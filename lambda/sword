@@ -1,0 +1,23 @@
+{
+    "User": {
+        "Username": "2458f468-1041-7010-895a-3320c6a93c1e",
+        "Attributes": [
+            {
+                "Name": "email",
+                "Value": "admin@kalshi-trading.com"
+            },
+            {
+                "Name": "email_verified",
+                "Value": "true"
+            },
+            {
+                "Name": "sub",
+                "Value": "2458f468-1041-7010-895a-3320c6a93c1e"
+            }
+        ],
+        "UserCreateDate": "2025-11-16T22:06:19.989000+00:00",
+        "UserLastModifiedDate": "2025-11-16T22:06:19.989000+00:00",
+        "Enabled": true,
+        "UserStatus": "FORCE_CHANGE_PASSWORD"
+    }
+}

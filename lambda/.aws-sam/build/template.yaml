@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Kalshi Dashboard API - Multi-user trading dashboard with admin support
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.12
+    MemorySize: 256
+    Environment:
+      Variables:
+        TRADES_TABLE: production-kalshi-trades
+        POSITIONS_TABLE: production-kalshi-market-positions
+        PORTFOLIO_TABLE: production-kalshi-portfolio-snapshots
+        MARKET_METADATA_TABLE: production-kalshi-market-metadata
+        CONFIG_BUCKET_NAME: production-kalshi-trading-config
+Parameters:
+  CognitoUserPoolArn:
+    Type: String
+    Description: ARN of the Cognito User Pool for authentication
+    Default: arn:aws:cognito-idp:us-east-1:355149669325:userpool/us-east-1_WEozUeojc
+Resources:
+  DashboardApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: kalshi-dashboard-api
+      StageName: prod
+      Cors:
+        AllowMethods: '''GET,POST,OPTIONS'''
+        AllowHeaders: '''Content-Type,Authorization'''
+        AllowOrigin: '''*'''
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn:
+              Ref: CognitoUserPoolArn
+            Identity:
+              Header: Authorization
+  GetTradesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-get-trades
+      CodeUri: GetTradesFunction
+      Handler: get-trades.lambda_handler
+      Description: Get trade history for a market ticker
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-trades
+      Events:
+        GetTrades:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /trades
+            Method: GET
+    Metadata:
+      SamResourceId: GetTradesFunction
+  GetPortfolioFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-get-portfolio
+      CodeUri: GetPortfolioFunction
+      Handler: get-portfolio.lambda_handler
+      Description: Get portfolio data for user(s)
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-market-positions
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-portfolio-snapshots
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-market-metadata
+      - S3ReadPolicy:
+          BucketName: production-kalshi-trading-config
+      Events:
+        GetPortfolio:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /portfolio
+            Method: GET
+    Metadata:
+      SamResourceId: GetPortfolioFunction
+  SharedCodeLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: dashboard-shared-code
+      Description: Shared utilities (s3_config_loader)
+      ContentUri: SharedCodeLayer
+      CompatibleRuntimes:
+      - python3.12
+    Metadata:
+      BuildMethod: python3.12
+      SamResourceId: SharedCodeLayer
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value:
+      Fn::Sub: https://${DashboardApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+  GetTradesFunctionArn:
+    Description: Get Trades Lambda ARN
+    Value:
+      Fn::GetAtt:
+      - GetTradesFunction
+      - Arn
+  GetPortfolioFunctionArn:
+    Description: Get Portfolio Lambda ARN
+    Value:
+      Fn::GetAtt:
+      - GetPortfolioFunction
+      - Arn

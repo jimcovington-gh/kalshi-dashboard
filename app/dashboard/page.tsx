@@ -1,0 +1,130 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { getPortfolio, Portfolio } from '@/lib/api';
+
+export default function DashboardPage() {
+  const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    loadPortfolio();
+  }, []);
+
+  async function loadPortfolio() {
+    try {
+      const data = await getPortfolio();
+      if (data.portfolio) {
+        setPortfolio(data.portfolio);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load portfolio');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  if (isLoading) {
+    return <div className="text-center py-12">Loading portfolio...</div>;
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        {error}
+      </div>
+    );
+  }
+
+  if (!portfolio) {
+    return <div className="text-center py-12">No portfolio data available</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Portfolio Summary */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">Portfolio Overview</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-blue-50 p-4 rounded-lg">
+            <div className="text-sm text-gray-600">Total Positions</div>
+            <div className="text-3xl font-bold text-blue-600">{portfolio.position_count}</div>
+          </div>
+          <div className="bg-green-50 p-4 rounded-lg">
+            <div className="text-sm text-gray-600">Total Value</div>
+            <div className="text-3xl font-bold text-green-600">
+              ${portfolio.total_position_value.toFixed(2)}
+            </div>
+          </div>
+          <div className="bg-purple-50 p-4 rounded-lg">
+            <div className="text-sm text-gray-600">Average Position</div>
+            <div className="text-3xl font-bold text-purple-600">
+              ${(portfolio.total_position_value / portfolio.position_count || 0).toFixed(2)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Positions Table */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900">Active Positions</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Market
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Side
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Contracts
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Price
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Value
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {portfolio.positions.map((position, idx) => (
+                <tr key={idx} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm font-medium text-gray-900">{position.ticker}</div>
+                    <div className="text-sm text-gray-500 truncate max-w-md">{position.market_title}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span
+                      className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                        position.side === 'yes'
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-blue-100 text-blue-800'
+                      }`}
+                    >
+                      {position.side.toUpperCase()}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">
+                    {Math.abs(position.contracts)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">
+                    ${position.current_price.toFixed(2)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">
+                    ${position.market_value.toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}

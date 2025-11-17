@@ -56,9 +56,12 @@ def lambda_handler(event, context):
                 'body': json.dumps({'error': 'ticker parameter is required'})
             }
         
-        # Build filter expression
-        filter_expression = 'ticker = :ticker'
-        expression_values = {':ticker': ticker}
+        # Build filter expression - only show filled trades
+        filter_expression = 'ticker = :ticker AND filled_count > :zero'
+        expression_values = {
+            ':ticker': ticker,
+            ':zero': 0
+        }
         
         # Authorization logic
         if requested_user:
@@ -79,12 +82,16 @@ def lambda_handler(event, context):
             # Admin sees all trades if no user specified
         
         # Query DynamoDB
+        print(f"Querying with filter: {filter_expression}")
+        print(f"Expression values: {expression_values}")
+        
         response = trades_table.scan(
             FilterExpression=filter_expression,
             ExpressionAttributeValues=expression_values
         )
         
         trades = response.get('Items', [])
+        print(f"Found {len(trades)} trades for ticker {ticker}")
         
         # Sort by timestamp descending
         trades.sort(key=lambda x: x.get('initiated_at', ''), reverse=True)

@@ -52,9 +52,9 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
             market = market_response.get('Item', {})
             
             if contracts > 0:  # YES position
-                current_price = market.get('yes_bid', 0)
+                current_price = market.get('yes_bid_dollars', 0)
             else:  # NO position
-                current_price = market.get('no_bid', 0)
+                current_price = market.get('no_bid_dollars', 0)
             
             position_value = abs(contracts) * current_price
             total_position_value += position_value
@@ -71,7 +71,9 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
                 'current_price': float(current_price),
                 'market_value': float(position_value),
                 'market_title': full_title,
-                'close_time': market.get('close_time', '')
+                'close_time': market.get('close_time', ''),
+                'event_ticker': market.get('event_ticker', ''),
+                'series_ticker': market.get('series_ticker', '')
             })
         except Exception as e:
             print(f"Error getting market data for {ticker}: {e}")
@@ -82,7 +84,9 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
                 'current_price': 0,
                 'market_value': 0,
                 'market_title': ticker,
-                'close_time': ''
+                'close_time': '',
+                'event_ticker': '',
+                'series_ticker': ''
             })
     
     # Sort by market value descending

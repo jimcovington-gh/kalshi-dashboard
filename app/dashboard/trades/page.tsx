@@ -46,22 +46,22 @@ export default function TradesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Trade History</h2>
+    <div className="space-y-4 md:space-y-6">
+      <div className="bg-white rounded-lg shadow p-4 md:p-6">
+        <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-3 md:mb-4">Trade History</h2>
         
-        <form onSubmit={handleSearch} className="flex gap-4">
+        <form onSubmit={handleSearch} className="flex flex-col md:flex-row gap-3 md:gap-4">
           <input
             type="text"
             value={ticker}
             onChange={(e) => setTicker(e.target.value)}
-            placeholder="Enter market ticker (e.g., KXHIGHAUS-25NOV16-B88.5)"
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+            placeholder="Enter ticker (e.g., KXHIGHAUS-25NOV16-B88.5)"
+            className="flex-1 px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 text-sm md:text-base"
           />
           <button
             type="submit"
             disabled={isLoading}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            className="px-4 md:px-6 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed text-sm md:text-base"
           >
             {isLoading ? 'Searching...' : 'Search'}
           </button>
@@ -75,7 +75,7 @@ export default function TradesPage() {
       )}
 
       {searched && trades.length === 0 && !isLoading && (
-        <div className="bg-white rounded-lg shadow p-12 text-center text-gray-500">
+        <div className="bg-white rounded-lg shadow p-8 md:p-12 text-center text-gray-500">
           No trades found for this ticker
         </div>
       )}
@@ -87,15 +87,15 @@ export default function TradesPage() {
             trade.success ? 'border-green-500' : 'border-red-500'
           }`}
         >
-          <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+          <div className="px-4 md:px-6 py-3 md:py-4 bg-gray-50 border-b border-gray-200 flex flex-col md:flex-row md:justify-between md:items-center gap-2">
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">Trade #{idx + 1}</h3>
-              <p className="text-sm text-gray-600">
+              <h3 className="text-base md:text-lg font-semibold text-gray-900">Trade #{idx + 1}</h3>
+              <p className="text-xs md:text-sm text-gray-600">
                 {format(new Date(trade.initiated_at), 'PPpp')}
               </p>
             </div>
             <span
-              className={`px-3 py-1 rounded-full text-sm font-semibold ${
+              className={`px-3 py-1 rounded-full text-xs md:text-sm font-semibold self-start md:self-auto ${
                 trade.success
                   ? 'bg-green-100 text-green-800'
                   : 'bg-red-100 text-red-800'
@@ -105,42 +105,42 @@ export default function TradesPage() {
             </span>
           </div>
 
-          <div className="p-6">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          <div className="p-4 md:p-6">
+            <div className="grid grid-cols-2 gap-3 md:gap-4 mb-4">
               <div>
                 <div className="text-xs text-gray-500 uppercase mb-1">Side</div>
-                <div className="text-lg font-semibold text-gray-900">{trade.side.toUpperCase()}</div>
+                <div className="text-base md:text-lg font-semibold text-gray-900">{trade.side.toUpperCase()}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500 uppercase mb-1">Contracts</div>
-                <div className="text-lg font-semibold text-gray-900">{trade.filled_count || 0}</div>
+                <div className="text-base md:text-lg font-semibold text-gray-900">{trade.filled_count || 0}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500 uppercase mb-1">
                   {trade.success ? 'Fill Price' : 'Target Price'}
                 </div>
-                <div className="text-lg font-semibold text-gray-900">
+                <div className="text-base md:text-lg font-semibold text-gray-900">
                   ${(trade.avg_fill_price || 0).toFixed(2)}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500 uppercase mb-1">Total Cost</div>
-                <div className="text-lg font-semibold text-gray-900">
+                <div className="text-base md:text-lg font-semibold text-gray-900">
                   ${((trade.filled_count || 0) * (trade.avg_fill_price || 0)).toFixed(2)}
                 </div>
               </div>
             </div>
 
             {!trade.success && trade.error_message && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+              <div className="bg-red-50 border border-red-200 text-red-700 px-3 md:px-4 py-2 md:py-3 rounded-lg mb-3 md:mb-4 text-sm">
                 <strong>Error:</strong> {trade.error_message}
               </div>
             )}
 
             {trade.orderbook_snapshot && (
-              <div className="mt-4">
-                <h4 className="text-sm font-semibold text-gray-700 mb-3">Order Book Snapshot</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="mt-3 md:mt-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-2 md:mb-3">Order Book Snapshot</h4>
+                <div className="grid grid-cols-1 gap-3 md:gap-4">
                   <OrderBookSide
                     title="YES Bids"
                     color="green"

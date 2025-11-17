@@ -47,32 +47,32 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       {/* Portfolio Summary */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Portfolio Overview</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-blue-50 p-4 rounded-lg">
-            <div className="text-sm text-gray-600">Total Positions</div>
-            <div className="text-3xl font-bold text-blue-600">{portfolio.position_count}</div>
+      <div className="bg-white rounded-lg shadow p-4 md:p-6">
+        <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-3 md:mb-4">Portfolio Overview</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+          <div className="bg-blue-50 p-3 md:p-4 rounded-lg">
+            <div className="text-xs md:text-sm text-gray-600">Total Positions</div>
+            <div className="text-2xl md:text-3xl font-bold text-blue-600">{portfolio.position_count}</div>
           </div>
-          <div className="bg-green-50 p-4 rounded-lg">
-            <div className="text-sm text-gray-600">Total Value</div>
-            <div className="text-3xl font-bold text-green-600">
+          <div className="bg-green-50 p-3 md:p-4 rounded-lg">
+            <div className="text-xs md:text-sm text-gray-600">Total Value</div>
+            <div className="text-2xl md:text-3xl font-bold text-green-600">
               ${portfolio.total_position_value.toFixed(2)}
             </div>
           </div>
-          <div className="bg-purple-50 p-4 rounded-lg">
-            <div className="text-sm text-gray-600">Average Position</div>
-            <div className="text-3xl font-bold text-purple-600">
+          <div className="bg-purple-50 p-3 md:p-4 rounded-lg">
+            <div className="text-xs md:text-sm text-gray-600">Average Position</div>
+            <div className="text-2xl md:text-3xl font-bold text-purple-600">
               ${(portfolio.total_position_value / portfolio.position_count || 0).toFixed(2)}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Positions Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+      {/* Positions Table - Desktop */}
+      <div className="hidden md:block bg-white rounded-lg shadow overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">Active Positions</h3>
         </div>
@@ -164,6 +164,80 @@ export default function DashboardPage() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Positions Cards - Mobile */}
+      <div className="md:hidden space-y-3">
+        <div className="px-4 py-3 bg-white rounded-lg shadow">
+          <h3 className="text-base font-semibold text-gray-900 mb-3">Active Positions</h3>
+        </div>
+        {portfolio.positions.map((position, idx) => {
+          // Build Kalshi URL
+          const buildMarketUrl = (seriesTicker: string, title: string, eventTicker: string) => {
+            if (!seriesTicker || !title || !eventTicker) return null;
+            const slug = title
+              .toLowerCase()
+              .replace(/[^a-z0-9\s-]/g, '')
+              .replace(/\s+/g, '-')
+              .replace(/-+/g, '-')
+              .replace(/^-|-$/g, '');
+            return `https://kalshi.com/markets/${seriesTicker.toUpperCase()}/${slug}/${eventTicker.toUpperCase()}`;
+          };
+          
+          const marketUrl = buildMarketUrl(
+            position.series_ticker || '',
+            position.market_title || '',
+            position.event_ticker || ''
+          );
+
+          return (
+            <div key={idx} className="bg-white rounded-lg shadow p-4">
+              {/* Market Title */}
+              {marketUrl ? (
+                <a href={marketUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-600 hover:underline block mb-2">
+                  {position.market_title}
+                </a>
+              ) : (
+                <div className="text-sm font-medium text-gray-900 mb-2">{position.market_title}</div>
+              )}
+              
+              {/* Ticker */}
+              <a href={`/dashboard/trades?ticker=${position.ticker}`} className="text-xs text-gray-500 hover:text-blue-600 block mb-3">
+                {position.ticker}
+              </a>
+              
+              {/* Stats Grid */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Side</div>
+                  <span className={`px-2 py-0.5 inline-flex text-xs leading-4 font-semibold rounded-full ${
+                    position.side === 'yes'
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {position.side.toUpperCase()}
+                  </span>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Contracts</div>
+                  <div className="text-sm font-semibold text-gray-900">{Math.abs(position.contracts)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Price</div>
+                  <div className={`text-sm font-semibold ${
+                    position.current_price >= 0.95 || position.current_price <= 0.05
+                      ? 'text-green-600'
+                      : position.current_price >= 0.85 || position.current_price <= 0.15
+                      ? 'text-orange-600'
+                      : 'text-red-600'
+                  }`}>
+                    ${position.current_price.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

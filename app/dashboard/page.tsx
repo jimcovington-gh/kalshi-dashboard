@@ -15,10 +15,15 @@ export default function DashboardPage() {
   async function loadPortfolio() {
     try {
       const data = await getPortfolio();
-      if (data.portfolio) {
+      if (data.is_admin_view && data.portfolios && data.portfolios.length > 0) {
+        // Admin view - use first user's portfolio or aggregate
+        setPortfolio(data.portfolios[0]);
+      } else if (data.portfolio) {
+        // Regular user view
         setPortfolio(data.portfolio);
       }
     } catch (err: any) {
+      console.error('Error fetching portfolio:', err);
       setError(err.message || 'Failed to load portfolio');
     } finally {
       setIsLoading(false);

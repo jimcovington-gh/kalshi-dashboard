@@ -19,10 +19,12 @@ Multi-user trading dashboard with AWS Cognito authentication, portfolio tracking
 ### Features
 - ✅ Multi-user support with isolated data access
 - ✅ Admin dashboard with visibility to all users
-- ✅ Real-time portfolio tracking
+- ✅ Real-time portfolio tracking with weighted average fill prices
 - ✅ Trade history lookup by market ticker
 - ✅ Order book snapshots
-- ✅ Responsive design (mobile-friendly)
+- ✅ Responsive design (mobile-friendly with adaptive layouts)
+- ✅ Hyperlinked market titles to Kalshi.com
+- ✅ Hyperlinked tickers to trade detail pages
 
 ## Step-by-Step Deployment
 

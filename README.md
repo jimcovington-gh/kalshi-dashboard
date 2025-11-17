@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Kalshi Trading Dashboard
 
-## Getting Started
+Multi-user trading dashboard with AWS Cognito authentication, portfolio tracking, and admin capabilities.
 
-First, run the development server:
+## Live Dashboard
+
+🔗 **https://main.d1uumqiqpqm7bm.amplifyapp.com**
+
+## Features
+
+- ✅ **Multi-user authentication** with AWS Cognito
+- ✅ **Role-based access control** (admin vs regular users)
+- ✅ **Portfolio tracking** with weighted average fill prices
+- ✅ **Real-time position values** and current market prices
+- ✅ **Trade history** with orderbook snapshots
+- ✅ **Mobile-responsive design** with adaptive layouts
+- ✅ **Smart navigation** - market titles link to Kalshi.com, tickers link to trade details
+- ✅ **Admin dashboard** with visibility to all users
+- ✅ **Serverless architecture** (scalable and cost-effective)
+
+## Portfolio View
+
+### Desktop Layout
+- Sortable table with columns: Market, Ticker, Side, Contracts, **Fill Price**, Current Price
+- Color-coded prices (green for deep ITM/OTM, orange for moderate, red for close)
+- Hyperlinked market titles (→ Kalshi.com)
+- Hyperlinked tickers (→ trade details page)
+
+### Mobile Layout
+- Card-based layout optimized for small screens
+- 4-column grid: Side, Contracts, Fill, Price
+- Compact navigation header
+- Touch-friendly interface
+
+## Trade History
+
+- Search by market ticker
+- Auto-search from URL parameter (`?ticker=XXX`)
+- View orderbook snapshot at trade time
+- See fill details and execution timestamps
+- Mobile-responsive with stacked layouts
+
+## Tech Stack
+
+- **Frontend**: Next.js 16 + TypeScript + Tailwind CSS
+- **Backend**: AWS Lambda (Python 3.12) + API Gateway
+- **Auth**: AWS Cognito with JWT tokens
+- **Data**: DynamoDB (positions, trades, portfolio snapshots, market metadata)
+- **Deployment**: AWS Amplify (auto-deploy from GitHub)
+
+## Quick Start
+
+See [QUICKSTART.md](./QUICKSTART.md) for rapid deployment guide.
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed infrastructure setup.
+
+## Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) with your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Recent Updates
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Fill Price Tracking**: Shows weighted average fill price for each position
+- **Mobile Optimization**: Fully responsive with adaptive layouts and compact navigation
+- **Smart Navigation**: Hyperlinked markets and tickers for quick access
+- **IAM Permissions**: Lambda access to trades table for fill price calculations
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).

@@ -6,11 +6,12 @@ A production-ready, multi-user trading dashboard with:
 
 ✅ **Multi-user authentication** (AWS Cognito)
 ✅ **Role-based access control** (admin vs regular users)
-✅ **Portfolio tracking** (real-time positions & values)
+✅ **Portfolio tracking** (real-time positions & values with fill prices)
 ✅ **Trade history lookup** (with order book snapshots)
 ✅ **Admin dashboard** (view all users)
-✅ **Responsive UI** (mobile-friendly)
+✅ **Responsive UI** (mobile-optimized with adaptive layouts)
 ✅ **Serverless architecture** (API Gateway + Lambda)
+✅ **Smart navigation** (hyperlinked markets & tickers)
 
 ## Project Structure
 
@@ -95,7 +96,9 @@ amplify publish
 | Multi-user auth | ❌ | ✅ Cognito |
 | Role-based access | ❌ | ✅ Admin/Users |
 | Scalability | 1 server | ♾️ Serverless |
-| Mobile responsive | ⚠️ Basic HTML | ✅ Tailwind |
+| Mobile responsive | ⚠️ Basic HTML | ✅ Adaptive UI |
+| Fill price tracking | ❌ | ✅ Weighted avg |
+| Smart navigation | ❌ | ✅ Hyperlinks |
 | Component reuse | ❌ | ✅ React |
 | Future expansion | Hard | Easy |
 | Production ready | ❌ | ✅ |

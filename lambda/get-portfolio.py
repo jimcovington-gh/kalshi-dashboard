@@ -26,7 +26,10 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     
     # Get all non-zero positions
     response = positions_table.scan(
-        FilterExpression='user_name = :user AND position <> :zero',
+        FilterExpression='user_name = :user AND #pos <> :zero',
+        ExpressionAttributeNames={
+            '#pos': 'position'
+        },
         ExpressionAttributeValues={
             ':user': user_name,
             ':zero': 0
@@ -43,18 +46,23 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
         ticker = pos['ticker']
         contracts = pos['position']
         
-        # Get current market price
+        # Get current market price and title
         try:
-            market_response = market_metadata_table.get_item(Key={'ticker': ticker})
+            market_response = market_metadata_table.get_item(Key={'market_ticker': ticker})
             market = market_response.get('Item', {})
             
             if contracts > 0:  # YES position
-                current_price = market.get('yes_bid', 0)
+                current_price = market.get('yes_bid_dollars', 0)
             else:  # NO position
-                current_price = market.get('no_bid', 0)
+                current_price = market.get('no_bid_dollars', 0)
             
             position_value = abs(contracts) * current_price
             total_position_value += position_value
+            
+            # Combine event and market titles
+            event_title = market.get('event_title', '')
+            market_title = market.get('market_title', market.get('title', ''))
+            full_title = f"{event_title}: {market_title}" if event_title and market_title else (market_title or event_title or ticker)
             
             position_details.append({
                 'ticker': ticker,
@@ -62,8 +70,10 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
                 'side': 'yes' if contracts > 0 else 'no',
                 'current_price': float(current_price),
                 'market_value': float(position_value),
-                'market_title': market.get('title', ''),
-                'close_time': market.get('close_time', '')
+                'market_title': full_title,
+                'close_time': market.get('close_time', ''),
+                'event_ticker': market.get('event_ticker', ''),
+                'series_ticker': market.get('series_ticker', '')
             })
         except Exception as e:
             print(f"Error getting market data for {ticker}: {e}")
@@ -73,7 +83,10 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
                 'side': 'yes' if contracts > 0 else 'no',
                 'current_price': 0,
                 'market_value': 0,
-                'error': str(e)
+                'market_title': ticker,
+                'close_time': '',
+                'event_ticker': '',
+                'series_ticker': ''
             })
     
     # Sort by market value descending
@@ -121,7 +134,12 @@ def lambda_handler(event, context):
         
         # Get user info from Cognito authorizer
         claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
-        current_user = claims.get('cognito:username', claims.get('username', ''))
+        # Try preferred_username first (our custom attribute), fall back to email prefix
+        current_user = claims.get('preferred_username', '')
+        if not current_user:
+            email = claims.get('email', '')
+            current_user = email.split('@')[0] if '@' in email else claims.get('cognito:username', '')
+        
         user_groups = claims.get('cognito:groups', '').split(',') if claims.get('cognito:groups') else []
         is_admin = 'admin' in user_groups
         
@@ -197,6 +215,12 @@ def lambda_handler(event, context):
         traceback.print_exc()
         return {
             'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+                'Access-Control-Allow-Methods': 'GET,OPTIONS'
+            },
             'body': json.dumps({'error': f'Internal server error: {str(e)}'})
         }
+

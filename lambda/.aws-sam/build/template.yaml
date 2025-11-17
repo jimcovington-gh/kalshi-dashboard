@@ -43,6 +43,8 @@ Resources:
       CodeUri: GetTradesFunction
       Handler: get-trades.lambda_handler
       Description: Get trade history for a market ticker
+      Layers:
+      - Ref: SharedCodeLayer
       Policies:
       - DynamoDBReadPolicy:
           TableName: production-kalshi-trades
@@ -63,6 +65,8 @@ Resources:
       CodeUri: GetPortfolioFunction
       Handler: get-portfolio.lambda_handler
       Description: Get portfolio data for user(s)
+      Layers:
+      - Ref: SharedCodeLayer
       Policies:
       - DynamoDBReadPolicy:
           TableName: production-kalshi-market-positions

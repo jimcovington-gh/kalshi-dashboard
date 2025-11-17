@@ -48,6 +48,8 @@ Resources:
       CodeUri: ./
       Handler: get-trades.lambda_handler
       Description: Get trade history for a market ticker
+      Layers:
+        - !Ref SharedCodeLayer
       Policies:
         - DynamoDBReadPolicy:
             TableName: production-kalshi-trades
@@ -67,6 +69,8 @@ Resources:
       CodeUri: ./
       Handler: get-portfolio.lambda_handler
       Description: Get portfolio data for user(s)
+      Layers:
+        - !Ref SharedCodeLayer
       Policies:
         - DynamoDBReadPolicy:
             TableName: production-kalshi-market-positions
@@ -90,7 +94,7 @@ Resources:
     Properties:
       LayerName: dashboard-shared-code
       Description: Shared utilities (s3_config_loader)
-      ContentUri: ../../kalshi-market-capture/src/
+      ContentUri: layer/
       CompatibleRuntimes:
         - python3.12
     Metadata:

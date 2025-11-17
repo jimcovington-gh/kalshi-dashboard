@@ -84,6 +84,9 @@ export default function DashboardPage() {
                   Market
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Ticker
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Side
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -92,40 +95,70 @@ export default function DashboardPage() {
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Price
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Value
-                </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {portfolio.positions.map((position, idx) => (
-                <tr key={idx} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{position.ticker}</div>
-                    <div className="text-sm text-gray-500 truncate max-w-md">{position.market_title}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        position.side === 'yes'
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-blue-100 text-blue-800'
-                      }`}
-                    >
-                      {position.side.toUpperCase()}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">
+              {portfolio.positions.map((position, idx) => {
+                // Build Kalshi URL
+                const buildMarketUrl = (seriesTicker: string, title: string, eventTicker: string) => {
+                  if (!seriesTicker || !title || !eventTicker) return null;
+                  const slug = title
+                    .toLowerCase()
+                    .replace(/[^a-z0-9\s-]/g, '')
+                    .replace(/\s+/g, '-')
+                    .replace(/-+/g, '-')
+                    .replace(/^-|-$/g, '');
+                  return `https://kalshi.com/markets/${seriesTicker.toUpperCase()}/${slug}/${eventTicker.toUpperCase()}`;
+                };
+                
+                const marketUrl = buildMarketUrl(
+                  position.series_ticker || '',
+                  position.market_title || '',
+                  position.event_ticker || ''
+                );
+
+                return (
+                  <tr key={idx} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <div className="text-xs text-gray-500 truncate max-w-md">{position.market_title}</div>
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {marketUrl ? (
+                        <a href={marketUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-blue-600 hover:underline">
+                          {position.ticker}
+                        </a>
+                      ) : (
+                        <div className="text-xs font-medium text-gray-900">{position.ticker}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <span
+                        className={`px-2 py-0.5 inline-flex text-xs leading-4 font-semibold rounded-full ${
+                          position.side === 'yes'
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-blue-100 text-blue-800'
+                        }`}
+                      >
+                        {position.side.toUpperCase()}
+                      </span>
+                    </td>
+                  <td className="px-4 py-2 whitespace-nowrap text-right text-xs text-gray-900">
                     {Math.abs(position.contracts)}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">
-                    ${position.current_price.toFixed(2)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">
-                    ${position.market_value.toFixed(2)}
+                  <td className="px-4 py-2 whitespace-nowrap text-right text-xs font-semibold">
+                    <span className={`${
+                      position.current_price >= 0.95 || position.current_price <= 0.05
+                        ? 'text-green-600'
+                        : position.current_price >= 0.85 || position.current_price <= 0.15
+                        ? 'text-orange-600'
+                        : 'text-red-600'
+                    }`}>
+                      ${position.current_price.toFixed(2)}
+                    </span>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

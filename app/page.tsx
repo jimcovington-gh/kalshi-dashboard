@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { signIn } from 'aws-amplify/auth';
+import { signIn, signOut } from 'aws-amplify/auth';
 import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
@@ -19,6 +19,13 @@ export default function LoginPage() {
     setError('');
 
     try {
+      // Always sign out first to clear any cached session
+      try {
+        await signOut();
+      } catch {
+        // Ignore errors if no user is signed in
+      }
+
       const result = await signIn({ username: email, password });
       
       if (result.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {

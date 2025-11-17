@@ -40,7 +40,12 @@ def lambda_handler(event, context):
         
         # Get user info from Cognito authorizer
         claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
-        current_user = claims.get('cognito:username', claims.get('username', ''))
+        # Try preferred_username first (our custom attribute), fall back to email prefix
+        current_user = claims.get('preferred_username', '')
+        if not current_user:
+            email = claims.get('email', '')
+            current_user = email.split('@')[0] if '@' in email else claims.get('cognito:username', '')
+        
         user_groups = claims.get('cognito:groups', '').split(',') if claims.get('cognito:groups') else []
         is_admin = 'admin' in user_groups
         
@@ -105,6 +110,11 @@ def lambda_handler(event, context):
         print(f"Error querying trades: {str(e)}")
         return {
             'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+                'Access-Control-Allow-Methods': 'GET,OPTIONS'
+            },
             'body': json.dumps({'error': f'Internal server error: {str(e)}'})
         }

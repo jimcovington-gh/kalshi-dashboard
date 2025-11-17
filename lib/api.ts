@@ -24,6 +24,8 @@ export interface Position {
   market_value: number;
   market_title: string;
   close_time: string;
+  event_ticker?: string;
+  series_ticker?: string;
 }
 
 export interface Portfolio {

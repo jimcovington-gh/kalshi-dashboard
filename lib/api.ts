@@ -20,6 +20,7 @@ export interface Position {
   ticker: string;
   contracts: number;
   side: 'yes' | 'no';
+  fill_price?: number;
   current_price: number;
   market_value: number;
   market_title: string;

@@ -13,6 +13,7 @@ dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 positions_table = dynamodb.Table(os.environ.get('POSITIONS_TABLE', 'production-kalshi-market-positions'))
 portfolio_table = dynamodb.Table(os.environ.get('PORTFOLIO_TABLE', 'production-kalshi-portfolio-snapshots'))
 market_metadata_table = dynamodb.Table(os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'))
+trades_table = dynamodb.Table(os.environ.get('TRADES_TABLE', 'production-kalshi-trades'))
 
 class DecimalEncoder(json.JSONEncoder):
     """Convert Decimal to float for JSON serialization"""
@@ -37,6 +38,35 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     )
     
     positions = response.get('Items', [])
+    
+    # Get all filled trades for this user to calculate average fill prices
+    trades_response = trades_table.scan(
+        FilterExpression='user_name = :user AND filled_count > :zero',
+        ExpressionAttributeValues={
+            ':user': user_name,
+            ':zero': 0
+        }
+    )
+    
+    # Calculate average fill price per ticker
+    fill_prices = {}
+    for trade in trades_response.get('Items', []):
+        ticker = trade.get('ticker')
+        filled_count = int(trade.get('filled_count', 0))
+        avg_fill_price = float(trade.get('avg_fill_price', 0))
+        
+        if ticker and filled_count > 0 and avg_fill_price > 0:
+            if ticker not in fill_prices:
+                fill_prices[ticker] = {'total_contracts': 0, 'total_cost': 0}
+            fill_prices[ticker]['total_contracts'] += filled_count
+            fill_prices[ticker]['total_cost'] += filled_count * avg_fill_price
+    
+    # Calculate weighted average
+    for ticker in fill_prices:
+        if fill_prices[ticker]['total_contracts'] > 0:
+            fill_prices[ticker] = fill_prices[ticker]['total_cost'] / fill_prices[ticker]['total_contracts']
+        else:
+            fill_prices[ticker] = 0
     
     # Calculate current values
     total_position_value = 0
@@ -64,10 +94,14 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
             market_title = market.get('market_title', market.get('title', ''))
             full_title = f"{event_title}: {market_title}" if event_title and market_title else (market_title or event_title or ticker)
             
+            # Get fill price for this ticker
+            fill_price = fill_prices.get(ticker, 0)
+            
             position_details.append({
                 'ticker': ticker,
                 'contracts': int(contracts),
                 'side': 'yes' if contracts > 0 else 'no',
+                'fill_price': float(fill_price) if fill_price > 0 else None,
                 'current_price': float(current_price),
                 'market_value': float(position_value),
                 'market_title': full_title,
@@ -77,10 +111,12 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
             })
         except Exception as e:
             print(f"Error getting market data for {ticker}: {e}")
+            fill_price = fill_prices.get(ticker, 0)
             position_details.append({
                 'ticker': ticker,
                 'contracts': int(contracts),
                 'side': 'yes' if contracts > 0 else 'no',
+                'fill_price': float(fill_price) if fill_price > 0 else None,
                 'current_price': 0,
                 'market_value': 0,
                 'market_title': ticker,

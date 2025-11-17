@@ -93,6 +93,9 @@ export default function DashboardPage() {
                   Contracts
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Fill Price
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Price
                 </th>
               </tr>
@@ -146,6 +149,9 @@ export default function DashboardPage() {
                     </td>
                   <td className="px-4 py-2 whitespace-nowrap text-right text-xs text-gray-900">
                     {Math.abs(position.contracts)}
+                  </td>
+                  <td className="px-4 py-2 whitespace-nowrap text-right text-xs text-gray-600">
+                    {position.fill_price ? `$${position.fill_price.toFixed(2)}` : '-'}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap text-right text-xs font-semibold">
                     <span className={`${
@@ -207,7 +213,7 @@ export default function DashboardPage() {
               </a>
               
               {/* Stats Grid */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-4 gap-3">
                 <div>
                   <div className="text-xs text-gray-500 mb-1">Side</div>
                   <span className={`px-2 py-0.5 inline-flex text-xs leading-4 font-semibold rounded-full ${
@@ -221,6 +227,12 @@ export default function DashboardPage() {
                 <div>
                   <div className="text-xs text-gray-500 mb-1">Contracts</div>
                   <div className="text-sm font-semibold text-gray-900">{Math.abs(position.contracts)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Fill</div>
+                  <div className="text-sm font-medium text-gray-600">
+                    {position.fill_price ? `$${position.fill_price.toFixed(2)}` : '-'}
+                  </div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500 mb-1">Price</div>

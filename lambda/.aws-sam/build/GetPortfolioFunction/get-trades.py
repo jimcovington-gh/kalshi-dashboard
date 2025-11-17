@@ -93,6 +93,21 @@ def lambda_handler(event, context):
         trades = response.get('Items', [])
         print(f"Found {len(trades)} trades for ticker {ticker}")
         
+        # Parse JSON string fields
+        for trade in trades:
+            if 'orderbook_snapshot' in trade and isinstance(trade['orderbook_snapshot'], str):
+                try:
+                    trade['orderbook_snapshot'] = json.loads(trade['orderbook_snapshot'])
+                except json.JSONDecodeError:
+                    print(f"Failed to parse orderbook_snapshot for trade {trade.get('trade_id')}")
+                    trade['orderbook_snapshot'] = None
+            if 'fills' in trade and isinstance(trade['fills'], str):
+                try:
+                    trade['fills'] = json.loads(trade['fills'])
+                except json.JSONDecodeError:
+                    print(f"Failed to parse fills for trade {trade.get('trade_id')}")
+                    trade['fills'] = None
+        
         # Sort by timestamp descending
         trades.sort(key=lambda x: x.get('initiated_at', ''), reverse=True)
         

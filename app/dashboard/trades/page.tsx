@@ -1,32 +1,48 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { getTrades, Trade } from '@/lib/api';
 import { format } from 'date-fns';
 
 export default function TradesPage() {
-  const [ticker, setTicker] = useState('');
+  const searchParams = useSearchParams();
+  const tickerParam = searchParams.get('ticker');
+  
+  const [ticker, setTicker] = useState(tickerParam || '');
   const [trades, setTrades] = useState<Trade[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
 
-  async function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (!ticker.trim()) return;
+  // Auto-search if ticker is in URL params
+  useEffect(() => {
+    if (tickerParam) {
+      setTicker(tickerParam);
+      performSearch(tickerParam);
+    }
+  }, [tickerParam]);
+
+  async function performSearch(searchTicker: string) {
+    if (!searchTicker.trim()) return;
 
     setIsLoading(true);
     setError('');
     setSearched(true);
 
     try {
-      const data = await getTrades(ticker.toUpperCase().trim());
+      const data = await getTrades(searchTicker.toUpperCase().trim());
       setTrades(data.trades);
     } catch (err: any) {
       setError(err.message || 'Failed to load trades');
     } finally {
       setIsLoading(false);
     }
+  }
+
+  async function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    performSearch(ticker);
   }
 
   return (

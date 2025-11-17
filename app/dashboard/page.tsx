@@ -120,16 +120,18 @@ export default function DashboardPage() {
                 return (
                   <tr key={idx} className="hover:bg-gray-50">
                     <td className="px-4 py-2 whitespace-nowrap">
-                      <div className="text-xs text-gray-500 truncate max-w-md">{position.market_title}</div>
-                    </td>
-                    <td className="px-4 py-2 whitespace-nowrap">
                       {marketUrl ? (
-                        <a href={marketUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-blue-600 hover:underline">
-                          {position.ticker}
+                        <a href={marketUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate max-w-md block">
+                          {position.market_title}
                         </a>
                       ) : (
-                        <div className="text-xs font-medium text-gray-900">{position.ticker}</div>
+                        <div className="text-xs text-gray-500 truncate max-w-md">{position.market_title}</div>
                       )}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <a href={`/dashboard/trades?ticker=${position.ticker}`} className="text-xs font-medium text-blue-600 hover:underline">
+                        {position.ticker}
+                      </a>
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">
                       <span

@@ -71,7 +71,7 @@ export default function DashboardPage() {
                 <div className="flex gap-6 text-sm">
                   <div>
                     <span className="text-blue-200">Cash:</span>
-                    <span className="ml-2 font-semibold">${userPortfolio.cash_balance?.toFixed(2) || '0.00'}</span>
+                    <span className="ml-2 font-semibold">${(userPortfolio.cash_balance || 0).toFixed(2)}</span>
                   </div>
                   <div>
                     <span className="text-blue-200">Total:</span>

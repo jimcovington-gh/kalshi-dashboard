@@ -5,6 +5,8 @@ import { getPortfolio, Portfolio } from '@/lib/api';
 
 export default function DashboardPage() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
+  const [isAdminView, setIsAdminView] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -15,12 +17,18 @@ export default function DashboardPage() {
   async function loadPortfolio() {
     try {
       const data = await getPortfolio();
+      console.log('Portfolio API response:', JSON.stringify(data, null, 2));
+      
       if (data.is_admin_view && data.portfolios && data.portfolios.length > 0) {
-        // Admin view - use first user's portfolio or aggregate
-        setPortfolio(data.portfolios[0]);
+        // Admin view - show all portfolios
+        console.log(`Admin view: ${data.portfolios.length} portfolios`);
+        setPortfolios(data.portfolios);
+        setIsAdminView(true);
       } else if (data.portfolio) {
         // Regular user view
+        console.log(`User view: ${data.portfolio.user_name}`);
         setPortfolio(data.portfolio);
+        setIsAdminView(false);
       }
     } catch (err: any) {
       console.error('Error fetching portfolio:', err);
@@ -42,9 +50,37 @@ export default function DashboardPage() {
     );
   }
 
-  if (!portfolio) {
+  if (!isAdminView && !portfolio) {
     return <div className="text-center py-12">No portfolio data available</div>;
   }
+
+  if (isAdminView && portfolios.length === 0) {
+    return <div className="text-center py-12">No portfolios available</div>;
+  }
+
+  // Admin view - render all portfolios
+  if (isAdminView) {
+    return (
+      <div className="space-y-8">
+        {portfolios.map((userPortfolio, userIdx) => (
+          <div key={userIdx} className="border-2 border-blue-200 rounded-lg p-4 bg-blue-50/30">
+            {/* User Header */}
+            <div className="bg-blue-600 text-white px-4 py-2 rounded-t-lg -mx-4 -mt-4 mb-4">
+              <h2 className="text-xl font-bold">{userPortfolio.user_name}</h2>
+            </div>
+            
+            <PortfolioContent portfolio={userPortfolio} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Regular user view
+  return <PortfolioContent portfolio={portfolio!} />;
+}
+
+function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
 
   return (
     <div className="space-y-4 md:space-y-6">

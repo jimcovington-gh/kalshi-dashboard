@@ -227,9 +227,8 @@ function MergedOrderBook({
     <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
       {/* Table Header */}
       <div className="bg-white px-4 py-2 border-b border-gray-300">
-        <div className="grid grid-cols-4 gap-2 text-xs font-semibold text-gray-600">
+        <div className="grid grid-cols-3 gap-2 text-xs font-semibold text-gray-600">
           <div className="text-left">Type</div>
-          <div className="text-left">Side</div>
           <div className="text-right">Price</div>
           <div className="text-right">Size</div>
         </div>
@@ -239,9 +238,8 @@ function MergedOrderBook({
       {topAsks.length > 0 ? (
         <div className="divide-y divide-gray-100">
           {topAsks.map((level, idx) => (
-            <div key={idx} className="px-4 py-1.5 grid grid-cols-4 gap-2 font-mono text-sm bg-red-50 hover:bg-red-100 transition-colors">
-              <span className="text-red-700 font-semibold">ASK</span>
-              <span className="text-gray-700 font-semibold">{level.side}</span>
+            <div key={idx} className="px-4 py-1.5 grid grid-cols-3 gap-2 font-mono text-sm bg-red-50 hover:bg-red-100 transition-colors">
+              <span className="text-red-700 font-semibold">{level.side} ASK</span>
               <span className="text-right text-red-700 font-semibold">${level.price.toFixed(2)}</span>
               <span className="text-right text-gray-600">{level.quantity}</span>
             </div>
@@ -258,9 +256,8 @@ function MergedOrderBook({
       {topBids.length > 0 ? (
         <div className="divide-y divide-gray-100">
           {topBids.map((level, idx) => (
-            <div key={idx} className="px-4 py-1.5 grid grid-cols-4 gap-2 font-mono text-sm bg-green-50 hover:bg-green-100 transition-colors">
-              <span className="text-green-700 font-semibold">BID</span>
-              <span className="text-gray-700 font-semibold">{level.side}</span>
+            <div key={idx} className="px-4 py-1.5 grid grid-cols-3 gap-2 font-mono text-sm bg-green-50 hover:bg-green-100 transition-colors">
+              <span className="text-green-700 font-semibold">{level.side} BID</span>
               <span className="text-right text-green-700 font-semibold">${level.price.toFixed(2)}</span>
               <span className="text-right text-gray-600">{level.quantity}</span>
             </div>

@@ -25,9 +25,11 @@ class DecimalEncoder(json.JSONEncoder):
 def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     """Get current portfolio positions and values"""
     
-    # Get latest portfolio snapshot for cash and total value
+    # Get latest portfolio snapshot for cash balance
+    # Note: user_name in positions table corresponds to userid in portfolio snapshots table
     snapshot_response = portfolio_table.query(
-        KeyConditionExpression='user_name = :user',
+        IndexName='UserSnapshotIndex',
+        KeyConditionExpression='userid = :user',
         ExpressionAttributeValues={':user': user_name},
         ScanIndexForward=False,
         Limit=1
@@ -35,7 +37,6 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     
     snapshot = snapshot_response.get('Items', [{}])[0] if snapshot_response.get('Items') else {}
     cash_balance = float(snapshot.get('cash', 0)) / 100  # Convert cents to dollars
-    total_value = float(snapshot.get('total_value', 0)) / 100  # Convert cents to dollars
     
     # Get all non-zero positions
     response = positions_table.scan(
@@ -143,7 +144,6 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     return {
         'user_name': user_name,
         'cash_balance': cash_balance,
-        'total_value': total_value,
         'position_count': len(positions),
         'total_position_value': float(total_position_value),
         'positions': position_details

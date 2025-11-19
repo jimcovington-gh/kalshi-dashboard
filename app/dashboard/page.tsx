@@ -75,7 +75,7 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <span className="text-blue-200">Total:</span>
-                    <span className="ml-2 font-semibold">${userPortfolio.total_value?.toFixed(2) || '0.00'}</span>
+                    <span className="ml-2 font-semibold">${((userPortfolio.cash_balance || 0) + userPortfolio.total_position_value).toFixed(2)}</span>
                   </div>
                 </div>
               </div>

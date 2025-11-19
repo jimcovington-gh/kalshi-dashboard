@@ -43,6 +43,9 @@ Resources:
       CodeUri: GetTradesFunction
       Handler: get-trades.lambda_handler
       Description: Get trade history for a market ticker
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
       Layers:
       - Ref: SharedCodeLayer
       Policies:
@@ -65,6 +68,9 @@ Resources:
       CodeUri: GetPortfolioFunction
       Handler: get-portfolio.lambda_handler
       Description: Get portfolio data for user(s)
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
       Layers:
       - Ref: SharedCodeLayer
       Policies:

@@ -140,24 +140,151 @@ export default function TradesPage() {
 
             {trade.orderbook_snapshot && (
               <div className="mt-3 md:mt-4">
-                <h4 className="text-sm font-semibold text-gray-700 mb-2 md:mb-3">Order Book Snapshot</h4>
-                <div className="grid grid-cols-1 gap-3 md:gap-4">
-                  <OrderBookSide
-                    title="YES Bids"
-                    color="green"
-                    levels={trade.orderbook_snapshot.yes_bids || []}
-                  />
-                  <OrderBookSide
-                    title="NO Bids"
-                    color="blue"
-                    levels={(trade.orderbook_snapshot.no_bids || []).slice(0, 10)}
-                  />
-                </div>
+                <h4 className="text-sm font-semibold text-gray-700 mb-2 md:mb-3">
+                  Order Book Snapshot (from {trade.side.toUpperCase()} holder perspective)
+                </h4>
+                <MergedOrderBook
+                  snapshot={trade.orderbook_snapshot}
+                  userSide={trade.side}
+                />
               </div>
             )}
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+interface OrderBookLevel {
+  price: number;
+  quantity: number;
+}
+
+interface OrderBookSnapshot {
+  yes_bids?: OrderBookLevel[];
+  no_bids?: OrderBookLevel[];
+}
+
+function MergedOrderBook({
+  snapshot,
+  userSide,
+}: {
+  snapshot: OrderBookSnapshot;
+  userSide: string;
+}) {
+  // Transform orderbook based on user's position
+  // If user holds NO: YES bids become YES asks (price = 1 - yes_bid)
+  // If user holds YES: NO bids become NO asks (price = 1 - no_bid)
+  
+  const yesBids = snapshot.yes_bids || [];
+  const noBids = snapshot.no_bids || [];
+  
+  let bids: Array<{ side: string; price: number; quantity: number }> = [];
+  let asks: Array<{ side: string; price: number; quantity: number }> = [];
+  
+  if (userSide.toLowerCase() === 'no') {
+    // User holds NO position
+    // NO bids = bids from user's perspective
+    bids = noBids.map(level => ({
+      side: 'NO',
+      price: level.price,
+      quantity: level.quantity
+    }));
+    
+    // YES bids = asks from user's perspective (flipped: 1 - price)
+    asks = yesBids.map(level => ({
+      side: 'YES',
+      price: 1 - level.price,
+      quantity: level.quantity
+    }));
+  } else {
+    // User holds YES position
+    // YES bids = bids from user's perspective
+    bids = yesBids.map(level => ({
+      side: 'YES',
+      price: level.price,
+      quantity: level.quantity
+    }));
+    
+    // NO bids = asks from user's perspective (flipped: 1 - price)
+    asks = noBids.map(level => ({
+      side: 'NO',
+      price: 1 - level.price,
+      quantity: level.quantity
+    }));
+  }
+  
+  // Sort: bids descending (highest first), asks ascending (lowest first)
+  bids.sort((a, b) => b.price - a.price);
+  asks.sort((a, b) => a.price - b.price);
+  
+  // Take top 10 of each
+  const topBids = bids.slice(0, 10);
+  const topAsks = asks.slice(0, 10);
+
+  return (
+    <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
+      {/* Header */}
+      <div className="grid grid-cols-2 gap-px bg-gray-300">
+        <div className="bg-green-50 px-4 py-2 text-center">
+          <h5 className="text-sm font-semibold text-green-800">BIDS (Buy)</h5>
+        </div>
+        <div className="bg-red-50 px-4 py-2 text-center">
+          <h5 className="text-sm font-semibold text-red-800">ASKS (Sell)</h5>
+        </div>
+      </div>
+      
+      {/* Table Headers */}
+      <div className="grid grid-cols-2 gap-px bg-gray-300 text-xs font-semibold text-gray-600">
+        <div className="bg-white px-4 py-2 grid grid-cols-3 gap-2">
+          <div className="text-left">Side</div>
+          <div className="text-right">Price</div>
+          <div className="text-right">Size</div>
+        </div>
+        <div className="bg-white px-4 py-2 grid grid-cols-3 gap-2">
+          <div className="text-left">Side</div>
+          <div className="text-right">Price</div>
+          <div className="text-right">Size</div>
+        </div>
+      </div>
+
+      {/* Order Book Rows */}
+      <div className="grid grid-cols-2 gap-px bg-gray-300">
+        {/* Bids Column */}
+        <div className="bg-white">
+          {topBids.length > 0 ? (
+            <div className="divide-y divide-gray-100">
+              {topBids.map((level, idx) => (
+                <div key={idx} className="px-4 py-1.5 grid grid-cols-3 gap-2 font-mono text-sm hover:bg-green-50 transition-colors">
+                  <span className="text-gray-700 font-semibold">{level.side}</span>
+                  <span className="text-right text-green-700 font-semibold">${level.price.toFixed(2)}</span>
+                  <span className="text-right text-gray-600">{level.quantity}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="px-4 py-8 text-center text-gray-400 text-sm">No bids</div>
+          )}
+        </div>
+
+        {/* Asks Column */}
+        <div className="bg-white">
+          {topAsks.length > 0 ? (
+            <div className="divide-y divide-gray-100">
+              {topAsks.map((level, idx) => (
+                <div key={idx} className="px-4 py-1.5 grid grid-cols-3 gap-2 font-mono text-sm hover:bg-red-50 transition-colors">
+                  <span className="text-gray-700 font-semibold">{level.side}</span>
+                  <span className="text-right text-red-700 font-semibold">${level.price.toFixed(2)}</span>
+                  <span className="text-right text-gray-600">{level.quantity}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="px-4 py-8 text-center text-gray-400 text-sm">No asks</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

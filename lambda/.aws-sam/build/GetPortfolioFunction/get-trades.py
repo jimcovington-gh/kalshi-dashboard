@@ -38,6 +38,8 @@ def lambda_handler(event, context):
         ticker = params.get('ticker', '').upper().strip()
         requested_user = params.get('user_name', '').strip()
         
+        print(f"DEBUG: params={params}, requested_user='{requested_user}'")
+        
         # Get user info from Cognito authorizer
         claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
         # Try preferred_username first (our custom attribute), fall back to email prefix
@@ -48,6 +50,8 @@ def lambda_handler(event, context):
         
         user_groups = claims.get('cognito:groups', '').split(',') if claims.get('cognito:groups') else []
         is_admin = 'admin' in user_groups
+        
+        print(f"DEBUG: current_user='{current_user}', is_admin={is_admin}")
         
         if not ticker:
             return {

@@ -8,6 +8,7 @@ import { format } from 'date-fns';
 export default function TradesPage() {
   const searchParams = useSearchParams();
   const tickerParam = searchParams.get('ticker');
+  const userNameParam = searchParams.get('user_name');
   
   const [ticker, setTicker] = useState(tickerParam || '');
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -19,11 +20,11 @@ export default function TradesPage() {
   useEffect(() => {
     if (tickerParam) {
       setTicker(tickerParam);
-      performSearch(tickerParam);
+      performSearch(tickerParam, userNameParam || undefined);
     }
-  }, [tickerParam]);
+  }, [tickerParam, userNameParam]);
 
-  async function performSearch(searchTicker: string) {
+  async function performSearch(searchTicker: string, userName?: string) {
     if (!searchTicker.trim()) return;
 
     setIsLoading(true);
@@ -31,7 +32,7 @@ export default function TradesPage() {
     setSearched(true);
 
     try {
-      const data = await getTrades(searchTicker.toUpperCase().trim());
+      const data = await getTrades(searchTicker.toUpperCase().trim(), userName);
       setTrades(data.trades);
     } catch (err: any) {
       setError(err.message || 'Failed to load trades');

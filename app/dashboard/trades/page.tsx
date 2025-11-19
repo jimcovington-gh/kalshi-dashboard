@@ -225,66 +225,50 @@ function MergedOrderBook({
 
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
-      {/* Header */}
-      <div className="grid grid-cols-2 gap-px bg-gray-300">
-        <div className="bg-green-50 px-4 py-2 text-center">
-          <h5 className="text-sm font-semibold text-green-800">BIDS (Buy)</h5>
-        </div>
-        <div className="bg-red-50 px-4 py-2 text-center">
-          <h5 className="text-sm font-semibold text-red-800">ASKS (Sell)</h5>
-        </div>
-      </div>
-      
-      {/* Table Headers */}
-      <div className="grid grid-cols-2 gap-px bg-gray-300 text-xs font-semibold text-gray-600">
-        <div className="bg-white px-4 py-2 grid grid-cols-3 gap-2">
-          <div className="text-left">Side</div>
-          <div className="text-right">Price</div>
-          <div className="text-right">Size</div>
-        </div>
-        <div className="bg-white px-4 py-2 grid grid-cols-3 gap-2">
+      {/* Table Header */}
+      <div className="bg-white px-4 py-2 border-b border-gray-300">
+        <div className="grid grid-cols-4 gap-2 text-xs font-semibold text-gray-600">
+          <div className="text-left">Type</div>
           <div className="text-left">Side</div>
           <div className="text-right">Price</div>
           <div className="text-right">Size</div>
         </div>
       </div>
 
-      {/* Order Book Rows */}
-      <div className="grid grid-cols-2 gap-px bg-gray-300">
-        {/* Bids Column */}
-        <div className="bg-white">
-          {topBids.length > 0 ? (
-            <div className="divide-y divide-gray-100">
-              {topBids.map((level, idx) => (
-                <div key={idx} className="px-4 py-1.5 grid grid-cols-3 gap-2 font-mono text-sm hover:bg-green-50 transition-colors">
-                  <span className="text-gray-700 font-semibold">{level.side}</span>
-                  <span className="text-right text-green-700 font-semibold">${level.price.toFixed(2)}</span>
-                  <span className="text-right text-gray-600">{level.quantity}</span>
-                </div>
-              ))}
+      {/* Asks Section (on top, ascending order) */}
+      {topAsks.length > 0 ? (
+        <div className="divide-y divide-gray-100">
+          {topAsks.map((level, idx) => (
+            <div key={idx} className="px-4 py-1.5 grid grid-cols-4 gap-2 font-mono text-sm bg-red-50 hover:bg-red-100 transition-colors">
+              <span className="text-red-700 font-semibold">ASK</span>
+              <span className="text-gray-700 font-semibold">{level.side}</span>
+              <span className="text-right text-red-700 font-semibold">${level.price.toFixed(2)}</span>
+              <span className="text-right text-gray-600">{level.quantity}</span>
             </div>
-          ) : (
-            <div className="px-4 py-8 text-center text-gray-400 text-sm">No bids</div>
-          )}
+          ))}
         </div>
+      ) : (
+        <div className="px-4 py-4 text-center text-gray-400 text-sm bg-red-50">No asks</div>
+      )}
 
-        {/* Asks Column */}
-        <div className="bg-white">
-          {topAsks.length > 0 ? (
-            <div className="divide-y divide-gray-100">
-              {topAsks.map((level, idx) => (
-                <div key={idx} className="px-4 py-1.5 grid grid-cols-3 gap-2 font-mono text-sm hover:bg-red-50 transition-colors">
-                  <span className="text-gray-700 font-semibold">{level.side}</span>
-                  <span className="text-right text-red-700 font-semibold">${level.price.toFixed(2)}</span>
-                  <span className="text-right text-gray-600">{level.quantity}</span>
-                </div>
-              ))}
+      {/* Spread Barrier */}
+      <div className="h-2 bg-gradient-to-b from-red-100 via-gray-300 to-green-100 border-y-2 border-gray-400"></div>
+
+      {/* Bids Section (on bottom, descending order) */}
+      {topBids.length > 0 ? (
+        <div className="divide-y divide-gray-100">
+          {topBids.map((level, idx) => (
+            <div key={idx} className="px-4 py-1.5 grid grid-cols-4 gap-2 font-mono text-sm bg-green-50 hover:bg-green-100 transition-colors">
+              <span className="text-green-700 font-semibold">BID</span>
+              <span className="text-gray-700 font-semibold">{level.side}</span>
+              <span className="text-right text-green-700 font-semibold">${level.price.toFixed(2)}</span>
+              <span className="text-right text-gray-600">{level.quantity}</span>
             </div>
-          ) : (
-            <div className="px-4 py-8 text-center text-gray-400 text-sm">No asks</div>
-          )}
+          ))}
         </div>
-      </div>
+      ) : (
+        <div className="px-4 py-4 text-center text-gray-400 text-sm bg-green-50">No bids</div>
+      )}
     </div>
   );
 }

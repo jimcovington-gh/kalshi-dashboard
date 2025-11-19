@@ -13,6 +13,7 @@ dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 positions_table = dynamodb.Table(os.environ.get('POSITIONS_TABLE', 'production-kalshi-market-positions'))
 portfolio_table = dynamodb.Table(os.environ.get('PORTFOLIO_TABLE', 'production-kalshi-portfolio-snapshots'))
 market_metadata_table = dynamodb.Table(os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'))
+trades_table = dynamodb.Table(os.environ.get('TRADES_TABLE', 'production-kalshi-trades'))
 
 class DecimalEncoder(json.JSONEncoder):
     """Convert Decimal to float for JSON serialization"""
@@ -23,6 +24,18 @@ class DecimalEncoder(json.JSONEncoder):
 
 def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     """Get current portfolio positions and values"""
+    
+    # Get latest portfolio snapshot for cash and total value
+    snapshot_response = portfolio_table.query(
+        KeyConditionExpression='user_name = :user',
+        ExpressionAttributeValues={':user': user_name},
+        ScanIndexForward=False,
+        Limit=1
+    )
+    
+    snapshot = snapshot_response.get('Items', [{}])[0] if snapshot_response.get('Items') else {}
+    cash_balance = float(snapshot.get('cash', 0)) / 100  # Convert cents to dollars
+    total_value = float(snapshot.get('total_value', 0)) / 100  # Convert cents to dollars
     
     # Get all non-zero positions
     response = positions_table.scan(
@@ -37,6 +50,35 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     )
     
     positions = response.get('Items', [])
+    
+    # Get all filled trades for this user to calculate average fill prices
+    trades_response = trades_table.scan(
+        FilterExpression='user_name = :user AND filled_count > :zero',
+        ExpressionAttributeValues={
+            ':user': user_name,
+            ':zero': 0
+        }
+    )
+    
+    # Calculate average fill price per ticker
+    fill_prices = {}
+    for trade in trades_response.get('Items', []):
+        ticker = trade.get('ticker')
+        filled_count = int(trade.get('filled_count', 0))
+        avg_fill_price = float(trade.get('avg_fill_price', 0))
+        
+        if ticker and filled_count > 0 and avg_fill_price > 0:
+            if ticker not in fill_prices:
+                fill_prices[ticker] = {'total_contracts': 0, 'total_cost': 0}
+            fill_prices[ticker]['total_contracts'] += filled_count
+            fill_prices[ticker]['total_cost'] += filled_count * avg_fill_price
+    
+    # Calculate weighted average
+    for ticker in fill_prices:
+        if fill_prices[ticker]['total_contracts'] > 0:
+            fill_prices[ticker] = fill_prices[ticker]['total_cost'] / fill_prices[ticker]['total_contracts']
+        else:
+            fill_prices[ticker] = 0
     
     # Calculate current values
     total_position_value = 0
@@ -64,10 +106,14 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
             market_title = market.get('market_title', market.get('title', ''))
             full_title = f"{event_title}: {market_title}" if event_title and market_title else (market_title or event_title or ticker)
             
+            # Get fill price for this ticker
+            fill_price = fill_prices.get(ticker, 0)
+            
             position_details.append({
                 'ticker': ticker,
                 'contracts': int(contracts),
                 'side': 'yes' if contracts > 0 else 'no',
+                'fill_price': float(fill_price) if fill_price > 0 else None,
                 'current_price': float(current_price),
                 'market_value': float(position_value),
                 'market_title': full_title,
@@ -77,10 +123,12 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
             })
         except Exception as e:
             print(f"Error getting market data for {ticker}: {e}")
+            fill_price = fill_prices.get(ticker, 0)
             position_details.append({
                 'ticker': ticker,
                 'contracts': int(contracts),
                 'side': 'yes' if contracts > 0 else 'no',
+                'fill_price': float(fill_price) if fill_price > 0 else None,
                 'current_price': 0,
                 'market_value': 0,
                 'market_title': ticker,
@@ -94,6 +142,8 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     
     return {
         'user_name': user_name,
+        'cash_balance': cash_balance,
+        'total_value': total_value,
         'position_count': len(positions),
         'total_position_value': float(total_position_value),
         'positions': position_details
@@ -143,6 +193,8 @@ def lambda_handler(event, context):
         user_groups = claims.get('cognito:groups', '').split(',') if claims.get('cognito:groups') else []
         is_admin = 'admin' in user_groups
         
+        print(f"DEBUG: requested_user='{requested_user}', current_user='{current_user}', is_admin={is_admin}, user_groups={user_groups}")
+        
         # Authorization logic
         if requested_user:
             # Specific user requested
@@ -169,9 +221,11 @@ def lambda_handler(event, context):
             # No user specified
             if is_admin:
                 # Admin can see all users - get list from S3 config
+                print("DEBUG: Admin with no user specified - getting all users")
                 from s3_config_loader import get_all_enabled_users
                 
                 all_users = get_all_enabled_users()
+                print(f"DEBUG: Found {len(all_users)} users: {all_users}")
                 portfolios = []
                 
                 for user in all_users:
@@ -180,6 +234,7 @@ def lambda_handler(event, context):
                         portfolio['history'] = get_portfolio_history(user, history_limit)
                     portfolios.append(portfolio)
                 
+                print(f"DEBUG: Returning {len(portfolios)} portfolios")
                 result = {
                     'is_admin_view': True,
                     'user_count': len(all_users),

@@ -31,6 +31,8 @@ export interface Position {
 
 export interface Portfolio {
   user_name: string;
+  cash_balance: number;
+  total_value: number;
   position_count: number;
   total_position_value: number;
   positions: Position[];

@@ -25,6 +25,18 @@ class DecimalEncoder(json.JSONEncoder):
 def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     """Get current portfolio positions and values"""
     
+    # Get latest portfolio snapshot for cash and total value
+    snapshot_response = portfolio_table.query(
+        KeyConditionExpression='user_name = :user',
+        ExpressionAttributeValues={':user': user_name},
+        ScanIndexForward=False,
+        Limit=1
+    )
+    
+    snapshot = snapshot_response.get('Items', [{}])[0] if snapshot_response.get('Items') else {}
+    cash_balance = float(snapshot.get('cash', 0)) / 100  # Convert cents to dollars
+    total_value = float(snapshot.get('total_value', 0)) / 100  # Convert cents to dollars
+    
     # Get all non-zero positions
     response = positions_table.scan(
         FilterExpression='user_name = :user AND #pos <> :zero',
@@ -130,6 +142,8 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     
     return {
         'user_name': user_name,
+        'cash_balance': cash_balance,
+        'total_value': total_value,
         'position_count': len(positions),
         'total_position_value': float(total_position_value),
         'positions': position_details
@@ -179,6 +193,8 @@ def lambda_handler(event, context):
         user_groups = claims.get('cognito:groups', '').split(',') if claims.get('cognito:groups') else []
         is_admin = 'admin' in user_groups
         
+        print(f"DEBUG: requested_user='{requested_user}', current_user='{current_user}', is_admin={is_admin}, user_groups={user_groups}")
+        
         # Authorization logic
         if requested_user:
             # Specific user requested
@@ -205,9 +221,11 @@ def lambda_handler(event, context):
             # No user specified
             if is_admin:
                 # Admin can see all users - get list from S3 config
+                print("DEBUG: Admin with no user specified - getting all users")
                 from s3_config_loader import get_all_enabled_users
                 
                 all_users = get_all_enabled_users()
+                print(f"DEBUG: Found {len(all_users)} users: {all_users}")
                 portfolios = []
                 
                 for user in all_users:
@@ -216,6 +234,7 @@ def lambda_handler(event, context):
                         portfolio['history'] = get_portfolio_history(user, history_limit)
                     portfolios.append(portfolio)
                 
+                print(f"DEBUG: Returning {len(portfolios)} portfolios")
                 result = {
                     'is_admin_view': True,
                     'user_count': len(all_users),

@@ -65,8 +65,20 @@ export default function DashboardPage() {
         {portfolios.map((userPortfolio, userIdx) => (
           <div key={userIdx} className="border-2 border-blue-200 rounded-lg p-4 bg-blue-50/30">
             {/* User Header */}
-            <div className="bg-blue-600 text-white px-4 py-2 rounded-t-lg -mx-4 -mt-4 mb-4">
-              <h2 className="text-xl font-bold">{userPortfolio.user_name}</h2>
+            <div className="bg-blue-600 text-white px-4 py-3 rounded-t-lg -mx-4 -mt-4 mb-4">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-bold">{userPortfolio.user_name}</h2>
+                <div className="flex gap-6 text-sm">
+                  <div>
+                    <span className="text-blue-200">Cash:</span>
+                    <span className="ml-2 font-semibold">${userPortfolio.cash_balance?.toFixed(2) || '0.00'}</span>
+                  </div>
+                  <div>
+                    <span className="text-blue-200">Total:</span>
+                    <span className="ml-2 font-semibold">${userPortfolio.total_value?.toFixed(2) || '0.00'}</span>
+                  </div>
+                </div>
+              </div>
             </div>
             
             <PortfolioContent portfolio={userPortfolio} />
@@ -168,7 +180,7 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
                       )}
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">
-                      <a href={`/dashboard/trades?ticker=${position.ticker}`} className="text-xs font-medium text-blue-600 hover:underline">
+                      <a href={`/dashboard/trades?ticker=${position.ticker}&user_name=${portfolio.user_name}`} className="text-xs font-medium text-blue-600 hover:underline">
                         {position.ticker}
                       </a>
                     </td>
@@ -244,7 +256,7 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
               )}
               
               {/* Ticker */}
-              <a href={`/dashboard/trades?ticker=${position.ticker}`} className="text-xs text-gray-500 hover:text-blue-600 block mb-3">
+              <a href={`/dashboard/trades?ticker=${position.ticker}&user_name=${portfolio.user_name}`} className="text-xs text-gray-500 hover:text-blue-600 block mb-3">
                 {position.ticker}
               </a>
               

@@ -78,6 +78,8 @@ Resources:
             TableName: production-kalshi-portfolio-snapshots
         - DynamoDBReadPolicy:
             TableName: production-kalshi-market-metadata
+        - DynamoDBReadPolicy:
+            TableName: production-kalshi-trades
         - S3ReadPolicy:
             BucketName: production-kalshi-trading-config
       Events:

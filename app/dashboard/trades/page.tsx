@@ -221,7 +221,7 @@ function MergedOrderBook({
   
   // Take top 10 of each
   const topBids = bids.slice(0, 10);
-  const topAsks = asks.slice(0, 10);
+  const topAsks = asks.slice(0, 10).reverse(); // Reverse so lowest ask is at bottom (nearest to spread)
 
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">

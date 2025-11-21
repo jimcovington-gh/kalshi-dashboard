@@ -10,6 +10,7 @@ from typing import Dict, List, Any
 import os
 
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
 positions_table = dynamodb.Table(os.environ.get('POSITIONS_TABLE', 'production-kalshi-market-positions'))
 portfolio_table = dynamodb.Table(os.environ.get('PORTFOLIO_TABLE', 'production-kalshi-portfolio-snapshots'))
 market_metadata_table = dynamodb.Table(os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'))
@@ -25,12 +26,21 @@ class DecimalEncoder(json.JSONEncoder):
 def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     """Get current portfolio positions and values"""
     
-    # Get latest portfolio snapshot for cash balance
-    # Note: user_name in positions table corresponds to userid in portfolio snapshots table
+    # Get user's api_key_id from Secrets Manager
+    try:
+        secret_response = secretsmanager.get_secret_value(
+            SecretId=f'production/kalshi/users/{user_name}/metadata'
+        )
+        secret_data = json.loads(secret_response['SecretString'])
+        api_key_id = secret_data['api_key_id']
+    except Exception as e:
+        print(f"Error getting api_key_id for user {user_name}: {e}")
+        raise
+    
+    # Get latest portfolio snapshot for cash balance - query directly by api_key_id
     snapshot_response = portfolio_table.query(
-        IndexName='UserSnapshotIndex',
-        KeyConditionExpression='userid = :user',
-        ExpressionAttributeValues={':user': user_name},
+        KeyConditionExpression='api_key_id = :api_key',
+        ExpressionAttributeValues={':api_key': api_key_id},
         ScanIndexForward=False,
         Limit=1
     )
@@ -94,10 +104,19 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
             market_response = market_metadata_table.get_item(Key={'market_ticker': ticker})
             market = market_response.get('Item', {})
             
-            if contracts > 0:  # YES position
-                current_price = market.get('yes_bid_dollars', 0)
-            else:  # NO position
-                current_price = market.get('no_bid_dollars', 0)
+            # For closed markets, use last_price; for active markets, use bid
+            market_status = market.get('status', 'active')
+            if market_status == 'closed':
+                last_price = float(market.get('last_price_dollars', 0))
+                if contracts > 0:  # YES position
+                    current_price = last_price
+                else:  # NO position - inverse of last YES price
+                    current_price = 1 - last_price
+            else:
+                if contracts > 0:  # YES position
+                    current_price = market.get('yes_bid_dollars', 0)
+                else:  # NO position
+                    current_price = market.get('no_bid_dollars', 0)
             
             position_value = abs(contracts) * current_price
             total_position_value += position_value

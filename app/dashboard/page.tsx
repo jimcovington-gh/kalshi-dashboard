@@ -203,9 +203,9 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap text-right text-xs font-semibold">
                     <span className={`${
-                      position.current_price >= 0.95 || position.current_price <= 0.05
+                      position.current_price >= 0.95
                         ? 'text-green-600'
-                        : position.current_price >= 0.85 || position.current_price <= 0.15
+                        : position.current_price >= 0.85
                         ? 'text-orange-600'
                         : 'text-red-600'
                     }`}>
@@ -285,9 +285,9 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
                 <div>
                   <div className="text-xs text-gray-500 mb-1">Price</div>
                   <div className={`text-sm font-semibold ${
-                    position.current_price >= 0.95 || position.current_price <= 0.05
+                    position.current_price >= 0.95
                       ? 'text-green-600'
-                      : position.current_price >= 0.85 || position.current_price <= 0.15
+                      : position.current_price >= 0.85
                       ? 'text-orange-600'
                       : 'text-red-600'
                   }`}>

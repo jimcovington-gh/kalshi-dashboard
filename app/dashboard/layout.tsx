@@ -72,6 +72,12 @@ export default function DashboardLayout({
                 >
                   Trades
                 </Link>
+                <Link
+                  href="/dashboard/analytics"
+                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100"
+                >
+                  Analytics
+                </Link>
                 {isAdminUser && (
                   <Link
                     href="/dashboard/admin"

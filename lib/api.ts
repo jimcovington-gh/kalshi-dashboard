@@ -84,7 +84,11 @@ export async function getTrades(ticker: string, userName?: string): Promise<{
   }
 }
 
-export async function getPortfolio(userName?: string, includeHistory: boolean = false): Promise<PortfolioResponse> {
+export async function getPortfolio(
+  userName?: string, 
+  includeHistory: boolean = false,
+  historyPeriod: string = '24h'
+): Promise<PortfolioResponse> {
   try {
     const session = await fetchAuthSession();
     const token = session.tokens?.idToken?.toString();
@@ -95,6 +99,7 @@ export async function getPortfolio(userName?: string, includeHistory: boolean = 
     }
     if (includeHistory) {
       params.include_history = 'true';
+      params.history_period = historyPeriod;
     }
 
     const queryString = new URLSearchParams(params).toString();

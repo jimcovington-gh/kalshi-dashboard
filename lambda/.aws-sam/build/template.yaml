@@ -100,6 +100,43 @@ Resources:
             Method: GET
     Metadata:
       SamResourceId: GetPortfolioFunction
+  GetAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-get-analytics
+      CodeUri: GetAnalyticsFunction
+      Handler: get-analytics.lambda_handler
+      Description: Get analytics data (PnL by category)
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Layers:
+      - Ref: SharedCodeLayer
+      Environment:
+        Variables:
+          SETTLEMENTS_TABLE: production-kalshi-settlements
+          MARKET_METADATA_TABLE: production-kalshi-market-metadata
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-settlements
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-market-metadata
+      - Statement:
+        - Effect: Allow
+          Action:
+          - secretsmanager:GetSecretValue
+          Resource:
+          - arn:aws:secretsmanager:us-east-1:355149669325:secret:production/kalshi/users/*
+      Events:
+        GetAnalytics:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /analytics
+            Method: GET
+    Metadata:
+      SamResourceId: GetAnalyticsFunction
   SharedCodeLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
@@ -127,4 +164,10 @@ Outputs:
     Value:
       Fn::GetAtt:
       - GetPortfolioFunction
+      - Arn
+  GetAnalyticsFunctionArn:
+    Description: Get Analytics Lambda ARN
+    Value:
+      Fn::GetAtt:
+      - GetAnalyticsFunction
       - Arn

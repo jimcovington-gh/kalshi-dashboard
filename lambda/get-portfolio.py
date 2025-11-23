@@ -329,6 +329,13 @@ def lambda_handler(event, context):
                 }
             else:
                 # Regular user sees only their own
+                if not current_user:
+                    return {
+                        'statusCode': 401,
+                        'headers': {'Content-Type': 'application/json'},
+                        'body': json.dumps({'error': 'Authentication required'})
+                    }
+                
                 api_key_id = get_api_key_id(current_user)
                 portfolio = get_current_portfolio(current_user, api_key_id)
                 

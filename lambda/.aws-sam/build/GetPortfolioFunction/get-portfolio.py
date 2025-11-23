@@ -8,6 +8,7 @@ import boto3
 from decimal import Decimal
 from typing import Dict, List, Any
 import os
+from datetime import datetime, timezone, timedelta
 
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
@@ -23,19 +24,24 @@ class DecimalEncoder(json.JSONEncoder):
             return float(obj)
         return super(DecimalEncoder, self).default(obj)
 
-def get_current_portfolio(user_name: str) -> Dict[str, Any]:
-    """Get current portfolio positions and values"""
-    
-    # Get user's api_key_id from Secrets Manager
+def get_api_key_id(user_name: str) -> str:
+    """Helper to get api_key_id for a user"""
     try:
         secret_response = secretsmanager.get_secret_value(
             SecretId=f'production/kalshi/users/{user_name}/metadata'
         )
         secret_data = json.loads(secret_response['SecretString'])
-        api_key_id = secret_data['api_key_id']
+        return secret_data['api_key_id']
     except Exception as e:
         print(f"Error getting api_key_id for user {user_name}: {e}")
         raise
+
+def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, Any]:
+    """Get current portfolio positions and values"""
+    
+    # Get user's api_key_id if not provided
+    if not api_key_id:
+        api_key_id = get_api_key_id(user_name)
     
     # Get latest portfolio snapshot for cash balance - query directly by api_key_id
     snapshot_response = portfolio_table.query(
@@ -168,17 +174,74 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
         'positions': position_details
     }
 
-def get_portfolio_history(user_name: str, limit: int = 100) -> List[Dict[str, Any]]:
-    """Get portfolio snapshot history"""
+def get_portfolio_history(api_key_id: str, period: str = '24h') -> List[Dict[str, Any]]:
+    """Get portfolio snapshot history with downsampling"""
     
-    response = portfolio_table.query(
-        KeyConditionExpression='user_name = :user',
-        ExpressionAttributeValues={':user': user_name},
-        ScanIndexForward=False,  # Most recent first
-        Limit=limit
-    )
+    now = datetime.now(timezone.utc)
     
-    return response.get('Items', [])
+    if period == '7d':
+        start_time = now - timedelta(days=7)
+        resolution = 'hour'
+    elif period == '30d':
+        start_time = now - timedelta(days=30)
+        resolution = 'day'
+    elif period == 'all':
+        start_time = now - timedelta(days=365) # Cap at 1 year for now
+        resolution = 'day'
+    else: # Default to 24h
+        start_time = now - timedelta(hours=24)
+        resolution = '15min'
+
+    start_ts = int(start_time.timestamp() * 1000)
+    
+    # Query DynamoDB
+    items = []
+    last_evaluated_key = None
+    
+    query_params = {
+        'KeyConditionExpression': 'api_key_id = :api_key AND snapshot_ts >= :start_ts',
+        'ExpressionAttributeValues': {
+            ':api_key': api_key_id,
+            ':start_ts': start_ts
+        }
+    }
+    
+    # Fetch all items in range (pagination)
+    while True:
+        if last_evaluated_key:
+            query_params['ExclusiveStartKey'] = last_evaluated_key
+            
+        response = portfolio_table.query(**query_params)
+        items.extend(response.get('Items', []))
+        
+        last_evaluated_key = response.get('LastEvaluatedKey')
+        if not last_evaluated_key:
+            break
+            
+    if not items:
+        return []
+        
+    # Sort by timestamp ascending
+    items.sort(key=lambda x: int(x['snapshot_ts']))
+    
+    # Downsample logic: Keep the LAST snapshot of each bucket
+    buckets = {}
+    for item in items:
+        ts = int(item['snapshot_ts']) / 1000
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        
+        if resolution == 'day':
+            key = dt.strftime('%Y-%m-%d')
+        elif resolution == 'hour':
+            key = dt.strftime('%Y-%m-%d %H')
+        else: # 15min
+            minute = (dt.minute // 15) * 15
+            key = dt.strftime(f'%Y-%m-%d %H:{minute:02d}')
+            
+        buckets[key] = item
+        
+    # Return sorted values
+    return sorted(list(buckets.values()), key=lambda x: int(x['snapshot_ts']))
 
 def lambda_handler(event, context):
     """
@@ -187,7 +250,7 @@ def lambda_handler(event, context):
     Query params:
     - user_name: Username filter (optional for admin, returns all users if omitted)
     - include_history: Include historical snapshots (default: false)
-    - history_limit: Number of historical snapshots (default: 100)
+    - history_period: Period for history (24h, 7d, 30d, all) - default 24h
     
     Cognito claims (from authorizer):
     - username: Logged in user
@@ -199,7 +262,7 @@ def lambda_handler(event, context):
         params = event.get('queryStringParameters', {}) or {}
         requested_user = params.get('user_name', '').strip()
         include_history = params.get('include_history', 'false').lower() == 'true'
-        history_limit = int(params.get('history_limit', '100'))
+        history_period = params.get('history_period', '24h')
         
         # Get user info from Cognito authorizer
         claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
@@ -225,10 +288,11 @@ def lambda_handler(event, context):
                 }
             
             # Get single user portfolio
-            portfolio = get_current_portfolio(requested_user)
+            api_key_id = get_api_key_id(requested_user)
+            portfolio = get_current_portfolio(requested_user, api_key_id)
             
             if include_history:
-                portfolio['history'] = get_portfolio_history(requested_user, history_limit)
+                portfolio['history'] = get_portfolio_history(api_key_id, history_period)
             
             result = {
                 'user': requested_user,
@@ -248,10 +312,14 @@ def lambda_handler(event, context):
                 portfolios = []
                 
                 for user in all_users:
-                    portfolio = get_current_portfolio(user)
-                    if include_history:
-                        portfolio['history'] = get_portfolio_history(user, history_limit)
-                    portfolios.append(portfolio)
+                    try:
+                        api_key_id = get_api_key_id(user)
+                        portfolio = get_current_portfolio(user, api_key_id)
+                        if include_history:
+                            portfolio['history'] = get_portfolio_history(api_key_id, history_period)
+                        portfolios.append(portfolio)
+                    except Exception as e:
+                        print(f"Error fetching portfolio for {user}: {e}")
                 
                 print(f"DEBUG: Returning {len(portfolios)} portfolios")
                 result = {
@@ -261,10 +329,18 @@ def lambda_handler(event, context):
                 }
             else:
                 # Regular user sees only their own
-                portfolio = get_current_portfolio(current_user)
+                if not current_user:
+                    return {
+                        'statusCode': 401,
+                        'headers': {'Content-Type': 'application/json'},
+                        'body': json.dumps({'error': 'Authentication required'})
+                    }
+                
+                api_key_id = get_api_key_id(current_user)
+                portfolio = get_current_portfolio(current_user, api_key_id)
                 
                 if include_history:
-                    portfolio['history'] = get_portfolio_history(current_user, history_limit)
+                    portfolio['history'] = get_portfolio_history(api_key_id, history_period)
                 
                 result = {
                     'user': current_user,

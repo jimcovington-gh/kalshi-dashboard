@@ -7,10 +7,12 @@ Supports YAML format with automatic version selection.
 import os
 import boto3
 import yaml
+import logging
 from typing import Dict, List, Any, Optional
-from utils import StructuredLogger
 
-logger = StructuredLogger(__name__)
+# Configure simple logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 s3_client = boto3.client('s3')
 

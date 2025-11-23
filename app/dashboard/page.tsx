@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { getPortfolio, Portfolio } from '@/lib/api';
+import { fetchAuthSession } from 'aws-amplify/auth';
+import { useRouter } from 'next/navigation';
 
 export default function DashboardPage() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
@@ -9,6 +11,7 @@ export default function DashboardPage() {
   const [isAdminView, setIsAdminView] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const router = useRouter();
 
   useEffect(() => {
     loadPortfolio();
@@ -16,6 +19,14 @@ export default function DashboardPage() {
 
   async function loadPortfolio() {
     try {
+      // Check if user is authenticated before calling API
+      const session = await fetchAuthSession();
+      if (!session.tokens?.idToken) {
+        console.error('No authentication token found, redirecting to login');
+        router.push('/');
+        return;
+      }
+
       const data = await getPortfolio();
       console.log('Portfolio API response:', JSON.stringify(data, null, 2));
       

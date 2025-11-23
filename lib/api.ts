@@ -46,6 +46,21 @@ export interface PortfolioResponse {
   user_count?: number;
 }
 
+export interface CategoryStat {
+  name: string;
+  pnl: number;
+  volume: number;
+  trades: number;
+  win_rate: number;
+}
+
+export interface AnalyticsResponse {
+  user: string;
+  period: string;
+  total_pnl: number;
+  categories: CategoryStat[];
+}
+
 export async function getTrades(ticker: string, userName?: string): Promise<{
   ticker: string;
   user: string;
@@ -141,5 +156,40 @@ export async function getCurrentUser(): Promise<string> {
     return session.tokens?.idToken?.payload['cognito:username'] as string || '';
   } catch {
     return '';
+  }
+}
+
+export async function getAnalytics(
+  userName?: string,
+  period: string = '30d'
+): Promise<AnalyticsResponse> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const params: any = { period };
+    if (userName) {
+      params.user_name = userName;
+    }
+
+    const queryString = new URLSearchParams(params).toString();
+    
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: `/analytics?${queryString}`,
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as any;
+  } catch (error) {
+    console.error('Error fetching analytics:', error);
+    throw error;
   }
 }

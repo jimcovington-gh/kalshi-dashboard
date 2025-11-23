@@ -1,21 +1,25 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getPortfolio, Portfolio } from '@/lib/api';
+import { getPortfolio, getAnalytics, Portfolio, AnalyticsResponse } from '@/lib/api';
 import {
   AreaChart,
   Area,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  ReferenceLine
+  ReferenceLine,
+  Cell
 } from 'recharts';
 import { format } from 'date-fns';
 
 export default function AnalyticsPage() {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
+  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [selectedUser, setSelectedUser] = useState<string>('');
   const [period, setPeriod] = useState<string>('24h');
   const [isLoading, setIsLoading] = useState(true);
@@ -23,29 +27,37 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     loadData();
-  }, [period]);
+  }, [period, selectedUser]);
 
   async function loadData() {
     setIsLoading(true);
     try {
-      // Fetch with history enabled
-      const data = await getPortfolio(undefined, true, period);
+      // 1. Fetch Portfolio History
+      const portfolioData = await getPortfolio(selectedUser || undefined, true, period);
       
       let loadedPortfolios: Portfolio[] = [];
-      
-      if (data.is_admin_view && data.portfolios) {
-        loadedPortfolios = data.portfolios;
-      } else if (data.portfolio) {
-        loadedPortfolios = [data.portfolio];
+      if (portfolioData.is_admin_view && portfolioData.portfolios) {
+        loadedPortfolios = portfolioData.portfolios;
+      } else if (portfolioData.portfolio) {
+        loadedPortfolios = [portfolioData.portfolio];
       }
-      
       setPortfolios(loadedPortfolios);
       
-      // Select first user if none selected or current selection not in list
+      // Auto-select user if needed
+      let targetUser = selectedUser;
       if (loadedPortfolios.length > 0) {
-        if (!selectedUser || !loadedPortfolios.find(p => p.user_name === selectedUser)) {
-          setSelectedUser(loadedPortfolios[0].user_name);
+        if (!targetUser || !loadedPortfolios.find(p => p.user_name === targetUser)) {
+          targetUser = loadedPortfolios[0].user_name;
+          setSelectedUser(targetUser);
         }
+      }
+
+      // 2. Fetch Category Analytics (only if we have a user)
+      if (targetUser) {
+        // Map period to analytics period (24h -> 7d minimum for meaningful stats)
+        const analyticsPeriod = period === '24h' ? '7d' : period;
+        const analyticsData = await getAnalytics(targetUser, analyticsPeriod);
+        setAnalytics(analyticsData);
       }
       
     } catch (err: any) {
@@ -126,7 +138,7 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      {isLoading ? (
+      {isLoading && !currentPortfolio ? (
         <div className="h-96 flex items-center justify-center bg-white rounded-lg shadow">
           <div className="text-gray-500">Loading chart data...</div>
         </div>
@@ -134,70 +146,134 @@ export default function AnalyticsPage() {
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
           {error}
         </div>
-      ) : chartData.length === 0 ? (
-        <div className="h-96 flex items-center justify-center bg-white rounded-lg shadow">
-          <div className="text-gray-500">No history data available for this period</div>
-        </div>
       ) : (
-        <div className="bg-white rounded-lg shadow p-4 md:p-6">
-          <div className="mb-6">
-            <h2 className="text-lg font-medium text-gray-900">Equity Curve</h2>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-gray-900">
-                {formatCurrency(chartData[chartData.length - 1].value)}
-              </span>
-              <span className={`text-sm font-medium ${
-                chartData[chartData.length - 1].value >= chartData[0].value 
-                  ? 'text-green-600' 
-                  : 'text-red-600'
-              }`}>
-                {chartData[chartData.length - 1].value >= chartData[0].value ? '+' : ''}
-                {((chartData[chartData.length - 1].value - chartData[0].value) / chartData[0].value * 100).toFixed(2)}%
-              </span>
-              <span className="text-sm text-gray-500">vs start of period</span>
+        <>
+          {/* Equity Curve */}
+          <div className="bg-white rounded-lg shadow p-4 md:p-6">
+            <div className="mb-6">
+              <h2 className="text-lg font-medium text-gray-900">Equity Curve</h2>
+              {chartData.length > 0 && (
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="text-3xl font-bold text-gray-900">
+                    {formatCurrency(chartData[chartData.length - 1].value)}
+                  </span>
+                  <span className={`text-sm font-medium ${
+                    chartData[chartData.length - 1].value >= chartData[0].value 
+                      ? 'text-green-600' 
+                      : 'text-red-600'
+                  }`}>
+                    {chartData[chartData.length - 1].value >= chartData[0].value ? '+' : ''}
+                    {((chartData[chartData.length - 1].value - chartData[0].value) / chartData[0].value * 100).toFixed(2)}%
+                  </span>
+                  <span className="text-sm text-gray-500">vs start of period</span>
+                </div>
+              )}
+            </div>
+
+            <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={chartData}
+                  margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                >
+                  <defs>
+                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis 
+                    dataKey="timestamp" 
+                    tickFormatter={formatXAxis}
+                    type="number"
+                    domain={['dataMin', 'dataMax']}
+                    minTickGap={50}
+                  />
+                  <YAxis 
+                    domain={['auto', 'auto']}
+                    tickFormatter={(val) => `$${val}`}
+                  />
+                  <Tooltip 
+                    labelFormatter={formatTooltipDate}
+                    formatter={(value: number) => [formatCurrency(value), 'Portfolio Value']}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke="#2563eb"
+                    fillOpacity={1}
+                    fill="url(#colorValue)"
+                    strokeWidth={2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
           </div>
 
-          <div className="h-[400px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart
-                data={chartData}
-                margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-              >
-                <defs>
-                  <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis 
-                  dataKey="timestamp" 
-                  tickFormatter={formatXAxis}
-                  type="number"
-                  domain={['dataMin', 'dataMax']}
-                  minTickGap={50}
-                />
-                <YAxis 
-                  domain={['auto', 'auto']}
-                  tickFormatter={(val) => `$${val}`}
-                />
-                <Tooltip 
-                  labelFormatter={formatTooltipDate}
-                  formatter={(value: number) => [formatCurrency(value), 'Portfolio Value']}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke="#2563eb"
-                  fillOpacity={1}
-                  fill="url(#colorValue)"
-                  strokeWidth={2}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+          {/* Profitability by Category */}
+          {analytics && analytics.categories.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white rounded-lg shadow p-4 md:p-6">
+                <h2 className="text-lg font-medium text-gray-900 mb-4">PnL by Category</h2>
+                <div className="h-[300px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={analytics.categories}
+                      layout="vertical"
+                      margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" tickFormatter={(val) => `$${val}`} />
+                      <YAxis dataKey="name" type="category" width={100} />
+                      <Tooltip 
+                        formatter={(value: number) => [formatCurrency(value), 'PnL']}
+                        cursor={{fill: 'transparent'}}
+                      />
+                      <Bar dataKey="pnl" radius={[0, 4, 4, 0]}>
+                        {analytics.categories.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.pnl >= 0 ? '#16a34a' : '#dc2626'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow p-4 md:p-6">
+                <h2 className="text-lg font-medium text-gray-900 mb-4">Category Performance</h2>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead>
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">PnL</th>
+                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Volume</th>
+                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Win Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {analytics.categories.map((cat) => (
+                        <tr key={cat.name}>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{cat.name}</td>
+                          <td className={`px-3 py-2 whitespace-nowrap text-sm text-right font-medium ${cat.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatCurrency(cat.pnl)}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-right text-gray-500">
+                            {formatCurrency(cat.volume)}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-right text-gray-500">
+                            {cat.win_rate}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

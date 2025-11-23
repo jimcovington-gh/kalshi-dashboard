@@ -1,17 +1,16 @@
 'use client';
 
 import { Amplify } from 'aws-amplify';
-import outputs from '@/amplify_outputs.json';
 import { useEffect } from 'react';
 
-// Configure Amplify with proper structure
+// Configure Amplify with proper structure from amplify_outputs.json
 const amplifyConfig = {
   Auth: {
     Cognito: {
-      userPoolId: outputs.auth.user_pool_id,
-      userPoolClientId: outputs.auth.user_pool_client_id,
-      identityPoolId: outputs.auth.identity_pool_id,
-      region: outputs.auth.aws_region,
+      userPoolId: 'us-east-1_WEozUeojc',
+      userPoolClientId: '6p1si912i2i95oorgruhob2il',
+      identityPoolId: 'us-east-1:cd23510f-1a9a-4966-81e7-fd24601771ba',
+      region: 'us-east-1',
       loginWith: {
         email: true,
       },
@@ -20,8 +19,8 @@ const amplifyConfig = {
   API: {
     REST: {
       DashboardAPI: {
-        endpoint: outputs.custom.API.REST.DashboardAPI.endpoint,
-        region: outputs.custom.API.REST.DashboardAPI.region,
+        endpoint: 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod',
+        region: 'us-east-1',
       },
     },
   },

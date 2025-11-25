@@ -2,6 +2,7 @@ import { get } from 'aws-amplify/api';
 import { fetchAuthSession } from 'aws-amplify/auth';
 
 // V2 Trade schema - uses market_ticker, idea_name, placed_at, completed_at
+// Only filled trades are returned (filled_count > 0)
 export interface Trade {
   order_id: string;
   market_ticker: string;
@@ -13,7 +14,6 @@ export interface Trade {
   max_dollar_amount: number;
   max_price: number;
   order_status: string;
-  success: boolean;
   placed_at: string;
   completed_at?: string;
   idea_name: string;
@@ -30,8 +30,10 @@ export interface Trade {
     price: number;
     created_time: string;
   }>;
-  error_message?: string;
-  orderbook_snapshot?: any;
+  orderbook_snapshot?: {
+    yes_bids?: Array<{ price: number; quantity: number }>;
+    no_bids?: Array<{ price: number; quantity: number }>;
+  };
   // Legacy field aliases for backward compatibility
   ticker?: string;  // Maps to market_ticker
   initiated_at?: string;  // Maps to placed_at

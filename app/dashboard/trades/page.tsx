@@ -84,9 +84,7 @@ export default function TradesPage() {
       {trades.map((trade, idx) => (
         <div
           key={trade.order_id || idx}
-          className={`bg-white rounded-lg shadow overflow-hidden border-l-4 ${
-            trade.success ? 'border-green-500' : 'border-red-500'
-          }`}
+          className="bg-white rounded-lg shadow overflow-hidden border-l-4 border-green-500"
         >
           <div className="px-4 md:px-6 py-3 md:py-4 bg-gray-50 border-b border-gray-200 flex flex-col md:flex-row md:justify-between md:items-center gap-2">
             <div>
@@ -100,14 +98,8 @@ export default function TradesPage() {
                 {trade.idea_name || 'Unknown'} {trade.idea_version ? `v${trade.idea_version}` : ''}
               </p>
             </div>
-            <span
-              className={`px-3 py-1 rounded-full text-xs md:text-sm font-semibold self-start md:self-auto ${
-                trade.success
-                  ? 'bg-green-100 text-green-800'
-                  : 'bg-red-100 text-red-800'
-              }`}
-            >
-              {trade.success ? '✅ Success' : '❌ Failed'}
+            <span className="px-3 py-1 rounded-full text-xs md:text-sm font-semibold self-start md:self-auto bg-green-100 text-green-800">
+              {trade.filled_count || 0} contracts filled
             </span>
           </div>
 
@@ -122,9 +114,7 @@ export default function TradesPage() {
                 <div className="text-base md:text-lg font-semibold text-gray-900">{trade.filled_count || 0}</div>
               </div>
               <div>
-                <div className="text-xs text-gray-500 uppercase mb-1">
-                  {trade.success ? 'Fill Price' : 'Target Price'}
-                </div>
+                <div className="text-xs text-gray-500 uppercase mb-1">Fill Price</div>
                 <div className="text-base md:text-lg font-semibold text-gray-900">
                   ${(trade.avg_fill_price || 0).toFixed(2)}
                 </div>
@@ -158,16 +148,10 @@ export default function TradesPage() {
               </div>
             )}
 
-            {!trade.success && trade.error_message && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-3 md:px-4 py-2 md:py-3 rounded-lg mb-3 md:mb-4 text-sm">
-                <strong>Error:</strong> {trade.error_message}
-              </div>
-            )}
-
             {trade.orderbook_snapshot && (
               <div className="mt-3 md:mt-4">
                 <h4 className="text-sm font-semibold text-gray-700 mb-2 md:mb-3">
-                  Order Book Snapshot (from {trade.side.toUpperCase()} holder perspective)
+                  Order Book at Trade Time (from {trade.side.toUpperCase()} holder perspective)
                 </h4>
                 <MergedOrderBook
                   snapshot={trade.orderbook_snapshot}

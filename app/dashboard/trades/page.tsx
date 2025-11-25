@@ -92,10 +92,12 @@ export default function TradesPage() {
             <div>
               <h3 className="text-base md:text-lg font-semibold text-gray-900">Trade #{idx + 1}</h3>
               <p className="text-xs md:text-sm text-gray-600">
-                {format(new Date(trade.completed_at || trade.placed_at), 'PPpp')}
+                {(trade.completed_at || trade.placed_at) 
+                  ? format(new Date(trade.completed_at || trade.placed_at), 'PPpp')
+                  : 'Unknown date'}
               </p>
               <p className="text-xs text-gray-500">
-                {trade.idea_name} v{trade.idea_version}
+                {trade.idea_name || 'Unknown'} {trade.idea_version ? `v${trade.idea_version}` : ''}
               </p>
             </div>
             <span

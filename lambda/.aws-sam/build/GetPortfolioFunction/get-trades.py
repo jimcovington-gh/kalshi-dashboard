@@ -73,17 +73,17 @@ def lambda_handler(event, context):
         
         # Query using market_ticker-index GSI with user filter (v2 schema)
         # This is more efficient than a full table scan
+        # filled_count > 0 is sufficient - if contracts filled, trade was successful
         print(f"Querying market_ticker-index for ticker={ticker}, user={target_user}")
         
         response = trades_table.query(
             IndexName='market_ticker-index',
             KeyConditionExpression='market_ticker = :ticker',
-            FilterExpression='user_name = :user AND filled_count > :zero AND success = :true',
+            FilterExpression='user_name = :user AND filled_count > :zero',
             ExpressionAttributeValues={
                 ':ticker': ticker,
                 ':user': target_user,
-                ':zero': 0,
-                ':true': True
+                ':zero': 0
             }
         )
         

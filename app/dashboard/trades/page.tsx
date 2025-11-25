@@ -5,6 +5,25 @@ import { useSearchParams } from 'next/navigation';
 import { getTrades, Trade } from '@/lib/api';
 import { format } from 'date-fns';
 
+// Helper to parse dates that might be ISO strings or Unix timestamps
+function parseTradeDate(dateValue: string | number | null | undefined): Date | null {
+  if (!dateValue) return null;
+  
+  // If it's a number or numeric string, treat as Unix timestamp (seconds)
+  if (typeof dateValue === 'number' || /^\d+$/.test(String(dateValue))) {
+    const timestamp = typeof dateValue === 'number' ? dateValue : parseInt(String(dateValue), 10);
+    // Unix timestamps in seconds are ~10 digits, milliseconds are ~13 digits
+    // If less than year 2100 in seconds (~4.1 billion), multiply by 1000
+    if (timestamp < 4102444800) {
+      return new Date(timestamp * 1000);
+    }
+    return new Date(timestamp);
+  }
+  
+  // Otherwise parse as ISO string
+  return new Date(dateValue);
+}
+
 export default function TradesPage() {
   const searchParams = useSearchParams();
   const tickerParam = searchParams.get('ticker');
@@ -90,9 +109,10 @@ export default function TradesPage() {
             <div>
               <h3 className="text-base md:text-lg font-semibold text-gray-900">Trade #{idx + 1}</h3>
               <p className="text-xs md:text-sm text-gray-600">
-                {(trade.completed_at || trade.placed_at) 
-                  ? format(new Date(trade.completed_at || trade.placed_at), 'PPpp')
-                  : 'Unknown date'}
+                {(() => {
+                  const date = parseTradeDate(trade.completed_at) || parseTradeDate(trade.placed_at);
+                  return date ? format(date, 'PPpp') : 'Unknown date';
+                })()}
               </p>
               <p className="text-xs text-gray-500">
                 {trade.idea_name || 'Unknown'} {trade.idea_version ? `v${trade.idea_version}` : ''}

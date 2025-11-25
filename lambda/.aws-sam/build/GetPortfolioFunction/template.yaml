@@ -9,7 +9,7 @@ Globals:
     MemorySize: 256
     Environment:
       Variables:
-        TRADES_TABLE: production-kalshi-trades
+        TRADES_TABLE: production-kalshi-trades-v2
         POSITIONS_TABLE: production-kalshi-market-positions
         PORTFOLIO_TABLE: production-kalshi-portfolio-snapshots
         MARKET_METADATA_TABLE: production-kalshi-market-metadata
@@ -30,8 +30,9 @@ Resources:
       StageName: prod
       Cors:
         AllowMethods: "'GET,POST,OPTIONS'"
-        AllowHeaders: "'Content-Type,Authorization'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
         AllowOrigin: "'*'"
+        MaxAge: "'600'"
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
@@ -39,6 +40,7 @@ Resources:
             UserPoolArn: !Ref CognitoUserPoolArn
             Identity:
               Header: Authorization
+        AddDefaultAuthorizerToCorsPreflight: false
 
   # Lambda: Get Trades
   GetTradesFunction:
@@ -55,7 +57,13 @@ Resources:
         - !Ref SharedCodeLayer
       Policies:
         - DynamoDBReadPolicy:
-            TableName: production-kalshi-trades
+            TableName: production-kalshi-trades-v2
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-trades-v2/index/*
       Events:
         GetTrades:
           Type: Api
@@ -85,7 +93,13 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: production-kalshi-market-metadata
         - DynamoDBReadPolicy:
-            TableName: production-kalshi-trades
+            TableName: production-kalshi-trades-v2
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-trades-v2/index/*
         - S3ReadPolicy:
             BucketName: production-kalshi-trading-config
         - Statement:

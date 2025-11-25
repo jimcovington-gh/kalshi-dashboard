@@ -15,7 +15,7 @@ secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
 positions_table = dynamodb.Table(os.environ.get('POSITIONS_TABLE', 'production-kalshi-market-positions'))
 portfolio_table = dynamodb.Table(os.environ.get('PORTFOLIO_TABLE', 'production-kalshi-portfolio-snapshots'))
 market_metadata_table = dynamodb.Table(os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'))
-trades_table = dynamodb.Table(os.environ.get('TRADES_TABLE', 'production-kalshi-trades'))
+trades_table = dynamodb.Table(os.environ.get('TRADES_TABLE', 'production-kalshi-trades-v2'))
 
 class DecimalEncoder(json.JSONEncoder):
     """Convert Decimal to float for JSON serialization"""
@@ -54,33 +54,48 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
     snapshot = snapshot_response.get('Items', [{}])[0] if snapshot_response.get('Items') else {}
     cash_balance = float(snapshot.get('cash', 0)) / 100  # Convert cents to dollars
     
-    # Get all non-zero positions
-    response = positions_table.scan(
-        FilterExpression='user_name = :user AND #pos <> :zero',
+    # Get all non-zero positions - query by api_key_id to be efficient
+    response = positions_table.query(
+        IndexName='UserTickerIndex',
+        KeyConditionExpression='api_key_id = :api_key',
+        FilterExpression='#pos <> :zero',
         ExpressionAttributeNames={
             '#pos': 'position'
         },
         ExpressionAttributeValues={
-            ':user': user_name,
+            ':api_key': api_key_id,
             ':zero': 0
-        }
+        },
+        ScanIndexForward=False  # Get most recent snapshots first
     )
     
-    positions = response.get('Items', [])
+    all_positions = response.get('Items', [])
+    
+    # Deduplicate by ticker - keep only the most recent snapshot per ticker
+    seen_tickers = set()
+    positions = []
+    for pos in all_positions:
+        ticker = pos.get('ticker')
+        if ticker and ticker not in seen_tickers:
+            seen_tickers.add(ticker)
+            positions.append(pos)
     
     # Get all filled trades for this user to calculate average fill prices
-    trades_response = trades_table.scan(
-        FilterExpression='user_name = :user AND filled_count > :zero',
+    # Use user_name-index GSI for efficient query (v2 table schema)
+    trades_response = trades_table.query(
+        IndexName='user_name-index',
+        KeyConditionExpression='user_name = :user',
+        FilterExpression='filled_count > :zero',
         ExpressionAttributeValues={
             ':user': user_name,
             ':zero': 0
         }
     )
     
-    # Calculate average fill price per ticker
+    # Calculate average fill price per ticker (v2 uses market_ticker field)
     fill_prices = {}
     for trade in trades_response.get('Items', []):
-        ticker = trade.get('ticker')
+        ticker = trade.get('market_ticker')  # v2 schema uses market_ticker
         filled_count = int(trade.get('filled_count', 0))
         avg_fill_price = float(trade.get('avg_fill_price', 0))
         

@@ -83,7 +83,7 @@ export default function TradesPage() {
 
       {trades.map((trade, idx) => (
         <div
-          key={idx}
+          key={trade.order_id || idx}
           className={`bg-white rounded-lg shadow overflow-hidden border-l-4 ${
             trade.success ? 'border-green-500' : 'border-red-500'
           }`}
@@ -92,7 +92,10 @@ export default function TradesPage() {
             <div>
               <h3 className="text-base md:text-lg font-semibold text-gray-900">Trade #{idx + 1}</h3>
               <p className="text-xs md:text-sm text-gray-600">
-                {format(new Date(trade.initiated_at), 'PPpp')}
+                {format(new Date(trade.completed_at || trade.placed_at), 'PPpp')}
+              </p>
+              <p className="text-xs text-gray-500">
+                {trade.idea_name} v{trade.idea_version}
               </p>
             </div>
             <span
@@ -131,6 +134,27 @@ export default function TradesPage() {
                 </div>
               </div>
             </div>
+
+            {/* Trade Parameters Section */}
+            {trade.idea_parameters && Object.keys(trade.idea_parameters).length > 0 && (
+              <div className="mt-3 md:mt-4 mb-3 md:mb-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">Trade Parameters</h4>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+                    {Object.entries(trade.idea_parameters).map(([key, value]) => (
+                      <div key={key} className="flex flex-col">
+                        <span className="text-xs text-gray-500">{key.replace(/_/g, ' ')}</span>
+                        <span className="font-mono text-gray-900">
+                          {typeof value === 'number' 
+                            ? value.toFixed(value % 1 === 0 ? 0 : 2)
+                            : String(value)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {!trade.success && trade.error_message && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-3 md:px-4 py-2 md:py-3 rounded-lg mb-3 md:mb-4 text-sm">

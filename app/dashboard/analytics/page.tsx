@@ -101,8 +101,8 @@ export default function AnalyticsPage() {
         <h1 className="text-2xl font-bold text-gray-900">Portfolio Analytics</h1>
         
         <div className="flex flex-wrap gap-2">
-          {/* User Selector (Admin only) */}
-          {portfolios.length > 1 && (
+          {/* User Selector (show always if portfolios available) */}
+          {portfolios.length > 0 && (
             <select
               value={selectedUser}
               onChange={(e) => setSelectedUser(e.target.value)}

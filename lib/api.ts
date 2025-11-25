@@ -1,19 +1,40 @@
 import { get } from 'aws-amplify/api';
 import { fetchAuthSession } from 'aws-amplify/auth';
 
+// V2 Trade schema - uses market_ticker, idea_name, placed_at, completed_at
 export interface Trade {
-  ticker: string;
+  order_id: string;
+  market_ticker: string;
+  user_name: string;
   side: 'yes' | 'no';
   action: 'buy' | 'sell';
   filled_count: number;
   avg_fill_price: number;
   max_dollar_amount: number;
-  status: string;
+  max_price: number;
+  order_status: string;
   success: boolean;
-  initiated_at: string;
-  fills?: string;
+  placed_at: string;
+  completed_at?: string;
+  idea_name: string;
+  idea_version: string;
+  idea_parameters: Record<string, any>;
+  fill_count: number;
+  fills?: Array<{
+    fill_id: string;
+    order_id: string;
+    ticker: string;
+    side: string;
+    action: string;
+    count: number;
+    price: number;
+    created_time: string;
+  }>;
   error_message?: string;
   orderbook_snapshot?: any;
+  // Legacy field aliases for backward compatibility
+  ticker?: string;  // Maps to market_ticker
+  initiated_at?: string;  // Maps to placed_at
 }
 
 export interface Position {

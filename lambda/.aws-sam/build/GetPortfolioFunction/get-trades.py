@@ -78,11 +78,12 @@ def lambda_handler(event, context):
         response = trades_table.query(
             IndexName='market_ticker-index',
             KeyConditionExpression='market_ticker = :ticker',
-            FilterExpression='user_name = :user AND filled_count > :zero',
+            FilterExpression='user_name = :user AND filled_count > :zero AND success = :true',
             ExpressionAttributeValues={
                 ':ticker': ticker,
                 ':user': target_user,
-                ':zero': 0
+                ':zero': 0,
+                ':true': True
             }
         )
         

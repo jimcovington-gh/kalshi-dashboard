@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kalshi CORS Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 5px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #cce5ff; color: #004085; }
+        .warning { background: #fff3cd; color: #856404; }
+        #log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .log-time { color: #569cd6; }
+        .log-info { color: #4ec9b0; }
+        .log-error { color: #f14c4c; }
+        .log-success { color: #6a9955; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Kalshi CORS Test</h1>
+        <p>This page tests whether the browser can directly call Kalshi API or if CORS blocks it.</p>
+        
+        <div class="test-section">
+            <h3>Test 1: Simple GET Request (No Auth)</h3>
+            <p>Tests if Kalshi allows any browser-origin requests.</p>
+            <button id="test1Btn" onclick="runTest1()">Run Test 1: GET /exchange/status</button>
+            <div id="test1Result" class="result" style="display:none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <h3>Test 2: Authenticated GET Request</h3>
+            <p>Tests if signed requests work from browser.</p>
+            <p><strong>Note:</strong> Requires signing service to be running.</p>
+            <button id="test2Btn" onclick="runTest2()">Run Test 2: GET /portfolio/balance</button>
+            <div id="test2Result" class="result" style="display:none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <h3>Test 3: POST Order Request</h3>
+            <p>Tests if we can place an order from the browser.</p>
+            <p><strong>Target:</strong> $10 market order on KXNFLPREPACK-3-25NOV30SEAMINPITBUFLACLV-SEAPITLAC</p>
+            <p><strong>Expected:</strong> CORS error OR "insufficient funds" from Kalshi</p>
+            <button id="test3Btn" onclick="runTest3()">Run Test 3: POST Order</button>
+            <div id="test3Result" class="result" style="display:none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <h3>📋 Log Output</h3>
+            <div id="log"></div>
+        </div>
+    </div>
+    
+    <script>
+        const KALSHI_API = 'https://api.elections.kalshi.com';
+        const SIGNING_API = 'https://5uthw49k2c.execute-api.us-east-1.amazonaws.com/prod'; // QuickBets API
+        
+        function log(message, type = 'info') {
+            const logEl = document.getElementById('log');
+            const time = new Date().toISOString().substr(11, 12);
+            const typeClass = `log-${type}`;
+            logEl.innerHTML += `<span class="log-time">[${time}]</span> <span class="${typeClass}">${message}</span>\n`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        function showResult(elementId, message, isSuccess) {
+            const el = document.getElementById(elementId);
+            el.style.display = 'block';
+            el.className = `result ${isSuccess ? 'success' : 'error'}`;
+            el.textContent = message;
+        }
+        
+        async function runTest1() {
+            const btn = document.getElementById('test1Btn');
+            btn.disabled = true;
+            log('Starting Test 1: Simple GET request to Kalshi API...', 'info');
+            
+            try {
+                const startTime = performance.now();
+                const response = await fetch(`${KALSHI_API}/trade-api/v2/exchange/status`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                const elapsed = (performance.now() - startTime).toFixed(0);
+                
+                const data = await response.json();
+                log(`✅ SUCCESS! Response received in ${elapsed}ms`, 'success');
+                log(`Status: ${response.status}`, 'info');
+                log(`Data: ${JSON.stringify(data, null, 2)}`, 'info');
+                
+                showResult('test1Result', 
+                    `✅ CORS ALLOWED for GET requests!\n\nStatus: ${response.status}\nLatency: ${elapsed}ms\nData: ${JSON.stringify(data, null, 2)}`, 
+                    true);
+                    
+            } catch (error) {
+                log(`❌ ERROR: ${error.message}`, 'error');
+                
+                if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                    showResult('test1Result', 
+                        `❌ CORS BLOCKED\n\nThe browser blocked the request.\nError: ${error.message}\n\nThis means we cannot call Kalshi directly from the browser.`, 
+                        false);
+                } else {
+                    showResult('test1Result', `❌ Error: ${error.message}`, false);
+                }
+            }
+            
+            btn.disabled = false;
+        }
+        
+        async function runTest2() {
+            const btn = document.getElementById('test2Btn');
+            btn.disabled = true;
+            log('Starting Test 2: Authenticated GET request...', 'info');
+            
+            // First, we need to get signing headers from our backend
+            log('Step 1: Getting signature from signing service...', 'info');
+            
+            try {
+                // Call our signing Lambda to get headers
+                const signResponse = await fetch(`${SIGNING_API}/sign`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // Add Cognito auth token here if needed
+                    },
+                    body: JSON.stringify({
+                        method: 'GET',
+                        path: '/trade-api/v2/portfolio/balance',
+                        user_name: 'jimc'  // Test user
+                    })
+                });
+                
+                if (!signResponse.ok) {
+                    throw new Error(`Signing service returned ${signResponse.status}`);
+                }
+                
+                const signData = await signResponse.json();
+                log(`Step 1 complete. Got signature headers.`, 'success');
+                
+                // Now call Kalshi with the signed headers
+                log('Step 2: Calling Kalshi API with signed headers...', 'info');
+                
+                const startTime = performance.now();
+                const response = await fetch(`${KALSHI_API}/trade-api/v2/portfolio/balance`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'KALSHI-ACCESS-KEY': signData.headers['KALSHI-ACCESS-KEY'],
+                        'KALSHI-ACCESS-SIGNATURE': signData.headers['KALSHI-ACCESS-SIGNATURE'],
+                        'KALSHI-ACCESS-TIMESTAMP': signData.headers['KALSHI-ACCESS-TIMESTAMP']
+                    }
+                });
+                const elapsed = (performance.now() - startTime).toFixed(0);
+                
+                const data = await response.json();
+                log(`✅ SUCCESS! Response received in ${elapsed}ms`, 'success');
+                log(`Status: ${response.status}`, 'info');
+                log(`Data: ${JSON.stringify(data, null, 2)}`, 'info');
+                
+                showResult('test2Result', 
+                    `✅ Authenticated request succeeded!\n\nStatus: ${response.status}\nLatency: ${elapsed}ms\nData: ${JSON.stringify(data, null, 2)}`, 
+                    true);
+                    
+            } catch (error) {
+                log(`❌ ERROR: ${error.message}`, 'error');
+                
+                if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                    showResult('test2Result', 
+                        `❌ CORS BLOCKED for authenticated requests\n\nError: ${error.message}`, 
+                        false);
+                } else if (error.message.includes('Signing service')) {
+                    showResult('test2Result', 
+                        `⚠️ Signing service not available\n\nDeploy the quickbets/sign Lambda first.\nError: ${error.message}`, 
+                        false);
+                } else {
+                    showResult('test2Result', `❌ Error: ${error.message}`, false);
+                }
+            }
+            
+            btn.disabled = false;
+        }
+        
+        async function runTest3() {
+            const btn = document.getElementById('test3Btn');
+            btn.disabled = true;
+            log('Starting Test 3: POST order request...', 'info');
+            
+            const ticker = 'KXNFLPREPACK-3-25NOV30SEAMINPITBUFLACLV-SEAPITLAC';
+            const orderAmount = 10; // $10
+            
+            try {
+                // Get signature for POST request
+                log('Step 1: Getting signature for order...', 'info');
+                
+                const orderBody = {
+                    ticker: ticker,
+                    side: 'yes',
+                    action: 'buy',
+                    type: 'market',
+                    count: orderAmount  // $10 = 10 contracts at ~$1 each
+                };
+                
+                const signResponse = await fetch(`${SIGNING_API}/sign`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        method: 'POST',
+                        path: '/trade-api/v2/portfolio/orders',
+                        body: orderBody,
+                        user_name: 'jimc'
+                    })
+                });
+                
+                if (!signResponse.ok) {
+                    const errText = await signResponse.text();
+                    throw new Error(`Signing service returned ${signResponse.status}: ${errText}`);
+                }
+                
+                const signData = await signResponse.json();
+                log(`Step 1 complete. Got signature headers.`, 'success');
+                
+                // Now POST to Kalshi
+                log('Step 2: Sending order to Kalshi...', 'info');
+                log(`Order: ${JSON.stringify(orderBody, null, 2)}`, 'info');
+                
+                const startTime = performance.now();
+                const response = await fetch(`${KALSHI_API}/trade-api/v2/portfolio/orders`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'KALSHI-ACCESS-KEY': signData.headers['KALSHI-ACCESS-KEY'],
+                        'KALSHI-ACCESS-SIGNATURE': signData.headers['KALSHI-ACCESS-SIGNATURE'],
+                        'KALSHI-ACCESS-TIMESTAMP': signData.headers['KALSHI-ACCESS-TIMESTAMP']
+                    },
+                    body: JSON.stringify(orderBody)
+                });
+                const elapsed = (performance.now() - startTime).toFixed(0);
+                
+                const data = await response.json();
+                log(`Response received in ${elapsed}ms`, 'info');
+                log(`Status: ${response.status}`, 'info');
+                log(`Data: ${JSON.stringify(data, null, 2)}`, 'info');
+                
+                if (response.status === 200 || response.status === 201) {
+                    log(`✅ ORDER PLACED SUCCESSFULLY!`, 'success');
+                    showResult('test3Result', 
+                        `✅ CORS ALLOWED - Order placed!\n\nStatus: ${response.status}\nLatency: ${elapsed}ms\nData: ${JSON.stringify(data, null, 2)}`, 
+                        true);
+                } else if (response.status === 400 && data.code === 'insufficient_balance') {
+                    log(`✅ GOT THROUGH TO KALSHI (insufficient funds as expected)`, 'success');
+                    showResult('test3Result', 
+                        `✅ CORS ALLOWED!\n\nThe request reached Kalshi and was rejected for insufficient funds.\nThis confirms browser can call Kalshi directly.\n\nStatus: ${response.status}\nLatency: ${elapsed}ms\nError: ${JSON.stringify(data, null, 2)}`, 
+                        true);
+                } else {
+                    log(`⚠️ Unexpected response: ${response.status}`, 'error');
+                    showResult('test3Result', 
+                        `⚠️ Request reached Kalshi\n\nStatus: ${response.status}\nLatency: ${elapsed}ms\nData: ${JSON.stringify(data, null, 2)}`, 
+                        true);
+                }
+                    
+            } catch (error) {
+                log(`❌ ERROR: ${error.message}`, 'error');
+                
+                if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError') || error.message.includes('CORS')) {
+                    showResult('test3Result', 
+                        `❌ CORS BLOCKED for POST requests\n\nThe browser blocked the order request.\nError: ${error.message}\n\n→ We must use Fargate to send orders.`, 
+                        false);
+                } else if (error.message.includes('Signing service')) {
+                    showResult('test3Result', 
+                        `⚠️ Signing service not available\n\nDeploy the quickbets/sign Lambda first, then retry.\n\nError: ${error.message}`, 
+                        false);
+                } else {
+                    showResult('test3Result', `❌ Error: ${error.message}`, false);
+                }
+            }
+            
+            btn.disabled = false;
+        }
+        
+        // Initial log
+        log('CORS Test Page loaded. Ready to run tests.', 'info');
+        log(`Kalshi API: ${KALSHI_API}`, 'info');
+        log(`Signing API: ${SIGNING_API}`, 'info');
+    </script>
+</body>
+</html>

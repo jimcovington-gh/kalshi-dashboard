@@ -1,14 +1,25 @@
 """
-Lambda function to get portfolio data from DynamoDB
+Lambda function to get portfolio data using PortfolioFetcherLayer + DynamoDB enrichment
 Supports user-specific queries and admin queries across all users
+
+Architecture:
+1. Fetch fresh portfolio from Kalshi API via PortfolioFetcherLayer
+2. Enrich with historical data (fill prices from trades, market titles, etc.)
+3. Return combined view with current state + historical context
 """
 
 import json
 import boto3
+import logging
 from decimal import Decimal
 from typing import Dict, List, Any
 import os
 from datetime import datetime, timezone, timedelta
+from portfolio_fetcher import fetch_user_portfolio_from_api
+
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
@@ -25,7 +36,7 @@ class DecimalEncoder(json.JSONEncoder):
         return super(DecimalEncoder, self).default(obj)
 
 def get_api_key_id(user_name: str) -> str:
-    """Helper to get api_key_id for a user"""
+    """Helper to get api_key_id for a user (used for portfolio history queries)"""
     try:
         secret_response = secretsmanager.get_secret_value(
             SecretId=f'production/kalshi/users/{user_name}/metadata'
@@ -33,161 +44,154 @@ def get_api_key_id(user_name: str) -> str:
         secret_data = json.loads(secret_response['SecretString'])
         return secret_data['api_key_id']
     except Exception as e:
-        print(f"Error getting api_key_id for user {user_name}: {e}")
+        logger.error(f"Error getting api_key_id for user {user_name}: {e}")
         raise
 
 def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, Any]:
-    """Get current portfolio positions and values"""
+    """
+    Get current portfolio positions and values using PortfolioFetcherLayer + DynamoDB enrichment
     
-    # Get user's api_key_id if not provided
-    if not api_key_id:
-        api_key_id = get_api_key_id(user_name)
+    Architecture:
+    1. Fetch fresh portfolio from Kalshi API (current positions & balance)
+    2. Query DynamoDB trades table for fill price history
+    3. Query DynamoDB metadata table for market titles and context
+    4. Combine API data with historical enrichment
     
-    # Get latest portfolio snapshot for cash balance - query directly by api_key_id
-    snapshot_response = portfolio_table.query(
-        KeyConditionExpression='api_key_id = :api_key',
-        ExpressionAttributeValues={':api_key': api_key_id},
-        ScanIndexForward=False,
-        Limit=1
-    )
+    Args:
+        user_name: Username to fetch portfolio for
+        api_key_id: Optional API key ID (unused, kept for backward compatibility)
     
-    snapshot = snapshot_response.get('Items', [{}])[0] if snapshot_response.get('Items') else {}
-    cash_balance = float(snapshot.get('cash', 0)) / 100  # Convert cents to dollars
+    Returns:
+        Dictionary with current portfolio state + historical enrichment
+    """
     
-    # Get all non-zero positions - query by api_key_id to be efficient
-    response = positions_table.query(
-        IndexName='UserTickerIndex',
-        KeyConditionExpression='api_key_id = :api_key',
-        FilterExpression='#pos <> :zero',
-        ExpressionAttributeNames={
-            '#pos': 'position'
-        },
-        ExpressionAttributeValues={
-            ':api_key': api_key_id,
-            ':zero': 0
-        },
-        ScanIndexForward=False  # Get most recent snapshots first
-    )
+    logger.info(f"Fetching portfolio for {user_name} using PortfolioFetcherLayer")
     
-    all_positions = response.get('Items', [])
+    # STEP 1: Fetch fresh portfolio from Kalshi API via layer
+    try:
+        portfolio_api = fetch_user_portfolio_from_api(
+            user_name=user_name,
+            user_secret_prefix='production/kalshi/users',  # Will construct 'production/kalshi/users/{user}/metadata'
+            kalshi_base_url=os.environ.get('KALSHI_API_BASE_URL', 'https://api.elections.kalshi.com'),
+            rate_limiter_table_name=os.environ.get('RATE_LIMITER_TABLE_NAME', 'production-kalshi-rate-limiter'),
+            market_metadata_table_name=os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'),
+            logger=logger
+        )
+    except Exception as e:
+        logger.error(f"Failed to fetch portfolio from API for {user_name}: {e}", exc_info=True)
+        raise
     
-    # Deduplicate by ticker - keep only the most recent snapshot per ticker
-    seen_tickers = set()
-    positions = []
-    for pos in all_positions:
-        ticker = pos.get('ticker')
-        if ticker and ticker not in seen_tickers:
-            seen_tickers.add(ticker)
-            positions.append(pos)
+    cash_balance = portfolio_api['balance_dollars']
+    api_positions = portfolio_api['positions']  # Dict[ticker, {position, current_price, market_value}]
+    total_position_value = portfolio_api['total_portfolio_value'] - cash_balance
     
-    # Get all filled trades for this user to calculate average fill prices
-    # Use user_name-index GSI for efficient query (v2 table schema)
-    trades_response = trades_table.query(
-        IndexName='user_name-index',
-        KeyConditionExpression='user_name = :user',
-        FilterExpression='filled_count > :zero',
-        ExpressionAttributeValues={
-            ':user': user_name,
-            ':zero': 0
-        }
-    )
+    logger.info(f"🔍 POSITION COUNT - Layer returned {len(api_positions)} positions for {user_name}")
+    logger.info(f"🔍 LAYER TICKERS: {sorted(list(api_positions.keys()))}")
     
-    # Calculate average fill price per ticker (v2 uses market_ticker field)
-    fill_prices = {}
-    for trade in trades_response.get('Items', []):
-        ticker = trade.get('market_ticker')  # v2 schema uses market_ticker
-        filled_count = int(trade.get('filled_count', 0))
-        avg_fill_price = float(trade.get('avg_fill_price', 0))
+    # STEP 2: Get fill price history from trades table
+    try:
+        trades_response = trades_table.query(
+            IndexName='user_name-index',
+            KeyConditionExpression='user_name = :user',
+            FilterExpression='filled_count > :zero',
+            ExpressionAttributeValues={
+                ':user': user_name,
+                ':zero': 0
+            }
+        )
         
-        if ticker and filled_count > 0 and avg_fill_price > 0:
-            if ticker not in fill_prices:
-                fill_prices[ticker] = {'total_contracts': 0, 'total_cost': 0}
-            fill_prices[ticker]['total_contracts'] += filled_count
-            fill_prices[ticker]['total_cost'] += filled_count * avg_fill_price
+        # Calculate average fill price per ticker
+        fill_prices = {}
+        for trade in trades_response.get('Items', []):
+            ticker = trade.get('market_ticker')
+            filled_count = int(trade.get('filled_count', 0))
+            avg_fill_price = float(trade.get('avg_fill_price', 0))
+            
+            if ticker and filled_count > 0 and avg_fill_price > 0:
+                if ticker not in fill_prices:
+                    fill_prices[ticker] = {'total_contracts': 0, 'total_cost': 0}
+                fill_prices[ticker]['total_contracts'] += filled_count
+                fill_prices[ticker]['total_cost'] += filled_count * avg_fill_price
+        
+        # Calculate weighted average
+        for ticker in fill_prices:
+            if fill_prices[ticker]['total_contracts'] > 0:
+                fill_prices[ticker] = fill_prices[ticker]['total_cost'] / fill_prices[ticker]['total_contracts']
+            else:
+                fill_prices[ticker] = 0
+        
+        logger.info(f"Calculated fill prices for {len(fill_prices)} tickers from trades history")
+        
+    except Exception as e:
+        logger.warning(f"Failed to fetch fill prices for {user_name}: {e}")
+        fill_prices = {}
     
-    # Calculate weighted average
-    for ticker in fill_prices:
-        if fill_prices[ticker]['total_contracts'] > 0:
-            fill_prices[ticker] = fill_prices[ticker]['total_cost'] / fill_prices[ticker]['total_contracts']
-        else:
-            fill_prices[ticker] = 0
-    
-    # Calculate current values
-    total_position_value = 0
+    # STEP 3: Enrich positions with market metadata and fill prices
     position_details = []
     
-    for pos in positions:
-        ticker = pos['ticker']
-        contracts = pos['position']
+    for ticker, position_data in api_positions.items():
+        contracts = position_data['position']
+        market_value = position_data['market_value']
+        current_price = position_data['current_price']
         
-        # Get current market price and title
+        # Get market metadata for titles and context
         try:
             market_response = market_metadata_table.get_item(Key={'market_ticker': ticker})
             market = market_response.get('Item', {})
-            
-            # For closed markets, use last_price; for active markets, use bid
-            market_status = market.get('status', 'active')
-            if market_status == 'closed':
-                last_price = float(market.get('last_price_dollars', 0))
-                if contracts > 0:  # YES position
-                    current_price = last_price
-                else:  # NO position - inverse of last YES price
-                    current_price = 1 - last_price
-            else:
-                if contracts > 0:  # YES position
-                    current_price = market.get('yes_bid_dollars', 0)
-                else:  # NO position
-                    current_price = market.get('no_bid_dollars', 0)
-            
-            position_value = abs(contracts) * current_price
-            total_position_value += position_value
             
             # Combine event and market titles
             event_title = market.get('event_title', '')
             market_title = market.get('market_title', market.get('title', ''))
             full_title = f"{event_title}: {market_title}" if event_title and market_title else (market_title or event_title or ticker)
             
-            # Get fill price for this ticker
-            fill_price = fill_prices.get(ticker, 0)
-            
             position_details.append({
                 'ticker': ticker,
                 'contracts': int(contracts),
                 'side': 'yes' if contracts > 0 else 'no',
-                'fill_price': float(fill_price) if fill_price > 0 else None,
+                'fill_price': float(fill_prices.get(ticker, 0)) if fill_prices.get(ticker) else None,
                 'current_price': float(current_price),
-                'market_value': float(position_value),
+                'market_value': float(market_value),
                 'market_title': full_title,
                 'close_time': market.get('close_time', ''),
                 'event_ticker': market.get('event_ticker', ''),
                 'series_ticker': market.get('series_ticker', '')
             })
+            
         except Exception as e:
-            print(f"Error getting market data for {ticker}: {e}")
-            fill_price = fill_prices.get(ticker, 0)
+            logger.warning(f"Failed to get metadata for {ticker}: {e}")
+            # Use API data only
             position_details.append({
                 'ticker': ticker,
                 'contracts': int(contracts),
                 'side': 'yes' if contracts > 0 else 'no',
-                'fill_price': float(fill_price) if fill_price > 0 else None,
-                'current_price': 0,
-                'market_value': 0,
+                'fill_price': float(fill_prices.get(ticker, 0)) if fill_prices.get(ticker) else None,
+                'current_price': float(current_price),
+                'market_value': float(market_value),
                 'market_title': ticker,
                 'close_time': '',
                 'event_ticker': '',
                 'series_ticker': ''
             })
     
+    logger.info(f"🔍 POSITION COUNT - After enrichment loop: {len(position_details)} positions")
+    logger.info(f"🔍 ENRICHED TICKERS: {sorted([p['ticker'] for p in position_details])}")
+    
     # Sort by market value descending
     position_details.sort(key=lambda x: x['market_value'], reverse=True)
+    
+    logger.info(f"🔍 POSITION COUNT - Returning {len(position_details)} positions to client for {user_name}")
+    logger.info(f"Portfolio complete for {user_name}: {len(position_details)} positions, total value: ${cash_balance + total_position_value:.2f}")
     
     return {
         'user_name': user_name,
         'cash_balance': cash_balance,
-        'position_count': len(positions),
+        'position_count': len(position_details),
         'total_position_value': float(total_position_value),
-        'positions': position_details
+        'positions': position_details,
+        'data_source': 'api_with_enrichment',  # Indicate data freshness
+        'fetched_at': portfolio_api.get('fetched_at')
     }
+
 
 def get_portfolio_history(api_key_id: str, period: str = '24h') -> List[Dict[str, Any]]:
     """Get portfolio snapshot history with downsampling"""

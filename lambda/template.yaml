@@ -20,6 +20,11 @@ Parameters:
     Type: String
     Description: ARN of the Cognito User Pool for authentication
     Default: 'arn:aws:cognito-idp:us-east-1:355149669325:userpool/us-east-1_WEozUeojc'
+  
+  PortfolioFetcherLayerArn:
+    Type: String
+    Description: ARN of the PortfolioFetcherLayer from kalshi-market-capture stack
+    Default: ''  # Will be populated during deployment
 
 Resources:
   # API Gateway
@@ -85,6 +90,12 @@ Resources:
         ProvisionedConcurrentExecutions: 1
       Layers:
         - !Ref SharedCodeLayer
+        - !Ref PortfolioFetcherLayerArn
+      Environment:
+        Variables:
+          RATE_LIMITER_TABLE_NAME: production-kalshi-rate-limiter
+          USER_SECRET_PREFIX: production/kalshi/users
+          KALSHI_API_BASE_URL: https://api.elections.kalshi.com
       Policies:
         - DynamoDBReadPolicy:
             TableName: production-kalshi-market-positions
@@ -94,6 +105,8 @@ Resources:
             TableName: production-kalshi-market-metadata
         - DynamoDBReadPolicy:
             TableName: production-kalshi-trades-v2
+        - DynamoDBCrudPolicy:
+            TableName: production-kalshi-rate-limiter
         - Statement:
             - Effect: Allow
               Action:

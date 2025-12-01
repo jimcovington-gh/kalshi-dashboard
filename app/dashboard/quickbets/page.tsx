@@ -95,8 +95,22 @@ export default function QuickBetsPage() {
     }
   }, [logs]);
 
-  const connectWebSocket = useCallback(() => {
+  const connectWebSocket = useCallback(async () => {
     if (!session) return;
+
+    // Get fresh auth token
+    let authToken: string;
+    try {
+      const authSession = await fetchAuthSession();
+      if (!authSession.tokens?.idToken) {
+        addLog('Not authenticated', 'error');
+        return;
+      }
+      authToken = authSession.tokens.idToken.toString();
+    } catch (e) {
+      addLog('Failed to get auth token', 'error');
+      return;
+    }
 
     // Use WebSocket URL from session (NLB with valid TLS)
     const wsUrl = session.websocket_url;
@@ -109,15 +123,63 @@ export default function QuickBetsPage() {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        setConnected(true);
-        setConnecting(false);
-        addLog('Connected to QuickBets server!', 'success');
+        addLog('WebSocket connected, sending auth...', 'info');
+        // Send auth message immediately
+        ws.send(JSON.stringify({
+          type: 'auth',
+          token: authToken
+        }));
       };
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          handleMessage(data);
+          const msgType = data.type || data.event;
+          
+          // Handle auth success
+          if (msgType === 'auth_success') {
+            setConnected(true);
+            setConnecting(false);
+            addLog(`Authenticated as ${data.user}`, 'success');
+            return;
+          }
+          
+          // Handle other message types
+          switch (msgType) {
+            case 'prices':
+              if (data.data) {
+                setPrices(data.data);
+                const teams = Object.keys(data.data);
+                if (teams.length > 0) {
+                  addLog(`Price update: ${teams.map(t => `${t}=${data.data[t]?.best_ask || '--'}¢`).join(', ')}`, 'price');
+                }
+              }
+              break;
+
+            case 'buy_result':
+              if (data.success) {
+                addLog(`✅ BUY SUCCESS: ${data.team} @ ${data.avg_price}¢ x${data.filled_count}`, 'success');
+              } else {
+                addLog(`❌ BUY FAILED: ${data.error}`, 'error');
+              }
+              break;
+
+            case 'sell_result':
+              const pnl = data.net_pnl >= 0 ? `+${data.net_pnl}` : data.net_pnl;
+              addLog(`💰 SELL: ${data.team} @ ${data.avg_price}¢, P&L: ${pnl}¢`, 'success');
+              break;
+
+            case 'pong':
+              // Heartbeat response, ignore
+              break;
+
+            case 'error':
+              addLog(`Error: ${data.message || data.error}`, 'error');
+              break;
+
+            default:
+              addLog(`Message: ${JSON.stringify(data)}`, 'info');
+          }
         } catch (e) {
           addLog(`Raw message: ${event.data}`, 'info');
         }

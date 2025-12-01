@@ -135,6 +135,21 @@ npm run dev
 
 ### Step 6: Deploy Frontend to AWS Amplify
 
+**IMPORTANT:** The dashboard is hosted on AWS Amplify. Any changes to the frontend code (pages, components, styles) must be committed and pushed to Git to trigger a deployment. Changes will NOT be visible to users until deployed.
+
+```bash
+# After making changes to dashboard code:
+git add .
+git commit -m "Description of changes"
+git push origin main
+
+# Amplify will automatically detect the push and deploy
+# Monitor deployment at: https://console.aws.amazon.com/amplify/
+# Or check: aws amplify list-jobs --app-id d1uumqiqpqm7bm --branch-name main
+```
+
+To deploy manually:
+
 ```bash
 # Install Amplify CLI
 npm install -g @aws-amplify/cli

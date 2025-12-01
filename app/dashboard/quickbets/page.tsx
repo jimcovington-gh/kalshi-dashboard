@@ -60,7 +60,7 @@ export default function QuickBetsPage() {
           'https://5uthw49k2c.execute-api.us-east-1.amazonaws.com/prod/sessions',
           {
             headers: {
-              'Authorization': `Bearer ${authSession.tokens.idToken.toString()}`,
+              'Authorization': authSession.tokens.idToken.toString(),
             },
           }
         );

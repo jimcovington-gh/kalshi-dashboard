@@ -252,7 +252,7 @@ export default function QuickBetsPage() {
 
     addLog(`Sending BUY for ${team}...`);
     wsRef.current.send(JSON.stringify({
-      action: 'buy',
+      type: 'buy',
       team: team
     }));
   }, [addLog]);

@@ -98,7 +98,7 @@ export default function QuickBetsPage() {
   const connectWebSocket = useCallback(() => {
     if (!session) return;
 
-    // Use wss:// - Fargate now has self-signed TLS
+    // Use WebSocket URL from session (NLB with valid TLS)
     const wsUrl = session.websocket_url;
     
     setConnecting(true);

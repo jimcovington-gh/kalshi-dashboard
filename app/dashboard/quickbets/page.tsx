@@ -149,7 +149,8 @@ export default function QuickBetsPage() {
             case 'prices':
               if (data.data) {
                 setPrices(data.data);
-                const teams = Object.keys(data.data);
+                // Filter out metadata keys like 'updated_at'
+                const teams = Object.keys(data.data).filter(k => k !== 'updated_at');
                 if (teams.length > 0) {
                   addLog(`Price update: ${teams.map(t => `${t}=${data.data[t]?.best_ask || '--'}¢`).join(', ')}`, 'price');
                 }
@@ -256,7 +257,8 @@ export default function QuickBetsPage() {
     }));
   }, [addLog]);
 
-  const teams = Object.keys(prices);
+  // Filter out metadata keys from prices to get actual teams
+  const teams = Object.keys(prices).filter(k => k !== 'updated_at');
 
   if (isLoading) {
     return (

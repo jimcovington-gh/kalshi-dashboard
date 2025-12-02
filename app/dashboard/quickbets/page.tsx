@@ -9,6 +9,7 @@ interface AvailableEvent {
   title: string;
   series_ticker: string;
   close_time: string;
+  event_time: string;
   status: string;
 }
 
@@ -374,6 +375,8 @@ export default function QuickBetsPage() {
                       <div className="flex-1">
                         <div className="font-bold">{event.title || event.event_ticker}</div>
                         <div className="text-sm text-gray-400">
+                          {event.event_time && <span className="text-cyan-400">{event.event_time}</span>}
+                          {event.event_time && event.series_ticker && <span className="mx-2">•</span>}
                           {event.series_ticker}
                         </div>
                       </div>

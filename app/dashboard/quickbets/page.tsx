@@ -105,11 +105,12 @@ export default function QuickBetsPage() {
         const data = await response.json();
         addLog(`Server ${data.status}: ${data.message}`, 'success');
         
-        // Connect to WebSocket
+        // Connect to WebSocket with token
         const wsUrl = data.websocket_url;
         addLog(`Connecting to ${wsUrl}...`);
         
-        connectWebSocket(wsUrl);
+        // Pass token directly to avoid ref timing issues
+        connectWebSocket(wsUrl, authTokenRef.current);
         
       } catch (err: any) {
         console.error('Error launching:', err);
@@ -129,8 +130,9 @@ export default function QuickBetsPage() {
     };
   }, [router, addLog]);
 
-  const connectWebSocket = useCallback((wsUrl: string) => {
+  const connectWebSocket = useCallback((wsUrl: string, token: string) => {
     try {
+      addLog(`Token length: ${token?.length || 0}`, 'info');
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -138,7 +140,7 @@ export default function QuickBetsPage() {
         addLog('WebSocket connected, authenticating...', 'info');
         ws.send(JSON.stringify({
           type: 'auth',
-          token: authTokenRef.current
+          token: token
         }));
       };
 
@@ -202,7 +204,7 @@ export default function QuickBetsPage() {
           wsRef.current.close();
         }
         // Connect to the direct IP WebSocket
-        connectWebSocket(data.websocket_url);
+        connectWebSocket(data.websocket_url, authTokenRef.current);
         break;
       
       case 'prices':

@@ -8,14 +8,14 @@ interface AvailableEvent {
   event_ticker: string;
   title: string;
   series_ticker: string;
-  start_date: string | null;
+  close_time: string;
   status: string;
 }
 
 interface UserSession {
   event_ticker: string;
+  title: string;
   websocket_url: string;
-  fargate_public_ip: string;
   started_at: number;
 }
 
@@ -34,20 +34,20 @@ interface LogEntry {
   type: 'info' | 'success' | 'error' | 'price';
 }
 
-type PageState = 'launching' | 'lobby' | 'event';
+type PageState = 'loading' | 'lobby' | 'launching' | 'trading';
 
 const API_BASE = 'https://5uthw49k2c.execute-api.us-east-1.amazonaws.com/prod';
 
 export default function QuickBetsPage() {
   // Page state
-  const [pageState, setPageState] = useState<PageState>('launching');
+  const [pageState, setPageState] = useState<PageState>('loading');
   const [error, setError] = useState('');
   
   // Lobby state
   const [availableEvents, setAvailableEvents] = useState<AvailableEvent[]>([]);
   const [userSessions, setUserSessions] = useState<UserSession[]>([]);
   
-  // Event mode state
+  // Trading state
   const [eventTicker, setEventTicker] = useState<string>('');
   const [connected, setConnected] = useState(false);
   const [prices, setPrices] = useState<TeamPrices>({});
@@ -56,9 +56,9 @@ export default function QuickBetsPage() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logContainerRef = useRef<HTMLDivElement>(null);
   
-  // WebSocket
+  // Auth & WebSocket
+  const [authToken, setAuthToken] = useState<string>('');
   const wsRef = useRef<WebSocket | null>(null);
-  const authTokenRef = useRef<string>('');
   
   const router = useRouter();
 
@@ -74,9 +74,9 @@ export default function QuickBetsPage() {
     }
   }, [logs]);
 
-  // Launch Fargate on page load
+  // Fetch events on page load (Lambda-based lobby)
   useEffect(() => {
-    async function launchAndConnect() {
+    async function loadLobby() {
       try {
         // Get auth token
         const authSession = await fetchAuthSession();
@@ -84,43 +84,42 @@ export default function QuickBetsPage() {
           router.push('/');
           return;
         }
-        authTokenRef.current = authSession.tokens.idToken.toString();
+        const token = authSession.tokens.idToken.toString();
+        setAuthToken(token);
         
-        addLog('Launching QuickBets server...');
+        addLog('Loading available events...');
         
-        // Call launch API
-        const response = await fetch(`${API_BASE}/launch`, {
-          method: 'POST',
+        // Fetch events from Lambda
+        const response = await fetch(`${API_BASE}/events`, {
           headers: {
-            'Authorization': authTokenRef.current,
-            'Content-Type': 'application/json',
+            'Authorization': token,
           },
         });
 
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || 'Failed to launch server');
+          throw new Error('Failed to fetch events');
         }
 
         const data = await response.json();
-        addLog(`Server ${data.status}: ${data.message}`, 'success');
+        setAvailableEvents(data.available_events || []);
+        setUserSessions(data.user_sessions || []);
         
-        // Connect to WebSocket with token
-        const wsUrl = data.websocket_url;
-        addLog(`Connecting to ${wsUrl}...`);
+        addLog(`Found ${data.available_events?.length || 0} available events`, 'success');
+        if (data.user_sessions?.length > 0) {
+          addLog(`You have ${data.user_sessions.length} active session(s)`, 'info');
+        }
         
-        // Pass token directly to avoid ref timing issues
-        connectWebSocket(wsUrl, authTokenRef.current);
+        setPageState('lobby');
         
       } catch (err: any) {
-        console.error('Error launching:', err);
+        console.error('Error loading lobby:', err);
         setError(err.message);
         addLog(`Error: ${err.message}`, 'error');
-        setPageState('lobby'); // Show error state
+        setPageState('lobby');
       }
     }
 
-    launchAndConnect();
+    loadLobby();
     
     // Cleanup on unmount
     return () => {
@@ -130,9 +129,61 @@ export default function QuickBetsPage() {
     };
   }, [router, addLog]);
 
+  // Launch Fargate for selected event
+  const launchEvent = useCallback(async (selectedEvent: string) => {
+    if (!authToken) {
+      addLog('Not authenticated', 'error');
+      return;
+    }
+    
+    setPageState('launching');
+    setEventTicker(selectedEvent);
+    addLog(`Launching server for ${selectedEvent}...`);
+    
+    try {
+      const response = await fetch(`${API_BASE}/launch`, {
+        method: 'POST',
+        headers: {
+          'Authorization': authToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ event_ticker: selectedEvent }),
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to launch server');
+      }
+      
+      addLog(`Server ${data.status}: ${data.message}`, 'success');
+      
+      // Connect to WebSocket
+      const wsUrl = data.websocket_url;
+      addLog(`Connecting to ${wsUrl}...`);
+      
+      connectWebSocket(wsUrl, authToken);
+      
+    } catch (err: any) {
+      console.error('Error launching:', err);
+      setError(err.message);
+      addLog(`Error: ${err.message}`, 'error');
+      setPageState('lobby');
+    }
+  }, [authToken, addLog]);
+
+  // Reconnect to existing session
+  const reconnectSession = useCallback(async (session: UserSession) => {
+    setPageState('launching');
+    setEventTicker(session.event_ticker);
+    addLog(`Reconnecting to ${session.event_ticker}...`);
+    
+    const wsUrl = session.websocket_url;
+    connectWebSocket(wsUrl, authToken);
+  }, [authToken, addLog]);
+
   const connectWebSocket = useCallback((wsUrl: string, token: string) => {
     try {
-      addLog(`Token length: ${token?.length || 0}`, 'info');
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -165,6 +216,7 @@ export default function QuickBetsPage() {
 
     } catch (e: any) {
       addLog(`Connection failed: ${e.message}`, 'error');
+      setPageState('lobby');
     }
   }, [addLog]);
 
@@ -174,37 +226,8 @@ export default function QuickBetsPage() {
     switch (msgType) {
       case 'auth_success':
         setConnected(true);
+        setPageState('trading');
         addLog(`Authenticated as ${data.user}`, 'success');
-        
-        // Check if we're in lobby mode
-        if (data.lobby_mode) {
-          addLog('Entering lobby mode - select an event', 'info');
-          setPageState('lobby');
-        }
-        break;
-      
-      case 'events':
-        // Received available events from lobby
-        setAvailableEvents(data.available_events || []);
-        setUserSessions(data.your_sessions || []);
-        addLog(`Found ${data.available_events?.length || 0} events, ${data.your_sessions?.length || 0} active sessions`, 'info');
-        break;
-      
-      case 'event_mode_started':
-        // Transitioned to event mode
-        setEventTicker(data.event_ticker);
-        setPageState('event');
-        addLog(`Event mode started: ${data.event_ticker}`, 'success');
-        break;
-      
-      case 'redirect':
-        // Redirect to existing session
-        addLog(`Redirecting to existing session...`, 'info');
-        if (wsRef.current) {
-          wsRef.current.close();
-        }
-        // Connect to the direct IP WebSocket
-        connectWebSocket(data.websocket_url, authTokenRef.current);
         break;
       
       case 'prices':
@@ -231,7 +254,6 @@ export default function QuickBetsPage() {
         break;
 
       case 'pong':
-        // Heartbeat response, ignore
         break;
 
       case 'error':
@@ -241,32 +263,6 @@ export default function QuickBetsPage() {
       default:
         addLog(`Message: ${JSON.stringify(data)}`, 'info');
     }
-  }, [addLog, connectWebSocket]);
-
-  const selectEvent = useCallback((eventTicker: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      addLog('Not connected!', 'error');
-      return;
-    }
-
-    addLog(`Selecting event: ${eventTicker}...`);
-    wsRef.current.send(JSON.stringify({
-      type: 'select_event',
-      event_ticker: eventTicker
-    }));
-  }, [addLog]);
-
-  const reconnectToSession = useCallback((session: UserSession) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      addLog('Not connected!', 'error');
-      return;
-    }
-
-    addLog(`Reconnecting to ${session.event_ticker}...`);
-    wsRef.current.send(JSON.stringify({
-      type: 'reconnect',
-      target_ip: session.fargate_public_ip
-    }));
   }, [addLog]);
 
   const sendBuy = useCallback((team: string) => {
@@ -282,10 +278,21 @@ export default function QuickBetsPage() {
     }));
   }, [addLog]);
 
+  const backToLobby = useCallback(() => {
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
+    setConnected(false);
+    setEventTicker('');
+    setPrices({});
+    setPageState('loading');
+    // Re-fetch events
+    window.location.reload();
+  }, []);
+
   // Filter teams from prices
   const teams = Object.keys(prices).filter(k => k !== 'updated_at');
 
-  // Render based on page state
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6">
       <div className="max-w-4xl mx-auto">
@@ -294,32 +301,34 @@ export default function QuickBetsPage() {
         {error && (
           <div className="bg-red-900/50 border border-red-500 text-red-200 px-4 py-3 rounded-lg mb-4">
             {error}
+            <button onClick={() => setError('')} className="float-right text-red-400 hover:text-red-200">×</button>
           </div>
         )}
 
-        {/* Connection Status */}
+        {/* Status Bar */}
         <div className={`px-4 py-3 rounded-lg mb-6 font-medium ${
-          connected 
+          pageState === 'trading' && connected
             ? 'bg-green-900/50 border border-green-500 text-green-200' 
-            : 'bg-yellow-900/50 border border-yellow-500 text-yellow-200'
+            : pageState === 'launching'
+            ? 'bg-yellow-900/50 border border-yellow-500 text-yellow-200'
+            : 'bg-gray-800 border border-gray-600 text-gray-300'
         }`}>
-          {pageState === 'launching' && 'Starting QuickBets server...'}
-          {pageState === 'lobby' && connected && 'Select an event to start trading'}
-          {pageState === 'event' && `Trading: ${eventTicker}`}
-          {!connected && pageState !== 'launching' && 'Disconnected'}
+          {pageState === 'loading' && 'Loading events...'}
+          {pageState === 'lobby' && 'Select an event to start trading'}
+          {pageState === 'launching' && `Launching server for ${eventTicker}...`}
+          {pageState === 'trading' && connected && `Trading: ${eventTicker}`}
         </div>
 
-        {/* LAUNCHING STATE */}
-        {pageState === 'launching' && (
+        {/* LOADING STATE */}
+        {pageState === 'loading' && (
           <div className="bg-gray-800 rounded-xl p-12 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-400 mx-auto mb-4"></div>
-            <p className="text-gray-400">Launching QuickBets server...</p>
-            <p className="text-gray-500 text-sm mt-2">This may take 15-20 seconds</p>
+            <p className="text-gray-400">Loading available events...</p>
           </div>
         )}
 
-        {/* LOBBY STATE - Event Selection */}
-        {pageState === 'lobby' && connected && (
+        {/* LOBBY STATE */}
+        {pageState === 'lobby' && (
           <div className="space-y-6">
             {/* Your Active Sessions */}
             {userSessions.length > 0 && (
@@ -332,13 +341,13 @@ export default function QuickBetsPage() {
                       className="flex items-center justify-between bg-gray-700 rounded-lg p-4"
                     >
                       <div>
-                        <div className="font-mono font-bold">{session.event_ticker}</div>
+                        <div className="font-bold">{session.title || session.event_ticker}</div>
                         <div className="text-sm text-gray-400">
                           Started {new Date(session.started_at * 1000).toLocaleTimeString()}
                         </div>
                       </div>
                       <button
-                        onClick={() => reconnectToSession(session)}
+                        onClick={() => reconnectSession(session)}
                         className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg font-medium transition-colors"
                       >
                         Reconnect
@@ -357,47 +366,42 @@ export default function QuickBetsPage() {
                 <p className="text-gray-400 text-center py-8">No live events available right now</p>
               ) : (
                 <div className="space-y-3">
-                  {availableEvents.map((event) => {
-                    const startTime = event.start_date 
-                      ? new Date(event.start_date).toLocaleString() 
-                      : 'TBD';
-                    const isLive = event.status === 'in_progress';
-                    
-                    return (
-                      <div 
-                        key={event.event_ticker}
-                        className="flex items-center justify-between bg-gray-700 rounded-lg p-4 hover:bg-gray-600 transition-colors"
-                      >
-                        <div className="flex-1">
-                          <div className="font-bold flex items-center gap-2">
-                            {event.title || event.event_ticker}
-                            {isLive && (
-                              <span className="px-2 py-0.5 bg-red-600 text-white text-xs rounded-full animate-pulse">
-                                LIVE
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-sm text-gray-400">
-                            {event.series_ticker} • {startTime}
-                          </div>
+                  {availableEvents.map((event) => (
+                    <div 
+                      key={event.event_ticker}
+                      className="flex items-center justify-between bg-gray-700 rounded-lg p-4 hover:bg-gray-600 transition-colors"
+                    >
+                      <div className="flex-1">
+                        <div className="font-bold">{event.title || event.event_ticker}</div>
+                        <div className="text-sm text-gray-400">
+                          {event.series_ticker}
                         </div>
-                        <button
-                          onClick={() => selectEvent(event.event_ticker)}
-                          className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg font-medium transition-colors"
-                        >
-                          Select
-                        </button>
                       </div>
-                    );
-                  })}
+                      <button
+                        onClick={() => launchEvent(event.event_ticker)}
+                        className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg font-medium transition-colors"
+                      >
+                        Select
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* EVENT STATE - Trading UI */}
-        {pageState === 'event' && connected && (
+        {/* LAUNCHING STATE */}
+        {pageState === 'launching' && (
+          <div className="bg-gray-800 rounded-xl p-12 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-400 mx-auto mb-4"></div>
+            <p className="text-gray-400">Launching server for {eventTicker}...</p>
+            <p className="text-gray-500 text-sm mt-2">This may take 20-30 seconds</p>
+          </div>
+        )}
+
+        {/* TRADING STATE */}
+        {pageState === 'trading' && connected && (
           <>
             {/* Event Info */}
             <div className="bg-gray-800 rounded-xl p-4 mb-6">
@@ -406,7 +410,15 @@ export default function QuickBetsPage() {
                   <span className="text-gray-400">Event:</span>
                   <span className="ml-2 font-mono font-bold">{eventTicker}</span>
                 </div>
-                <span className="px-3 py-1 bg-green-600 rounded-full text-sm">Connected</span>
+                <div className="flex items-center gap-4">
+                  <span className="px-3 py-1 bg-green-600 rounded-full text-sm">Connected</span>
+                  <button
+                    onClick={backToLobby}
+                    className="px-3 py-1 bg-gray-600 hover:bg-gray-500 rounded-lg text-sm"
+                  >
+                    ← Back
+                  </button>
+                </div>
               </div>
             </div>
 

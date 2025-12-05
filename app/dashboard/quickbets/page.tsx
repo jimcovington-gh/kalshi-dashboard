@@ -60,6 +60,10 @@ export default function QuickBetsPage() {
   // Auth & WebSocket
   const [authToken, setAuthToken] = useState<string>('');
   const wsRef = useRef<WebSocket | null>(null);
+  const wsRetryCount = useRef(0);
+  const wsRetryTimeout = useRef<NodeJS.Timeout | null>(null);
+  const currentWsUrl = useRef<string>('');
+  const isLaunching = useRef(false);
   
   const router = useRouter();
 
@@ -133,6 +137,9 @@ export default function QuickBetsPage() {
       if (wakeLockRef.current) {
         wakeLockRef.current.release();
       }
+      if (wsRetryTimeout.current) {
+        clearTimeout(wsRetryTimeout.current);
+      }
     };
   }, [router, addLog]);
 
@@ -144,8 +151,17 @@ export default function QuickBetsPage() {
     }
     
     setPageState('launching');
+    isLaunching.current = true;
     setEventTicker(selectedEvent);
     addLog(`Launching server for ${selectedEvent}...`);
+    
+    // Request wake lock immediately to prevent screen sleep during launch
+    if ('wakeLock' in navigator) {
+      navigator.wakeLock.request('screen').then(lock => {
+        wakeLockRef.current = lock;
+        addLog('Screen wake lock acquired', 'info');
+      }).catch(() => {});
+    }
     
     try {
       const response = await fetch(`${API_BASE}/launch`, {
@@ -189,12 +205,20 @@ export default function QuickBetsPage() {
     connectWebSocket(wsUrl, authToken);
   }, [authToken, addLog]);
 
-  const connectWebSocket = useCallback((wsUrl: string, token: string) => {
+  const connectWebSocket = useCallback((wsUrl: string, token: string, isRetry = false) => {
+    // Store for retries
+    currentWsUrl.current = wsUrl;
+    
+    if (!isRetry) {
+      wsRetryCount.current = 0;
+    }
+    
     try {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
+        wsRetryCount.current = 0; // Reset on successful connect
         addLog('WebSocket connected, authenticating...', 'info');
         ws.send(JSON.stringify({
           type: 'auth',
@@ -213,12 +237,23 @@ export default function QuickBetsPage() {
 
       ws.onclose = (event) => {
         setConnected(false);
-        addLog(`Disconnected (code: ${event.code})`, 'error');
         wsRef.current = null;
+        
+        // Auto-retry if we're still launching and haven't connected yet
+        if (isLaunching.current && wsRetryCount.current < 20) {
+          wsRetryCount.current++;
+          const delay = Math.min(2000, 500 + wsRetryCount.current * 200);
+          addLog(`Retrying connection (${wsRetryCount.current}/20)...`, 'info');
+          wsRetryTimeout.current = setTimeout(() => {
+            connectWebSocket(currentWsUrl.current, token, true);
+          }, delay);
+        } else if (!isLaunching.current) {
+          addLog(`Disconnected (code: ${event.code})`, 'error');
+        }
       };
 
       ws.onerror = () => {
-        addLog('WebSocket error', 'error');
+        // Error will trigger onclose, which handles retry
       };
 
     } catch (e: any) {
@@ -234,14 +269,8 @@ export default function QuickBetsPage() {
       case 'auth_success':
         setConnected(true);
         setPageState('trading');
+        isLaunching.current = false;
         addLog(`Authenticated as ${data.user}`, 'success');
-        // Request wake lock to prevent screen sleep
-        if ('wakeLock' in navigator) {
-          navigator.wakeLock.request('screen').then(lock => {
-            wakeLockRef.current = lock;
-            addLog('Screen wake lock acquired', 'info');
-          }).catch(() => {});
-        }
         break;
       
       case 'prices':
@@ -296,11 +325,17 @@ export default function QuickBetsPage() {
     if (wsRef.current) {
       wsRef.current.close();
     }
+    if (wsRetryTimeout.current) {
+      clearTimeout(wsRetryTimeout.current);
+      wsRetryTimeout.current = null;
+    }
     // Release wake lock
     if (wakeLockRef.current) {
       wakeLockRef.current.release();
       wakeLockRef.current = null;
     }
+    wsRetryCount.current = 0;
+    isLaunching.current = false;
     setConnected(false);
     setEventTicker('');
     setPrices({});
@@ -423,16 +458,6 @@ export default function QuickBetsPage() {
         {/* TRADING STATE */}
         {pageState === 'trading' && connected && (
           <>
-            {/* Back button */}
-            <div className="mb-4">
-              <button
-                onClick={backToLobby}
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-gray-300"
-              >
-                ← Back to Events
-              </button>
-            </div>
-            
             {/* Team Cards */}
             <div className="grid grid-cols-2 gap-6 mb-6">
               {teams.length > 0 ? (

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getCurrentUser, fetchAuthSession, signOut } from 'aws-amplify/auth';
+import { fetchAuthSession, signOut } from 'aws-amplify/auth';
 import { isAdmin } from '@/lib/api';
 import Link from 'next/link';
 
@@ -22,8 +22,12 @@ export default function DashboardLayout({
 
   async function checkAuth() {
     try {
-      const currentUser = await getCurrentUser();
-      setUser(currentUser.username);
+      const session = await fetchAuthSession();
+      // Use preferred_username (the trading system user_name) if available, otherwise fall back to email prefix
+      const preferredUsername = session.tokens?.idToken?.payload['preferred_username'] as string;
+      const email = session.tokens?.idToken?.payload['email'] as string;
+      const displayName = preferredUsername || (email ? email.split('@')[0] : 'User');
+      setUser(displayName);
       const adminStatus = await isAdmin();
       setIsAdminUser(adminStatus);
       setIsLoading(false);
@@ -67,16 +71,16 @@ export default function DashboardLayout({
                   Portfolio
                 </Link>
                 <Link
-                  href="/dashboard/trades"
-                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100"
-                >
-                  Trades
-                </Link>
-                <Link
                   href="/dashboard/analytics"
                   className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100"
                 >
                   Analytics
+                </Link>
+                <Link
+                  href="/dashboard/quickbets"
+                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-green-600 hover:text-green-800 hover:bg-green-50"
+                >
+                  QuickBets
                 </Link>
                 {isAdminUser && (
                   <Link

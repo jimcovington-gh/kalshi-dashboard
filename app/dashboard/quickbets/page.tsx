@@ -429,9 +429,9 @@ export default function QuickBetsPage() {
                       <div className="flex-1">
                         <div className="font-bold">{event.title || event.event_ticker}</div>
                         <div className="text-sm text-gray-400">
+                          <span className="text-gray-300">{event.event_ticker}</span>
+                          {event.event_time && <span className="mx-2">•</span>}
                           {event.event_time && <span className="text-cyan-400">{event.event_time}</span>}
-                          {event.event_time && event.series_ticker && <span className="mx-2">•</span>}
-                          {event.series_ticker}
                         </div>
                       </div>
                       <button

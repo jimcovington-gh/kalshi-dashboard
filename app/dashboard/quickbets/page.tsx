@@ -415,7 +415,7 @@ export default function QuickBetsPage() {
 
             {/* Available Events */}
             <div className="bg-gray-800 rounded-xl p-6">
-              <h2 className="text-lg font-semibold mb-4">🏈 Select an Event</h2>
+              <h2 className="text-lg font-semibold mb-4">Select an Event</h2>
               
               {availableEvents.length === 0 ? (
                 <p className="text-gray-400 text-center py-8">No live events available right now</p>

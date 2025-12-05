@@ -63,6 +63,9 @@ export default function QuickBetsPage() {
   
   const router = useRouter();
 
+  // Wake Lock to prevent screen sleep (like watching a video)
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+
   const addLog = useCallback((message: string, type: LogEntry['type'] = 'info') => {
     const time = new Date().toLocaleTimeString();
     setLogs(prev => [...prev.slice(-100), { time, message, type }]);
@@ -126,6 +129,9 @@ export default function QuickBetsPage() {
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
+      }
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release();
       }
     };
   }, [router, addLog]);
@@ -229,6 +235,13 @@ export default function QuickBetsPage() {
         setConnected(true);
         setPageState('trading');
         addLog(`Authenticated as ${data.user}`, 'success');
+        // Request wake lock to prevent screen sleep
+        if ('wakeLock' in navigator) {
+          navigator.wakeLock.request('screen').then(lock => {
+            wakeLockRef.current = lock;
+            addLog('Screen wake lock acquired', 'info');
+          }).catch(() => {});
+        }
         break;
       
       case 'prices':
@@ -283,6 +296,11 @@ export default function QuickBetsPage() {
     if (wsRef.current) {
       wsRef.current.close();
     }
+    // Release wake lock
+    if (wakeLockRef.current) {
+      wakeLockRef.current.release();
+      wakeLockRef.current = null;
+    }
     setConnected(false);
     setEventTicker('');
     setPrices({});
@@ -297,7 +315,6 @@ export default function QuickBetsPage() {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold text-cyan-400 mb-2">⚡ QuickBets</h1>
         
         {error && (
           <div className="bg-red-900/50 border border-red-500 text-red-200 px-4 py-3 rounded-lg mb-4">
@@ -406,25 +423,16 @@ export default function QuickBetsPage() {
         {/* TRADING STATE */}
         {pageState === 'trading' && connected && (
           <>
-            {/* Event Info */}
-            <div className="bg-gray-800 rounded-xl p-4 mb-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-gray-400">Event:</span>
-                  <span className="ml-2 font-mono font-bold">{eventTicker}</span>
-                </div>
-                <div className="flex items-center gap-4">
-                  <span className="px-3 py-1 bg-green-600 rounded-full text-sm">Connected</span>
-                  <button
-                    onClick={backToLobby}
-                    className="px-3 py-1 bg-gray-600 hover:bg-gray-500 rounded-lg text-sm"
-                  >
-                    ← Back
-                  </button>
-                </div>
-              </div>
+            {/* Back button */}
+            <div className="mb-4">
+              <button
+                onClick={backToLobby}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-gray-300"
+              >
+                ← Back to Events
+              </button>
             </div>
-
+            
             {/* Team Cards */}
             <div className="grid grid-cols-2 gap-6 mb-6">
               {teams.length > 0 ? (

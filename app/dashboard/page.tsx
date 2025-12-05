@@ -110,21 +110,27 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
       {/* Portfolio Summary */}
       <div className="bg-white rounded-lg shadow p-4 md:p-6">
         <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-3 md:mb-4">Portfolio Overview</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
           <div className="bg-blue-50 p-3 md:p-4 rounded-lg">
             <div className="text-xs md:text-sm text-gray-600">Total Positions</div>
             <div className="text-2xl md:text-3xl font-bold text-blue-600">{portfolio.position_count}</div>
           </div>
           <div className="bg-green-50 p-3 md:p-4 rounded-lg">
-            <div className="text-xs md:text-sm text-gray-600">Total Value</div>
+            <div className="text-xs md:text-sm text-gray-600">Position Value</div>
             <div className="text-2xl md:text-3xl font-bold text-green-600">
               ${portfolio.total_position_value.toFixed(2)}
             </div>
           </div>
+          <div className="bg-yellow-50 p-3 md:p-4 rounded-lg">
+            <div className="text-xs md:text-sm text-gray-600">Cash Balance</div>
+            <div className="text-2xl md:text-3xl font-bold text-yellow-600">
+              ${(portfolio.cash_balance || 0).toFixed(2)}
+            </div>
+          </div>
           <div className="bg-purple-50 p-3 md:p-4 rounded-lg">
-            <div className="text-xs md:text-sm text-gray-600">Average Position</div>
+            <div className="text-xs md:text-sm text-gray-600">Total Value</div>
             <div className="text-2xl md:text-3xl font-bold text-purple-600">
-              ${(portfolio.total_position_value / portfolio.position_count || 0).toFixed(2)}
+              ${((portfolio.cash_balance || 0) + portfolio.total_position_value).toFixed(2)}
             </div>
           </div>
         </div>

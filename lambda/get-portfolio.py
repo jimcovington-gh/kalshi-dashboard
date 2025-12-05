@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Dict, List, Any
 import os
 from datetime import datetime, timezone, timedelta
+from concurrent.futures import ThreadPoolExecutor
 from portfolio_fetcher import fetch_user_portfolio_from_api
 
 # Configure logging
@@ -88,43 +89,48 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
     logger.info(f"🔍 POSITION COUNT - Layer returned {len(api_positions)} positions for {user_name}")
     logger.info(f"🔍 LAYER TICKERS: {sorted(list(api_positions.keys()))}")
     
-    # STEP 2: Get fill price history from trades table
-    try:
-        trades_response = trades_table.query(
-            IndexName='user_name-index',
-            KeyConditionExpression='user_name = :user',
-            FilterExpression='filled_count > :zero',
-            ExpressionAttributeValues={
-                ':user': user_name,
-                ':zero': 0
-            }
-        )
-        
-        # Calculate average fill price per ticker
-        fill_prices = {}
-        for trade in trades_response.get('Items', []):
-            ticker = trade.get('market_ticker')
-            filled_count = int(trade.get('filled_count', 0))
-            avg_fill_price = float(trade.get('avg_fill_price', 0))
+    # STEP 2: Get fill prices by querying each ticker in parallel (avoids pagination issues)
+    def query_ticker_fill_price(ticker: str) -> tuple:
+        """Query fill price for a single ticker using market_ticker-index"""
+        try:
+            response = trades_table.query(
+                IndexName='market_ticker-index',
+                KeyConditionExpression='market_ticker = :ticker',
+                FilterExpression='user_name = :user AND filled_count > :zero',
+                ExpressionAttributeValues={
+                    ':ticker': ticker,
+                    ':user': user_name,
+                    ':zero': 0
+                }
+            )
+            items = response.get('Items', [])
+            if items:
+                total_contracts = sum(int(t.get('filled_count', 0)) for t in items)
+                total_cost = sum(int(t.get('filled_count', 0)) * float(t.get('avg_fill_price', 0)) for t in items)
+                if total_contracts > 0:
+                    return ticker, total_cost / total_contracts
+            return ticker, None
+        except Exception as e:
+            logger.warning(f"Failed to query fill price for {ticker}: {e}")
+            return ticker, None
+    
+    # Query fill prices in parallel (10 workers provides good balance)
+    fill_prices = {}
+    tickers_to_query = list(api_positions.keys())
+    
+    if tickers_to_query:
+        try:
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                results = list(executor.map(query_ticker_fill_price, tickers_to_query))
             
-            if ticker and filled_count > 0 and avg_fill_price > 0:
-                if ticker not in fill_prices:
-                    fill_prices[ticker] = {'total_contracts': 0, 'total_cost': 0}
-                fill_prices[ticker]['total_contracts'] += filled_count
-                fill_prices[ticker]['total_cost'] += filled_count * avg_fill_price
-        
-        # Calculate weighted average
-        for ticker in fill_prices:
-            if fill_prices[ticker]['total_contracts'] > 0:
-                fill_prices[ticker] = fill_prices[ticker]['total_cost'] / fill_prices[ticker]['total_contracts']
-            else:
-                fill_prices[ticker] = 0
-        
-        logger.info(f"Calculated fill prices for {len(fill_prices)} tickers from trades history")
-        
-    except Exception as e:
-        logger.warning(f"Failed to fetch fill prices for {user_name}: {e}")
-        fill_prices = {}
+            for ticker, avg_price in results:
+                if avg_price is not None:
+                    fill_prices[ticker] = avg_price
+            
+            logger.info(f"Calculated fill prices for {len(fill_prices)}/{len(tickers_to_query)} tickers using parallel queries")
+        except Exception as e:
+            logger.warning(f"Failed to fetch fill prices in parallel for {user_name}: {e}")
+            fill_prices = {}
     
     # STEP 3: Enrich positions with market metadata and fill prices
     position_details = []

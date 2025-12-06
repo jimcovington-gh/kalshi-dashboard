@@ -183,10 +183,8 @@ export default function QuickBetsPage() {
       
       addLog(`Server ${data.status}: ${data.message}`, 'success');
       
-      // Connect to WebSocket
+      // Connect to WebSocket - start immediately, retry handles NLB health check delay
       const wsUrl = data.websocket_url;
-      addLog(`Connecting to ${wsUrl}...`);
-      
       connectWebSocket(wsUrl, authToken, selectedEvent);
       
     } catch (err: any) {
@@ -214,6 +212,7 @@ export default function QuickBetsPage() {
     
     if (!isRetry) {
       wsRetryCount.current = 0;
+      addLog(`Connecting to ${wsUrl}...`);
     }
     
     try {
@@ -265,10 +264,13 @@ export default function QuickBetsPage() {
         }
         
         // Auto-retry if we're still launching and haven't connected yet
-        if (isLaunching.current && wsRetryCount.current < 20) {
+        // Use fast retries since NLB health check takes ~10s
+        if (isLaunching.current && wsRetryCount.current < 30) {
           wsRetryCount.current++;
-          const delay = Math.min(2000, 500 + wsRetryCount.current * 200);
-          addLog(`Retrying connection (${wsRetryCount.current}/20)...`, 'info');
+          const delay = 500; // Fast fixed retry - NLB will accept once healthy
+          if (wsRetryCount.current === 1) {
+            addLog(`Waiting for server to become healthy...`, 'info');
+          }
           wsRetryTimeout.current = setTimeout(() => {
             connectWebSocket(currentWsUrl.current, token, targetEvent, true);
           }, delay);

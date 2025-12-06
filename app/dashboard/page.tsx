@@ -104,6 +104,12 @@ export default function DashboardPage() {
 }
 
 function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
+  // DEBUG: Log what we receive
+  console.log('PortfolioContent positions:', portfolio.positions.map(p => ({
+    ticker: p.ticker,
+    market_status: p.market_status
+  })));
+
   // Separate positions by market status
   // Active = markets still trading (active, open, unknown)
   // Determined = markets closed but not yet settled (closed, determined)
@@ -114,6 +120,11 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
   const determinedPositions = portfolio.positions.filter(p => 
     p.market_status && (p.market_status === 'closed' || p.market_status === 'determined')
   );
+
+  // DEBUG: Log filter results
+  console.log('Active positions count:', activePositions.length);
+  console.log('Determined positions count:', determinedPositions.length);
+  console.log('Determined positions:', determinedPositions.map(p => p.ticker));
 
   return (
     <div className="space-y-4 md:space-y-6">

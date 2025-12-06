@@ -187,7 +187,7 @@ export default function QuickBetsPage() {
       const wsUrl = data.websocket_url;
       addLog(`Connecting to ${wsUrl}...`);
       
-      connectWebSocket(wsUrl, authToken);
+      connectWebSocket(wsUrl, authToken, selectedEvent);
       
     } catch (err: any) {
       console.error('Error launching:', err);
@@ -205,10 +205,10 @@ export default function QuickBetsPage() {
     addLog(`Reconnecting to ${session.title || session.event_ticker}...`);
     
     const wsUrl = session.websocket_url;
-    connectWebSocket(wsUrl, authToken);
-  }, [authToken, addLog]);
+    connectWebSocket(wsUrl, authToken, session.event_ticker);
+  }, [authToken, addLog, connectWebSocket]);
 
-  const connectWebSocket = useCallback((wsUrl: string, token: string, isRetry = false) => {
+  const connectWebSocket = useCallback((wsUrl: string, token: string, targetEvent: string, isRetry = false) => {
     // Store for retries
     currentWsUrl.current = wsUrl;
     
@@ -221,11 +221,11 @@ export default function QuickBetsPage() {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        wsRetryCount.current = 0; // Reset on successful connect
         addLog('WebSocket connected, authenticating...', 'info');
         ws.send(JSON.stringify({
           type: 'auth',
-          token: token
+          token: token,
+          event_ticker: targetEvent  // Tell server which event we want
         }));
       };
 
@@ -239,8 +239,30 @@ export default function QuickBetsPage() {
       };
 
       ws.onclose = (event) => {
+        // Ignore close events from stale connections
+        if (wsRef.current !== ws) {
+          return;
+        }
+        
         setConnected(false);
         wsRef.current = null;
+        
+        // 4010 = connected to wrong container, retry to hit correct one
+        if (event.code === 4010) {
+          if (wsRetryCount.current < 30) {
+            wsRetryCount.current++;
+            const delay = 500 + Math.random() * 500; // Random delay to avoid hitting same container
+            addLog(`Wrong container, retrying (${wsRetryCount.current}/30)...`, 'info');
+            wsRetryTimeout.current = setTimeout(() => {
+              connectWebSocket(currentWsUrl.current, token, targetEvent, true);
+            }, delay);
+            return;
+          } else {
+            addLog('Failed to connect to correct container after 30 attempts', 'error');
+            setPageState('lobby');
+            return;
+          }
+        }
         
         // Auto-retry if we're still launching and haven't connected yet
         if (isLaunching.current && wsRetryCount.current < 20) {
@@ -248,7 +270,7 @@ export default function QuickBetsPage() {
           const delay = Math.min(2000, 500 + wsRetryCount.current * 200);
           addLog(`Retrying connection (${wsRetryCount.current}/20)...`, 'info');
           wsRetryTimeout.current = setTimeout(() => {
-            connectWebSocket(currentWsUrl.current, token, true);
+            connectWebSocket(currentWsUrl.current, token, targetEvent, true);
           }, delay);
         } else if (!isLaunching.current) {
           addLog(`Disconnected (code: ${event.code})`, 'error');
@@ -362,14 +384,13 @@ export default function QuickBetsPage() {
         )}
 
         {/* Status Bar - hidden during trading */}
-        {pageState !== 'trading' && (
+        {(pageState === 'loading' || pageState === 'launching') && (
           <div className={`px-4 py-3 rounded-lg mb-6 font-medium ${
             pageState === 'launching'
             ? 'bg-yellow-900/50 border border-yellow-500 text-yellow-200'
             : 'bg-gray-800 border border-gray-600 text-gray-300'
           }`}>
             {pageState === 'loading' && 'Loading events...'}
-            {pageState === 'lobby' && 'Select an event to start trading'}
             {pageState === 'launching' && `Launching: ${eventTitle || eventTicker}...`}
           </div>
         )}
@@ -415,7 +436,7 @@ export default function QuickBetsPage() {
 
             {/* Available Events */}
             <div className="bg-gray-800 rounded-xl p-6">
-              <h2 className="text-lg font-semibold mb-4">Select an Event</h2>
+              <h2 className="text-lg font-semibold mb-4">Select an Event to Start Trading</h2>
               
               {availableEvents.length === 0 ? (
                 <p className="text-gray-400 text-center py-8">No live events available right now</p>

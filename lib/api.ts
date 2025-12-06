@@ -50,6 +50,7 @@ export interface Position {
   close_time: string;
   event_ticker?: string;
   series_ticker?: string;
+  market_status?: string;
 }
 
 export interface Portfolio {

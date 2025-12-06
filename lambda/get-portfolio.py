@@ -150,6 +150,9 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
             market_title = market.get('market_title', market.get('title', ''))
             full_title = f"{event_title}: {market_title}" if event_title and market_title else (market_title or event_title or ticker)
             
+            # Get market status (active, closed, settled, etc.)
+            market_status = market.get('status', 'unknown')
+            
             position_details.append({
                 'ticker': ticker,
                 'contracts': int(contracts),
@@ -160,7 +163,8 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                 'market_title': full_title,
                 'close_time': market.get('close_time', ''),
                 'event_ticker': market.get('event_ticker', ''),
-                'series_ticker': market.get('series_ticker', '')
+                'series_ticker': market.get('series_ticker', ''),
+                'market_status': market_status
             })
             
         except Exception as e:
@@ -176,14 +180,22 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                 'market_title': ticker,
                 'close_time': '',
                 'event_ticker': '',
-                'series_ticker': ''
+                'series_ticker': '',
+                'market_status': 'unknown'
             })
     
     logger.info(f"🔍 POSITION COUNT - After enrichment loop: {len(position_details)} positions")
     logger.info(f"🔍 ENRICHED TICKERS: {sorted([p['ticker'] for p in position_details])}")
     
-    # Sort by market value descending
-    position_details.sort(key=lambda x: x['market_value'], reverse=True)
+    # Sort: active/open markets first, then by market value descending within each group
+    def sort_key(pos):
+        # Active statuses come first (sort key 0), closed/settled come second (sort key 1)
+        status = pos.get('market_status', 'unknown').lower()
+        is_active = 1 if status in ('active', 'open', 'unknown') else 2
+        # Within each group, sort by market value descending (negate for descending)
+        return (is_active, -pos['market_value'])
+    
+    position_details.sort(key=sort_key)
     
     logger.info(f"🔍 POSITION COUNT - Returning {len(position_details)} positions to client for {user_name}")
     logger.info(f"Portfolio complete for {user_name}: {len(position_details)} positions, total value: ${cash_balance + total_position_value:.2f}")

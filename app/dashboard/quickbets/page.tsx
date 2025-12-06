@@ -195,17 +195,6 @@ export default function QuickBetsPage() {
     }
   }, [authToken, addLog]);
 
-  // Reconnect to existing session
-  const reconnectSession = useCallback(async (session: UserSession) => {
-    setPageState('launching');
-    setEventTicker(session.event_ticker);
-    setEventTitle(session.title || session.event_ticker);
-    addLog(`Reconnecting to ${session.title || session.event_ticker}...`);
-    
-    const wsUrl = session.websocket_url;
-    connectWebSocket(wsUrl, authToken, session.event_ticker);
-  }, [authToken, addLog, connectWebSocket]);
-
   const connectWebSocket = useCallback((wsUrl: string, token: string, targetEvent: string, isRetry = false) => {
     // Store for retries
     currentWsUrl.current = wsUrl;
@@ -288,6 +277,17 @@ export default function QuickBetsPage() {
       setPageState('lobby');
     }
   }, [addLog]);
+
+  // Reconnect to existing session
+  const reconnectSession = useCallback(async (session: UserSession) => {
+    setPageState('launching');
+    setEventTicker(session.event_ticker);
+    setEventTitle(session.title || session.event_ticker);
+    addLog(`Reconnecting to ${session.title || session.event_ticker}...`);
+    
+    const wsUrl = session.websocket_url;
+    connectWebSocket(wsUrl, authToken, session.event_ticker);
+  }, [authToken, addLog, connectWebSocket]);
 
   const handleWebSocketMessage = useCallback((data: any) => {
     const msgType = data.type;

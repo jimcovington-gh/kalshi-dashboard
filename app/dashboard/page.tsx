@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getPortfolio, Portfolio } from '@/lib/api';
+import { getPortfolio, Portfolio, Position } from '@/lib/api';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useRouter } from 'next/navigation';
 
@@ -104,6 +104,16 @@ export default function DashboardPage() {
 }
 
 function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
+  // Separate positions by market status
+  // Active = markets still trading (active, open, unknown)
+  // Determined = markets closed but not yet settled (closed, determined)
+  // We exclude settled positions as they've already paid out
+  const activePositions = portfolio.positions.filter(p => 
+    !p.market_status || p.market_status === 'active' || p.market_status === 'open' || p.market_status === 'unknown'
+  );
+  const determinedPositions = portfolio.positions.filter(p => 
+    p.market_status && (p.market_status === 'closed' || p.market_status === 'determined')
+  );
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -136,14 +146,56 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
         </div>
       </div>
 
-      {/* Positions Table - Desktop */}
-      <div className="hidden md:block bg-white rounded-lg shadow overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">Active Positions</h3>
+      {/* Active Positions */}
+      {activePositions.length > 0 && (
+        <PositionsTable 
+          positions={activePositions} 
+          title="Active Positions" 
+          userName={portfolio.user_name}
+          badgeColor="green"
+        />
+      )}
+
+      {/* Determined/Closed Positions (awaiting settlement) */}
+      {determinedPositions.length > 0 && (
+        <PositionsTable 
+          positions={determinedPositions} 
+          title="Determined (Awaiting Settlement)" 
+          userName={portfolio.user_name}
+          badgeColor="gray"
+        />
+      )}
+
+      {/* Show message if no positions */}
+      {activePositions.length === 0 && determinedPositions.length === 0 && (
+        <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
+          No positions found
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PositionsTable({ positions, title, userName, badgeColor }: { 
+  positions: Position[]; 
+  title: string; 
+  userName: string;
+  badgeColor: 'green' | 'gray';
+}) {
+  const bgColor = badgeColor === 'green' ? 'bg-green-50' : 'bg-gray-50';
+  const borderColor = badgeColor === 'green' ? 'border-green-200' : 'border-gray-300';
+  const headerBg = badgeColor === 'green' ? 'bg-green-100' : 'bg-gray-200';
+  
+  return (
+    <>
+      {/* Desktop Table */}
+      <div className={`hidden md:block bg-white rounded-lg shadow overflow-hidden border ${borderColor}`}>
+        <div className={`px-6 py-4 ${headerBg} border-b ${borderColor}`}>
+          <h3 className="text-lg font-semibold text-gray-900">{title} ({positions.length})</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+            <thead className={bgColor}>
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Market
@@ -166,19 +218,7 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {portfolio.positions.map((position, idx) => {
-                // Build Kalshi URL
-                const buildMarketUrl = (seriesTicker: string, title: string, eventTicker: string) => {
-                  if (!seriesTicker || !title || !eventTicker) return null;
-                  const slug = title
-                    .toLowerCase()
-                    .replace(/[^a-z0-9\s-]/g, '')
-                    .replace(/\s+/g, '-')
-                    .replace(/-+/g, '-')
-                    .replace(/^-|-$/g, '');
-                  return `https://kalshi.com/markets/${seriesTicker.toUpperCase()}/${slug}/${eventTicker.toUpperCase()}`;
-                };
-                
+              {positions.map((position, idx) => {
                 const marketUrl = buildMarketUrl(
                   position.series_ticker || '',
                   position.market_title || '',
@@ -197,7 +237,7 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
                       )}
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">
-                      <a href={`/dashboard/trades?ticker=${position.ticker}&user_name=${portfolio.user_name}`} className="text-xs font-medium text-blue-600 hover:underline">
+                      <a href={`/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`} className="text-xs font-medium text-blue-600 hover:underline">
                         {position.ticker}
                       </a>
                     </td>
@@ -212,24 +252,24 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
                         {position.side.toUpperCase()}
                       </span>
                     </td>
-                  <td className="px-4 py-2 whitespace-nowrap text-right text-xs text-gray-900">
-                    {Math.abs(position.contracts)}
-                  </td>
-                  <td className="px-4 py-2 whitespace-nowrap text-right text-xs text-gray-600">
-                    {position.fill_price ? `$${position.fill_price.toFixed(2)}` : '-'}
-                  </td>
-                  <td className="px-4 py-2 whitespace-nowrap text-right text-xs font-semibold">
-                    <span className={`${
-                      position.current_price >= 0.95
-                        ? 'text-green-600'
-                        : position.current_price >= 0.85
-                        ? 'text-orange-600'
-                        : 'text-red-600'
-                    }`}>
-                      ${position.current_price.toFixed(2)}
-                    </span>
-                  </td>
-                </tr>
+                    <td className="px-4 py-2 whitespace-nowrap text-right text-xs text-gray-900">
+                      {Math.abs(position.contracts)}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-right text-xs text-gray-600">
+                      {position.fill_price ? `$${position.fill_price.toFixed(2)}` : '-'}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-right text-xs font-semibold">
+                      <span className={`${
+                        position.current_price >= 0.95
+                          ? 'text-green-600'
+                          : position.current_price >= 0.85
+                          ? 'text-orange-600'
+                          : 'text-red-600'
+                      }`}>
+                        ${position.current_price.toFixed(2)}
+                      </span>
+                    </td>
+                  </tr>
                 );
               })}
             </tbody>
@@ -237,24 +277,12 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
         </div>
       </div>
 
-      {/* Positions Cards - Mobile */}
+      {/* Mobile Cards */}
       <div className="md:hidden space-y-3">
-        <div className="px-4 py-3 bg-white rounded-lg shadow">
-          <h3 className="text-base font-semibold text-gray-900 mb-3">Active Positions</h3>
+        <div className={`px-4 py-3 rounded-lg shadow ${headerBg}`}>
+          <h3 className="text-base font-semibold text-gray-900">{title} ({positions.length})</h3>
         </div>
-        {portfolio.positions.map((position, idx) => {
-          // Build Kalshi URL
-          const buildMarketUrl = (seriesTicker: string, title: string, eventTicker: string) => {
-            if (!seriesTicker || !title || !eventTicker) return null;
-            const slug = title
-              .toLowerCase()
-              .replace(/[^a-z0-9\s-]/g, '')
-              .replace(/\s+/g, '-')
-              .replace(/-+/g, '-')
-              .replace(/^-|-$/g, '');
-            return `https://kalshi.com/markets/${seriesTicker.toUpperCase()}/${slug}/${eventTicker.toUpperCase()}`;
-          };
-          
+        {positions.map((position, idx) => {
           const marketUrl = buildMarketUrl(
             position.series_ticker || '',
             position.market_title || '',
@@ -273,7 +301,7 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
               )}
               
               {/* Ticker */}
-              <a href={`/dashboard/trades?ticker=${position.ticker}&user_name=${portfolio.user_name}`} className="text-xs text-gray-500 hover:text-blue-600 block mb-3">
+              <a href={`/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`} className="text-xs text-gray-500 hover:text-blue-600 block mb-3">
                 {position.ticker}
               </a>
               
@@ -316,6 +344,18 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
           );
         })}
       </div>
-    </div>
+    </>
   );
+}
+
+// Helper function to build Kalshi market URL
+function buildMarketUrl(seriesTicker: string, title: string, eventTicker: string): string | null {
+  if (!seriesTicker || !title || !eventTicker) return null;
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return `https://kalshi.com/markets/${seriesTicker.toUpperCase()}/${slug}/${eventTicker.toUpperCase()}`;
 }

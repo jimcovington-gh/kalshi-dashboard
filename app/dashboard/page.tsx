@@ -121,6 +121,18 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
     p.market_status && (p.market_status === 'closed' || p.market_status === 'determined')
   );
 
+  // Sort each group by fill_time descending (newest first)
+  const sortByFillTime = (positions: Position[]) => {
+    return [...positions].sort((a, b) => {
+      const timeA = a.fill_time ? new Date(a.fill_time).getTime() : 0;
+      const timeB = b.fill_time ? new Date(b.fill_time).getTime() : 0;
+      return timeB - timeA; // Descending order (newest first)
+    });
+  };
+
+  const sortedActivePositions = sortByFillTime(activePositions);
+  const sortedDeterminedPositions = sortByFillTime(determinedPositions);
+
   // DEBUG: Log filter results
   console.log('Active positions count:', activePositions.length);
   console.log('Determined positions count:', determinedPositions.length);
@@ -160,7 +172,7 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
       {/* Active Positions */}
       {activePositions.length > 0 && (
         <PositionsTable 
-          positions={activePositions} 
+          positions={sortedActivePositions} 
           title="Active Positions" 
           userName={portfolio.user_name}
           badgeColor="green"
@@ -170,7 +182,7 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
       {/* Determined/Closed Positions (awaiting settlement) */}
       {determinedPositions.length > 0 && (
         <PositionsTable 
-          positions={determinedPositions} 
+          positions={sortedDeterminedPositions} 
           title="Determined (Awaiting Settlement)" 
           userName={portfolio.user_name}
           badgeColor="gray"
@@ -215,6 +227,9 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                   Ticker
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Fill Date/Time
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Side
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -235,6 +250,9 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                   position.market_title || '',
                   position.event_ticker || ''
                 );
+                
+                // Format fill time
+                const fillDateTime = position.fill_time ? formatDateTime(position.fill_time) : '-';
 
                 return (
                   <tr key={idx} className="hover:bg-gray-50">
@@ -251,6 +269,9 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                       <a href={`/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`} className="text-xs font-medium text-blue-600 hover:underline">
                         {position.ticker}
                       </a>
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-600">
+                      {fillDateTime}
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">
                       <span
@@ -299,6 +320,7 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
             position.market_title || '',
             position.event_ticker || ''
           );
+          const fillDateTime = position.fill_time ? formatDateTime(position.fill_time) : '-';
 
           return (
             <div key={idx} className="bg-white rounded-lg shadow p-4">
@@ -311,10 +333,13 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                 <div className="text-sm font-medium text-gray-900 mb-2">{position.market_title}</div>
               )}
               
-              {/* Ticker */}
-              <a href={`/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`} className="text-xs text-gray-500 hover:text-blue-600 block mb-3">
-                {position.ticker}
-              </a>
+              {/* Ticker and Fill Date/Time */}
+              <div className="flex justify-between items-start mb-3">
+                <a href={`/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`} className="text-xs text-gray-500 hover:text-blue-600">
+                  {position.ticker}
+                </a>
+                <div className="text-xs text-gray-500">{fillDateTime}</div>
+              </div>
               
               {/* Stats Grid */}
               <div className="grid grid-cols-4 gap-3">
@@ -369,4 +394,21 @@ function buildMarketUrl(seriesTicker: string, title: string, eventTicker: string
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
   return `https://kalshi.com/markets/${seriesTicker.toUpperCase()}/${slug}/${eventTicker.toUpperCase()}`;
+}
+
+// Helper function to format date/time for display
+function formatDateTime(dateString: string): string {
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '-';
+    
+    // Format as "Dec 7, 2025 at 5:40 PM" or shorter "12/7 5:40 PM" for mobile
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    
+    return `${month}/${day} ${time}`;
+  } catch {
+    return '-';
+  }
 }

@@ -44,6 +44,7 @@ export interface Position {
   contracts: number;
   side: 'yes' | 'no';
   fill_price?: number;
+  fill_time?: string;
   current_price: number;
   market_value: number;
   market_title: string;

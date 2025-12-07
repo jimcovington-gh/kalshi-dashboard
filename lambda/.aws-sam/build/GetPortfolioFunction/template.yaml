@@ -165,44 +165,6 @@ Resources:
             Path: /analytics
             Method: GET
 
-  # Lambda: QuickBets Sign (for CORS test and low-latency order signing)
-  QuickBetsSignFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: dashboard-quickbets-sign
-      CodeUri: ./
-      Handler: quickbets-sign.lambda_handler
-      Description: Sign Kalshi API requests for QuickBets (CORS test and order signing)
-      MemorySize: 256
-      Timeout: 10
-      Layers:
-        - !Ref SharedCodeLayer
-      Environment:
-        Variables:
-          USER_SECRET_PREFIX: production/kalshi/users
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action:
-                - secretsmanager:GetSecretValue
-              Resource:
-                - arn:aws:secretsmanager:us-east-1:355149669325:secret:production/kalshi/users/*
-      Events:
-        QuickBetsSign:
-          Type: Api
-          Properties:
-            RestApiId: !Ref DashboardApi
-            Path: /quickbets/sign
-            Method: POST
-        QuickBetsSignOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref DashboardApi
-            Path: /quickbets/sign
-            Method: OPTIONS
-            Auth:
-              Authorizer: NONE
-
   # Lambda Layer: Shared code (s3_config_loader)
   SharedCodeLayer:
     Type: AWS::Serverless::LayerVersion

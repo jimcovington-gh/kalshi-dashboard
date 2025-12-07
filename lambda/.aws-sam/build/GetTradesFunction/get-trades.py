@@ -42,11 +42,14 @@ def lambda_handler(event, context):
         
         # Get user info from Cognito authorizer
         claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
-        # Try preferred_username first (our custom attribute), fall back to email prefix
         current_user = claims.get('preferred_username', '')
+        
         if not current_user:
-            email = claims.get('email', '')
-            current_user = email.split('@')[0] if '@' in email else claims.get('cognito:username', '')
+            return {
+                'statusCode': 401,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({'error': 'Authentication required - preferred_username not set'})
+            }
         
         user_groups = claims.get('cognito:groups', '').split(',') if claims.get('cognito:groups') else []
         is_admin = 'admin' in user_groups

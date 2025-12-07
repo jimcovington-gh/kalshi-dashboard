@@ -1,3 +1,2 @@
 pyyaml
 boto3
-cryptography

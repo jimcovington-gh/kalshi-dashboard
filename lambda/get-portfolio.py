@@ -89,9 +89,10 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
     logger.info(f"🔍 POSITION COUNT - Layer returned {len(api_positions)} positions for {user_name}")
     logger.info(f"🔍 LAYER TICKERS: {sorted(list(api_positions.keys()))}")
     
-    # STEP 2: Get fill prices by querying each ticker in parallel (avoids pagination issues)
-    def query_ticker_fill_price(ticker: str) -> tuple:
-        """Query fill price for a single ticker using market_ticker-index"""
+    # STEP 2: Get fill prices AND fill times by querying each ticker in parallel
+    def query_ticker_fill_data(ticker: str) -> tuple:
+        """Query fill price and fill time for a single ticker using market_ticker-index.
+        Returns (ticker, avg_fill_price, earliest_fill_time)"""
         try:
             response = trades_table.query(
                 IndexName='market_ticker-index',
@@ -107,27 +108,33 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
             if items:
                 total_contracts = sum(int(t.get('filled_count', 0)) for t in items)
                 total_cost = sum(int(t.get('filled_count', 0)) * float(t.get('avg_fill_price', 0)) for t in items)
+                # Get earliest fill time (placed_at or completed_at)
+                fill_times = [t.get('completed_at') or t.get('placed_at') for t in items if t.get('completed_at') or t.get('placed_at')]
+                earliest_fill = min(fill_times) if fill_times else None
                 if total_contracts > 0:
-                    return ticker, total_cost / total_contracts
-            return ticker, None
+                    return ticker, total_cost / total_contracts, earliest_fill
+            return ticker, None, None
         except Exception as e:
-            logger.warning(f"Failed to query fill price for {ticker}: {e}")
-            return ticker, None
+            logger.warning(f"Failed to query fill data for {ticker}: {e}")
+            return ticker, None, None
     
-    # Query fill prices in parallel (10 workers provides good balance)
+    # Query fill data in parallel (10 workers provides good balance)
     fill_prices = {}
+    fill_times = {}
     tickers_to_query = list(api_positions.keys())
     
     if tickers_to_query:
         try:
             with ThreadPoolExecutor(max_workers=10) as executor:
-                results = list(executor.map(query_ticker_fill_price, tickers_to_query))
+                results = list(executor.map(query_ticker_fill_data, tickers_to_query))
             
-            for ticker, avg_price in results:
+            for ticker, avg_price, fill_time in results:
                 if avg_price is not None:
                     fill_prices[ticker] = avg_price
+                if fill_time is not None:
+                    fill_times[ticker] = fill_time
             
-            logger.info(f"Calculated fill prices for {len(fill_prices)}/{len(tickers_to_query)} tickers using parallel queries")
+            logger.info(f"Calculated fill data for {len(fill_prices)}/{len(tickers_to_query)} tickers using parallel queries")
         except Exception as e:
             logger.warning(f"Failed to fetch fill prices in parallel for {user_name}: {e}")
             fill_prices = {}
@@ -158,6 +165,7 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                 'contracts': int(contracts),
                 'side': 'yes' if contracts > 0 else 'no',
                 'fill_price': float(fill_prices.get(ticker, 0)) if fill_prices.get(ticker) else None,
+                'fill_time': fill_times.get(ticker),
                 'current_price': float(current_price),
                 'market_value': float(market_value),
                 'market_title': full_title,
@@ -175,6 +183,7 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                 'contracts': int(contracts),
                 'side': 'yes' if contracts > 0 else 'no',
                 'fill_price': float(fill_prices.get(ticker, 0)) if fill_prices.get(ticker) else None,
+                'fill_time': fill_times.get(ticker),
                 'current_price': float(current_price),
                 'market_value': float(market_value),
                 'market_title': ticker,
@@ -186,6 +195,13 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
     
     logger.info(f"🔍 POSITION COUNT - After enrichment loop: {len(position_details)} positions")
     logger.info(f"🔍 ENRICHED TICKERS: {sorted([p['ticker'] for p in position_details])}")
+    
+    # DEBUG: Log market_status distribution
+    status_counts = {}
+    for p in position_details:
+        s = p.get('market_status', 'MISSING')
+        status_counts[s] = status_counts.get(s, 0) + 1
+    logger.info(f"🔍 MARKET STATUS DISTRIBUTION: {status_counts}")
     
     # Sort: active/open markets first, then by market value descending within each group
     def sort_key(pos):
@@ -303,11 +319,14 @@ def lambda_handler(event, context):
         
         # Get user info from Cognito authorizer
         claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
-        # Try preferred_username first (our custom attribute), fall back to email prefix
         current_user = claims.get('preferred_username', '')
+        
         if not current_user:
-            email = claims.get('email', '')
-            current_user = email.split('@')[0] if '@' in email else claims.get('cognito:username', '')
+            return {
+                'statusCode': 401,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({'error': 'Authentication required - preferred_username not set'})
+            }
         
         user_groups = claims.get('cognito:groups', '').split(',') if claims.get('cognito:groups') else []
         is_admin = 'admin' in user_groups

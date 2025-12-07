@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Dict, List, Any
 import os
 from datetime import datetime, timezone, timedelta
+from concurrent.futures import ThreadPoolExecutor
 from portfolio_fetcher import fetch_user_portfolio_from_api
 
 # Configure logging
@@ -88,43 +89,55 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
     logger.info(f"🔍 POSITION COUNT - Layer returned {len(api_positions)} positions for {user_name}")
     logger.info(f"🔍 LAYER TICKERS: {sorted(list(api_positions.keys()))}")
     
-    # STEP 2: Get fill price history from trades table
-    try:
-        trades_response = trades_table.query(
-            IndexName='user_name-index',
-            KeyConditionExpression='user_name = :user',
-            FilterExpression='filled_count > :zero',
-            ExpressionAttributeValues={
-                ':user': user_name,
-                ':zero': 0
-            }
-        )
-        
-        # Calculate average fill price per ticker
-        fill_prices = {}
-        for trade in trades_response.get('Items', []):
-            ticker = trade.get('market_ticker')
-            filled_count = int(trade.get('filled_count', 0))
-            avg_fill_price = float(trade.get('avg_fill_price', 0))
+    # STEP 2: Get fill prices AND fill times by querying each ticker in parallel
+    def query_ticker_fill_data(ticker: str) -> tuple:
+        """Query fill price and fill time for a single ticker using market_ticker-index.
+        Returns (ticker, avg_fill_price, earliest_fill_time)"""
+        try:
+            response = trades_table.query(
+                IndexName='market_ticker-index',
+                KeyConditionExpression='market_ticker = :ticker',
+                FilterExpression='user_name = :user AND filled_count > :zero',
+                ExpressionAttributeValues={
+                    ':ticker': ticker,
+                    ':user': user_name,
+                    ':zero': 0
+                }
+            )
+            items = response.get('Items', [])
+            if items:
+                total_contracts = sum(int(t.get('filled_count', 0)) for t in items)
+                total_cost = sum(int(t.get('filled_count', 0)) * float(t.get('avg_fill_price', 0)) for t in items)
+                # Get earliest fill time (placed_at or completed_at)
+                fill_times = [t.get('completed_at') or t.get('placed_at') for t in items if t.get('completed_at') or t.get('placed_at')]
+                earliest_fill = min(fill_times) if fill_times else None
+                if total_contracts > 0:
+                    return ticker, total_cost / total_contracts, earliest_fill
+            return ticker, None, None
+        except Exception as e:
+            logger.warning(f"Failed to query fill data for {ticker}: {e}")
+            return ticker, None, None
+    
+    # Query fill data in parallel (10 workers provides good balance)
+    fill_prices = {}
+    fill_times = {}
+    tickers_to_query = list(api_positions.keys())
+    
+    if tickers_to_query:
+        try:
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                results = list(executor.map(query_ticker_fill_data, tickers_to_query))
             
-            if ticker and filled_count > 0 and avg_fill_price > 0:
-                if ticker not in fill_prices:
-                    fill_prices[ticker] = {'total_contracts': 0, 'total_cost': 0}
-                fill_prices[ticker]['total_contracts'] += filled_count
-                fill_prices[ticker]['total_cost'] += filled_count * avg_fill_price
-        
-        # Calculate weighted average
-        for ticker in fill_prices:
-            if fill_prices[ticker]['total_contracts'] > 0:
-                fill_prices[ticker] = fill_prices[ticker]['total_cost'] / fill_prices[ticker]['total_contracts']
-            else:
-                fill_prices[ticker] = 0
-        
-        logger.info(f"Calculated fill prices for {len(fill_prices)} tickers from trades history")
-        
-    except Exception as e:
-        logger.warning(f"Failed to fetch fill prices for {user_name}: {e}")
-        fill_prices = {}
+            for ticker, avg_price, fill_time in results:
+                if avg_price is not None:
+                    fill_prices[ticker] = avg_price
+                if fill_time is not None:
+                    fill_times[ticker] = fill_time
+            
+            logger.info(f"Calculated fill data for {len(fill_prices)}/{len(tickers_to_query)} tickers using parallel queries")
+        except Exception as e:
+            logger.warning(f"Failed to fetch fill prices in parallel for {user_name}: {e}")
+            fill_prices = {}
     
     # STEP 3: Enrich positions with market metadata and fill prices
     position_details = []
@@ -144,17 +157,22 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
             market_title = market.get('market_title', market.get('title', ''))
             full_title = f"{event_title}: {market_title}" if event_title and market_title else (market_title or event_title or ticker)
             
+            # Get market status (active, closed, settled, etc.)
+            market_status = market.get('status', 'unknown')
+            
             position_details.append({
                 'ticker': ticker,
                 'contracts': int(contracts),
                 'side': 'yes' if contracts > 0 else 'no',
                 'fill_price': float(fill_prices.get(ticker, 0)) if fill_prices.get(ticker) else None,
+                'fill_time': fill_times.get(ticker),
                 'current_price': float(current_price),
                 'market_value': float(market_value),
                 'market_title': full_title,
                 'close_time': market.get('close_time', ''),
                 'event_ticker': market.get('event_ticker', ''),
-                'series_ticker': market.get('series_ticker', '')
+                'series_ticker': market.get('series_ticker', ''),
+                'market_status': market_status
             })
             
         except Exception as e:
@@ -165,19 +183,35 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                 'contracts': int(contracts),
                 'side': 'yes' if contracts > 0 else 'no',
                 'fill_price': float(fill_prices.get(ticker, 0)) if fill_prices.get(ticker) else None,
+                'fill_time': fill_times.get(ticker),
                 'current_price': float(current_price),
                 'market_value': float(market_value),
                 'market_title': ticker,
                 'close_time': '',
                 'event_ticker': '',
-                'series_ticker': ''
+                'series_ticker': '',
+                'market_status': 'unknown'
             })
     
     logger.info(f"🔍 POSITION COUNT - After enrichment loop: {len(position_details)} positions")
     logger.info(f"🔍 ENRICHED TICKERS: {sorted([p['ticker'] for p in position_details])}")
     
-    # Sort by market value descending
-    position_details.sort(key=lambda x: x['market_value'], reverse=True)
+    # DEBUG: Log market_status distribution
+    status_counts = {}
+    for p in position_details:
+        s = p.get('market_status', 'MISSING')
+        status_counts[s] = status_counts.get(s, 0) + 1
+    logger.info(f"🔍 MARKET STATUS DISTRIBUTION: {status_counts}")
+    
+    # Sort: active/open markets first, then by market value descending within each group
+    def sort_key(pos):
+        # Active statuses come first (sort key 0), closed/settled come second (sort key 1)
+        status = pos.get('market_status', 'unknown').lower()
+        is_active = 1 if status in ('active', 'open', 'unknown') else 2
+        # Within each group, sort by market value descending (negate for descending)
+        return (is_active, -pos['market_value'])
+    
+    position_details.sort(key=sort_key)
     
     logger.info(f"🔍 POSITION COUNT - Returning {len(position_details)} positions to client for {user_name}")
     logger.info(f"Portfolio complete for {user_name}: {len(position_details)} positions, total value: ${cash_balance + total_position_value:.2f}")
@@ -285,11 +319,14 @@ def lambda_handler(event, context):
         
         # Get user info from Cognito authorizer
         claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
-        # Try preferred_username first (our custom attribute), fall back to email prefix
         current_user = claims.get('preferred_username', '')
+        
         if not current_user:
-            email = claims.get('email', '')
-            current_user = email.split('@')[0] if '@' in email else claims.get('cognito:username', '')
+            return {
+                'statusCode': 401,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({'error': 'Authentication required - preferred_username not set'})
+            }
         
         user_groups = claims.get('cognito:groups', '').split(',') if claims.get('cognito:groups') else []
         is_admin = 'admin' in user_groups

@@ -92,7 +92,7 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
     # STEP 2: Get fill prices AND fill times by querying each ticker in parallel
     def query_ticker_fill_data(ticker: str) -> tuple:
         """Query fill price and fill time for a single ticker using market_ticker-index.
-        Returns (ticker, avg_fill_price, earliest_fill_time)"""
+        Returns (ticker, avg_fill_price, earliest_fill_time, idea_name)"""
         try:
             response = trades_table.query(
                 IndexName='market_ticker-index',
@@ -111,16 +111,19 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                 # Get earliest fill time (placed_at or completed_at)
                 fill_times = [t.get('completed_at') or t.get('placed_at') for t in items if t.get('completed_at') or t.get('placed_at')]
                 earliest_fill = min(fill_times) if fill_times else None
+                # Get idea_name from first trade with this ticker
+                idea_name = items[0].get('idea_name', 'unknown') if items else 'unknown'
                 if total_contracts > 0:
-                    return ticker, total_cost / total_contracts, earliest_fill
-            return ticker, None, None
+                    return ticker, total_cost / total_contracts, earliest_fill, idea_name
+            return ticker, None, None, None
         except Exception as e:
             logger.warning(f"Failed to query fill data for {ticker}: {e}")
-            return ticker, None, None
+            return ticker, None, None, None
     
     # Query fill data in parallel (10 workers provides good balance)
     fill_prices = {}
     fill_times = {}
+    idea_names = {}
     tickers_to_query = list(api_positions.keys())
     
     if tickers_to_query:
@@ -128,11 +131,13 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
             with ThreadPoolExecutor(max_workers=10) as executor:
                 results = list(executor.map(query_ticker_fill_data, tickers_to_query))
             
-            for ticker, avg_price, fill_time in results:
+            for ticker, avg_price, fill_time, idea_name in results:
                 if avg_price is not None:
                     fill_prices[ticker] = avg_price
                 if fill_time is not None:
                     fill_times[ticker] = fill_time
+                if idea_name is not None:
+                    idea_names[ticker] = idea_name
             
             logger.info(f"Calculated fill data for {len(fill_prices)}/{len(tickers_to_query)} tickers using parallel queries")
         except Exception as e:
@@ -166,6 +171,7 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                 'side': 'yes' if contracts > 0 else 'no',
                 'fill_price': float(fill_prices.get(ticker, 0)) if fill_prices.get(ticker) else None,
                 'fill_time': fill_times.get(ticker),
+                'idea_name': idea_names.get(ticker),
                 'current_price': float(current_price),
                 'market_value': float(market_value),
                 'market_title': full_title,
@@ -184,6 +190,7 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                 'side': 'yes' if contracts > 0 else 'no',
                 'fill_price': float(fill_prices.get(ticker, 0)) if fill_prices.get(ticker) else None,
                 'fill_time': fill_times.get(ticker),
+                'idea_name': idea_names.get(ticker),
                 'current_price': float(current_price),
                 'market_value': float(market_value),
                 'market_title': ticker,

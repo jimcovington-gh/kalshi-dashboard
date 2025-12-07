@@ -227,6 +227,9 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                   Fill Date
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Idea
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Side
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -236,7 +239,7 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                   Fill Price
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Price
+                  Current Price
                 </th>
               </tr>
             </thead>
@@ -267,6 +270,9 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                       <a href={tradeUrl} className="text-xs text-blue-600 hover:underline">
                         {fillDateTime}
                       </a>
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-600">
+                      {position.idea_name || '-'}
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">
                       <span

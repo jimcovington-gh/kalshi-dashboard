@@ -224,16 +224,13 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                   Market
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Ticker
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Fill Date/Time
+                  Fill Date
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Side
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Contracts
+                  QTY
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Fill Price
@@ -253,6 +250,7 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                 
                 // Format fill time
                 const fillDateTime = position.fill_time ? formatDateTime(position.fill_time) : '-';
+                const tradeUrl = `/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`;
 
                 return (
                   <tr key={idx} className="hover:bg-gray-50">
@@ -266,12 +264,9 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                       )}
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">
-                      <a href={`/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`} className="text-xs font-medium text-blue-600 hover:underline">
-                        {position.ticker}
+                      <a href={tradeUrl} className="text-xs text-blue-600 hover:underline">
+                        {fillDateTime}
                       </a>
-                    </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-600">
-                      {fillDateTime}
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">
                       <span
@@ -321,6 +316,7 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
             position.event_ticker || ''
           );
           const fillDateTime = position.fill_time ? formatDateTime(position.fill_time) : '-';
+          const tradeUrl = `/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`;
 
           return (
             <div key={idx} className="bg-white rounded-lg shadow p-4">
@@ -333,13 +329,10 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                 <div className="text-sm font-medium text-gray-900 mb-2">{position.market_title}</div>
               )}
               
-              {/* Ticker and Fill Date/Time */}
-              <div className="flex justify-between items-start mb-3">
-                <a href={`/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`} className="text-xs text-gray-500 hover:text-blue-600">
-                  {position.ticker}
-                </a>
-                <div className="text-xs text-gray-500">{fillDateTime}</div>
-              </div>
+              {/* Fill Date/Time - clickable to trades page */}
+              <a href={tradeUrl} className="text-xs text-blue-600 hover:underline block mb-3">
+                {fillDateTime}
+              </a>
               
               {/* Stats Grid */}
               <div className="grid grid-cols-4 gap-3">
@@ -354,7 +347,7 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                   </span>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500 mb-1">Contracts</div>
+                  <div className="text-xs text-gray-500 mb-1">QTY</div>
                   <div className="text-sm font-semibold text-gray-900">{Math.abs(position.contracts)}</div>
                 </div>
                 <div>

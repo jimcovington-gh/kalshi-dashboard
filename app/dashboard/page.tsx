@@ -397,12 +397,30 @@ function buildMarketUrl(seriesTicker: string, title: string, eventTicker: string
 }
 
 // Helper function to format date/time for display
-function formatDateTime(dateString: string): string {
+function formatDateTime(dateValue: string | number): string {
   try {
-    const date = new Date(dateString);
+    let date: Date;
+    
+    if (typeof dateValue === 'number') {
+      // Unix timestamp in seconds
+      date = new Date(dateValue * 1000);
+    } else if (typeof dateValue === 'string') {
+      // Try parsing as ISO string or Unix timestamp string
+      const asNumber = Number(dateValue);
+      if (!isNaN(asNumber)) {
+        // It's a number string - likely Unix timestamp in seconds
+        date = new Date(asNumber * 1000);
+      } else {
+        // Try as ISO string
+        date = new Date(dateValue);
+      }
+    } else {
+      return '-';
+    }
+    
     if (isNaN(date.getTime())) return '-';
     
-    // Format as "Dec 7, 2025 at 5:40 PM" or shorter "12/7 5:40 PM" for mobile
+    // Format as "MM/DD HH:MM AM/PM"
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const day = date.getDate().toString().padStart(2, '0');
     const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });

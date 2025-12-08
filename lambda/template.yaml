@@ -193,6 +193,41 @@ Resources:
             Path: /trading-status
             Method: POST
 
+  # Lambda: Admin Stats (market capture runs, recent orders/trades)
+  AdminStatsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-admin-stats
+      CodeUri: ./
+      Handler: get-admin-stats.lambda_handler
+      Description: Get admin statistics (market capture runs, recent orders/trades)
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Layers:
+        - !Ref SharedCodeLayer
+      Environment:
+        Variables:
+          ORDERS_TABLE: production-kalshi-orders
+          TRADES_TABLE: production-kalshi-trades-v2
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: production-kalshi-orders
+        - DynamoDBReadPolicy:
+            TableName: production-kalshi-trades-v2
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cloudwatch:GetMetricStatistics
+              Resource: '*'
+      Events:
+        GetAdminStats:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /admin-stats
+            Method: GET
+
   # Lambda: Mention Monitors (get/clear mention monitor status)
   MentionMonitorsFunction:
     Type: AWS::Serverless::Function

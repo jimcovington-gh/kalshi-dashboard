@@ -380,3 +380,75 @@ export async function clearMentionMonitors(userName: string): Promise<ClearMonit
     throw error;
   }
 }
+
+// Admin Stats Types and Functions
+export interface MarketCaptureRun {
+  timestamp: string;
+  duration_ms: number;
+  duration_sec: number;
+  record_count: number;
+}
+
+export interface RecentOrder {
+  order_id: string;
+  market_ticker: string;
+  user_name: string;
+  side: 'yes' | 'no';
+  action: 'buy' | 'sell';
+  quantity: number;
+  limit_price: number;
+  order_status: string;
+  placed_at: number;
+  placed_at_iso: string;
+  idea_name: string;
+}
+
+export interface RecentTrade {
+  order_id: string;
+  market_ticker: string;
+  user_name: string;
+  side: 'yes' | 'no';
+  action: 'buy' | 'sell';
+  filled_count: number;
+  avg_fill_price: number;
+  total_cost: number;
+  order_status: string;
+  placed_at: number;
+  placed_at_iso: string;
+  completed_at: number | null;
+  completed_at_iso: string | null;
+  idea_name: string;
+  idea_version: string;
+}
+
+export interface AdminStatsResponse {
+  market_capture_runs: MarketCaptureRun[];
+  recent_orders: RecentOrder[];
+  recent_trades: RecentTrade[];
+  error?: string;
+}
+
+export async function getAdminStats(): Promise<AdminStatsResponse> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: '/admin-stats',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as unknown as AdminStatsResponse;
+  } catch (error) {
+    console.error('Error fetching admin stats:', error);
+    throw error;
+  }
+}

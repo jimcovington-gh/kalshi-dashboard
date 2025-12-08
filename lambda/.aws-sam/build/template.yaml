@@ -193,6 +193,87 @@ Resources:
             Method: POST
     Metadata:
       SamResourceId: TradingStatusFunction
+  AdminStatsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-admin-stats
+      CodeUri: AdminStatsFunction
+      Handler: get-admin-stats.lambda_handler
+      Description: Get admin statistics (market capture runs, recent orders/trades)
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Layers:
+      - Ref: SharedCodeLayer
+      Environment:
+        Variables:
+          ORDERS_TABLE: production-kalshi-orders
+          TRADES_TABLE: production-kalshi-trades-v2
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-orders
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-trades-v2
+      - Statement:
+        - Effect: Allow
+          Action:
+          - cloudwatch:GetMetricStatistics
+          Resource: '*'
+      Events:
+        GetAdminStats:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /admin-stats
+            Method: GET
+    Metadata:
+      SamResourceId: AdminStatsFunction
+  MentionMonitorsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-mention-monitors
+      CodeUri: MentionMonitorsFunction
+      Handler: mention-monitors.lambda_handler
+      Description: Get and clear mention monitor status (admin only)
+      Timeout: 60
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          MENTION_STATE_TABLE: production-kalshi-mention-event-state
+          ECS_CLUSTER: production-kalshi-fargate-cluster
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: production-kalshi-mention-event-state
+      - Statement:
+        - Effect: Allow
+          Action:
+          - ecs:StopTask
+          - ecs:DescribeTasks
+          Resource: '*'
+          Condition:
+            ArnLike:
+              ecs:cluster:
+                Fn::Sub: arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/production-kalshi-fargate-cluster
+      Events:
+        GetMentionMonitors:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /mention-monitors
+            Method: GET
+        ClearMentionMonitors:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /mention-monitors/clear
+            Method: POST
+    Metadata:
+      SamResourceId: MentionMonitorsFunction
   SharedCodeLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:

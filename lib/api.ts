@@ -249,7 +249,7 @@ export async function getTradingStatus(): Promise<TradingStatus> {
     const response = await restOperation.response;
     const data = await response.body.json();
     
-    return data as TradingStatus;
+    return data as unknown as TradingStatus;
   } catch (error) {
     console.error('Error fetching trading status:', error);
     throw error;
@@ -279,7 +279,7 @@ export async function setTradingStatus(enabled: boolean, reason?: string): Promi
     const response = await restOperation.response;
     const data = await response.body.json();
     
-    return data as TradingStatus;
+    return data as unknown as TradingStatus;
   } catch (error) {
     console.error('Error setting trading status:', error);
     throw error;

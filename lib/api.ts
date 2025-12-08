@@ -284,3 +284,99 @@ export async function setTradingStatus(enabled: boolean, reason?: string): Promi
     throw error;
   }
 }
+
+// Mention Monitor Types and Functions
+export interface MentionMonitor {
+  event_ticker: string;
+  user_name: string;
+  phase: string;
+  fargate_state: string;
+  start_date: string;
+  close_time: number;
+  open_time: number;
+  created_at: string;
+  activated_at: string;
+  last_heartbeat: string;
+  fargate_instance_id?: string;
+  phase_updated_at?: string;
+  fargate_task_arn?: string;
+  fargate_task_state?: string;
+  fargate_started_at?: string;
+}
+
+export interface UserMonitorSummary {
+  active_events: number;
+  pending_events: number;
+  has_fargate: boolean;
+  fargate_state: string;
+}
+
+export interface MentionMonitorsResponse {
+  monitors: MentionMonitor[];
+  users: Record<string, UserMonitorSummary>;
+  total_running_fargate: number;
+  total_active_events: number;
+  error?: string;
+}
+
+export interface ClearMonitorsResult {
+  user_name: string;
+  fargate_stopped: boolean;
+  events_cleared: number;
+  errors: string[];
+  success: boolean;
+  stopped_task_arn?: string;
+}
+
+export async function getMentionMonitors(): Promise<MentionMonitorsResponse> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: '/mention-monitors',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as unknown as MentionMonitorsResponse;
+  } catch (error) {
+    console.error('Error fetching mention monitors:', error);
+    throw error;
+  }
+}
+
+export async function clearMentionMonitors(userName: string): Promise<ClearMonitorsResult> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = post({
+      apiName: 'DashboardAPI',
+      path: '/mention-monitors/clear',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: {
+          user_name: userName,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as unknown as ClearMonitorsResult;
+  } catch (error) {
+    console.error('Error clearing mention monitors:', error);
+    throw error;
+  }
+}

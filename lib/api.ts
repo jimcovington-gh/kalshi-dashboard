@@ -267,12 +267,11 @@ export async function setTradingStatus(enabled: boolean, reason?: string): Promi
       options: {
         headers: {
           Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
+        body: {
           enabled,
           reason: reason || '',
-        }),
+        },
       },
     });
 

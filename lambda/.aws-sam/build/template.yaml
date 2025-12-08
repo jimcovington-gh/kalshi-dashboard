@@ -163,6 +163,36 @@ Resources:
             Method: GET
     Metadata:
       SamResourceId: GetAnalyticsFunction
+  TradingStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-trading-status
+      CodeUri: TradingStatusFunction
+      Handler: trading-status.lambda_handler
+      Description: Get and set trading shutdown status (admin only for POST)
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: production-kalshi-trading-shutdown-signals
+      Events:
+        GetTradingStatus:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /trading-status
+            Method: GET
+        SetTradingStatus:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /trading-status
+            Method: POST
+    Metadata:
+      SamResourceId: TradingStatusFunction
   SharedCodeLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:

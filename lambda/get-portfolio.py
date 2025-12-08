@@ -111,8 +111,15 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                 # Get earliest fill time (placed_at or completed_at)
                 fill_times = [t.get('completed_at') or t.get('placed_at') for t in items if t.get('completed_at') or t.get('placed_at')]
                 earliest_fill = min(fill_times) if fill_times else None
-                # Get idea_name from first trade with this ticker
-                idea_name = items[0].get('idea_name', 'unknown') if items else 'unknown'
+                
+                # Get idea_name - if multiple trades, check if they're all the same
+                idea_names = [t.get('idea_name') for t in items if t.get('idea_name')]
+                if idea_names:
+                    # If all trades have the same idea_name, use it; otherwise show "VARIOUS"
+                    idea_name = idea_names[0] if len(set(idea_names)) == 1 else 'VARIOUS'
+                else:
+                    idea_name = None
+                
                 if total_contracts > 0:
                     return ticker, total_cost / total_contracts, earliest_fill, idea_name
             return ticker, None, None, None

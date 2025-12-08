@@ -1,4 +1,4 @@
-import { get } from 'aws-amplify/api';
+import { get, post } from 'aws-amplify/api';
 import { fetchAuthSession } from 'aws-amplify/auth';
 
 // V2 Trade schema - uses market_ticker, idea_name, placed_at, completed_at
@@ -198,6 +198,7 @@ export async function getAnalytics(
       params.user_name = userName;
     }
 
+
     const queryString = new URLSearchParams(params).toString();
     
     const restOperation = get({
@@ -216,6 +217,71 @@ export async function getAnalytics(
     return data as any;
   } catch (error) {
     console.error('Error fetching analytics:', error);
+    throw error;
+  }
+}
+
+// Trading Status Types and Functions
+export interface TradingStatus {
+  trading_enabled: boolean | null;
+  shutdown_active: boolean | null;
+  reason: string;
+  triggered_at: string;
+  triggered_by: string;
+  error?: string;
+}
+
+export async function getTradingStatus(): Promise<TradingStatus> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: '/trading-status',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as TradingStatus;
+  } catch (error) {
+    console.error('Error fetching trading status:', error);
+    throw error;
+  }
+}
+
+export async function setTradingStatus(enabled: boolean, reason?: string): Promise<TradingStatus> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = post({
+      apiName: 'DashboardAPI',
+      path: '/trading-status',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          enabled,
+          reason: reason || '',
+        }),
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as TradingStatus;
+  } catch (error) {
+    console.error('Error setting trading status:', error);
     throw error;
   }
 }

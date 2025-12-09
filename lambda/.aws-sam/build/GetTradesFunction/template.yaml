@@ -210,11 +210,14 @@ Resources:
         Variables:
           ORDERS_TABLE: production-kalshi-orders
           TRADES_TABLE: production-kalshi-trades-v2
+          MENTION_EVENTS_TABLE: production-kalshi-mention-events
       Policies:
         - DynamoDBReadPolicy:
             TableName: production-kalshi-orders
         - DynamoDBReadPolicy:
             TableName: production-kalshi-trades-v2
+        - DynamoDBReadPolicy:
+            TableName: production-kalshi-mention-events
         - Statement:
             - Effect: Allow
               Action:

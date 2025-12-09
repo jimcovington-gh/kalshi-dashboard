@@ -392,6 +392,8 @@ export interface MarketCaptureRun {
 export interface RecentOrder {
   order_id: string;
   market_ticker: string;
+  event_ticker: string;
+  series_ticker: string;
   user_name: string;
   side: 'yes' | 'no';
   action: 'buy' | 'sell';
@@ -406,6 +408,8 @@ export interface RecentOrder {
 export interface RecentTrade {
   order_id: string;
   market_ticker: string;
+  event_ticker: string;
+  series_ticker: string;
   user_name: string;
   side: 'yes' | 'no';
   action: 'buy' | 'sell';
@@ -421,10 +425,22 @@ export interface RecentTrade {
   idea_version: string;
 }
 
+export interface UpcomingMentionEvent {
+  event_ticker: string;
+  series_ticker: string;
+  title: string;
+  sub_title: string;
+  category: string;
+  start_date: string;
+  strike_date: string;
+  hours_until_start: number;
+}
+
 export interface AdminStatsResponse {
   market_capture_runs: MarketCaptureRun[];
   recent_orders: RecentOrder[];
   recent_trades: RecentTrade[];
+  upcoming_mention_events: UpcomingMentionEvent[];
   error?: string;
 }
 

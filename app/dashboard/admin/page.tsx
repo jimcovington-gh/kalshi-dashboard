@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { isAdmin, getTradingStatus, setTradingStatus, TradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade } from '@/lib/api';
+import { isAdmin, getTradingStatus, setTradingStatus, TradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
@@ -149,33 +149,42 @@ export default function AdminPage() {
   }
 
   // Helper function to build Kalshi event URL from event_ticker
-  // Event tickers follow format like: KXNBAMENTION-25DEC03OKCGSW
-  // URL format: https://kalshi.com/events/KXNBAMENTION/KXNBAMENTION-25DEC03OKCGSW
   function buildEventUrl(eventTicker: string): string {
     if (!eventTicker) return '';
-    // Extract the series ticker (everything before the first hyphen or the whole thing if it follows series pattern)
-    // Most event tickers are like: SERIESNAME-DATE or SERIESNAME-DATEDETAILS
     const parts = eventTicker.split('-');
     const seriesTicker = parts[0];
-    return `https://kalshi.com/events/${seriesTicker}/${eventTicker}`;
+    return `https://kalshi.com/markets/${seriesTicker}/${eventTicker}`;
   }
 
-  // Helper function to format timestamp for display
+  // Helper function to build Kalshi market URL
+  function buildMarketUrl(seriesTicker: string, eventTicker: string, marketTicker: string): string {
+    if (!seriesTicker || !eventTicker) return '';
+    return `https://kalshi.com/markets/${seriesTicker}/${eventTicker}#${marketTicker}`;
+  }
+
+  // Helper function to format timestamp for display (compact)
   function formatTimestamp(timestamp: number | string | null): string {
     if (!timestamp) return '-';
     try {
       const ts = typeof timestamp === 'string' ? parseInt(timestamp, 10) : timestamp;
       const date = new Date(ts * 1000);
       return date.toLocaleString('en-US', { 
-        month: 'short', 
+        month: 'numeric', 
         day: 'numeric', 
-        hour: '2-digit', 
+        hour: 'numeric', 
         minute: '2-digit',
         hour12: true 
       });
     } catch {
       return '-';
     }
+  }
+
+  // Helper to format hours until start
+  function formatHoursUntil(hours: number): string {
+    if (hours < 1) return `${Math.round(hours * 60)}m`;
+    if (hours < 24) return `${hours.toFixed(1)}h`;
+    return `${Math.round(hours / 24)}d`;
   }
 
   if (!isAdminUser) {
@@ -484,133 +493,111 @@ export default function AdminPage() {
       </div>
 
       {/* Market Capture Runs Section */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            📊 Market Capture Runs
-            {adminStatsLoading && (
-              <span className="text-sm font-normal text-gray-500">Loading...</span>
-            )}
-          </h2>
-          <button
-            onClick={loadAdminStats}
-            disabled={adminStatsLoading}
-            className="px-3 py-1 text-sm font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md disabled:opacity-50"
-          >
-            🔄 Refresh
-          </button>
+      <div className="bg-white rounded-lg shadow p-4">
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="text-lg font-bold text-gray-900">📊 Market Capture (2min)</h2>
+          <button onClick={loadAdminStats} disabled={adminStatsLoading}
+            className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50">🔄</button>
         </div>
-
         {adminStats && adminStats.market_capture_runs.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Duration</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Markets Processed</th>
+          <table className="min-w-full text-xs">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-2 py-1 text-left font-medium text-gray-500">Time</th>
+                <th className="px-2 py-1 text-right font-medium text-gray-500">Duration</th>
+                <th className="px-2 py-1 text-right font-medium text-gray-500">Markets</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {adminStats.market_capture_runs.map((run, idx) => (
+                <tr key={run.timestamp} className={idx === 0 ? 'bg-green-50' : ''}>
+                  <td className="px-2 py-1 text-gray-700">{new Date(run.timestamp).toLocaleTimeString()}</td>
+                  <td className="px-2 py-1 text-right font-mono">
+                    <span className={run.duration_sec > 60 ? 'text-orange-600' : 'text-green-600'}>{run.duration_sec}s</span>
+                  </td>
+                  <td className="px-2 py-1 text-right font-mono">{run.record_count.toLocaleString()}</td>
                 </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {adminStats.market_capture_runs.map((run, idx) => (
-                  <tr key={run.timestamp} className={idx === 0 ? 'bg-green-50' : 'hover:bg-gray-50'}>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                      {new Date(run.timestamp).toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right font-mono">
-                      <span className={`${run.duration_sec > 60 ? 'text-orange-600' : 'text-green-600'}`}>
-                        {run.duration_sec}s
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right font-mono text-gray-900">
-                      {run.record_count.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {adminStats && adminStats.market_capture_runs.length === 0 && (
-          <div className="text-center py-8 text-gray-500">
-            No recent market capture runs found
-          </div>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
 
-      {/* Recent Orders Section */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            📝 Recent Orders (20)
-          </h2>
-        </div>
+      {/* Upcoming Mention Events Section */}
+      <div className="bg-white rounded-lg shadow p-4">
+        <h2 className="text-lg font-bold text-gray-900 mb-2">⏰ Upcoming Mentions (24h)</h2>
+        {adminStats && adminStats.upcoming_mention_events && adminStats.upcoming_mention_events.length > 0 ? (
+          <table className="min-w-full text-xs">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-2 py-1 text-left font-medium text-gray-500">Event</th>
+                <th className="px-2 py-1 text-left font-medium text-gray-500">Title</th>
+                <th className="px-2 py-1 text-right font-medium text-gray-500">Starts In</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {adminStats.upcoming_mention_events.map((evt) => (
+                <tr key={evt.event_ticker} className={evt.hours_until_start < 2 ? 'bg-yellow-50' : ''}>
+                  <td className="px-2 py-1">
+                    <a href={buildEventUrl(evt.event_ticker)} target="_blank" rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline font-mono">{evt.event_ticker}</a>
+                  </td>
+                  <td className="px-2 py-1 text-gray-700 max-w-xs truncate" title={evt.title}>{evt.title}</td>
+                  <td className="px-2 py-1 text-right font-mono">
+                    <span className={evt.hours_until_start < 2 ? 'text-orange-600 font-semibold' : 'text-gray-600'}>
+                      {formatHoursUntil(evt.hours_until_start)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="text-center py-4 text-gray-500 text-sm">No upcoming mention events</div>
+        )}
+      </div>
 
+      {/* Recent Orders Section - links to Kalshi */}
+      <div className="bg-white rounded-lg shadow p-4">
+        <h2 className="text-lg font-bold text-gray-900 mb-2">📝 Recent Orders</h2>
         {adminStats && adminStats.recent_orders.length > 0 && (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <table className="min-w-full text-xs">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ticker</th>
-                  <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Side</th>
-                  <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Action</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Price</th>
-                  <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Idea</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Time</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">User</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Market</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">Side</th>
+                  <th className="px-2 py-1 text-right font-medium text-gray-500">Qty</th>
+                  <th className="px-2 py-1 text-right font-medium text-gray-500">Price</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">Status</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="divide-y divide-gray-100">
                 {adminStats.recent_orders.map((order) => (
                   <tr key={order.order_id} className="hover:bg-gray-50">
-                    <td className="px-3 py-2 whitespace-nowrap text-gray-600">
-                      {formatTimestamp(order.placed_at)}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap font-medium text-gray-900">
-                      {order.user_name}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <a 
-                        href={`/dashboard/trades?ticker=${order.market_ticker}&user_name=${order.user_name}`}
-                        className="text-blue-600 hover:underline font-mono text-xs"
-                      >
-                        {order.market_ticker.length > 30 
-                          ? order.market_ticker.substring(0, 30) + '...' 
-                          : order.market_ticker}
+                    <td className="px-2 py-1 text-gray-600 whitespace-nowrap">{formatTimestamp(order.placed_at)}</td>
+                    <td className="px-2 py-1 font-medium">{order.user_name}</td>
+                    <td className="px-2 py-1">
+                      <a href={buildMarketUrl(order.series_ticker, order.event_ticker, order.market_ticker)}
+                        target="_blank" rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline font-mono">
+                        {order.market_ticker.length > 28 ? order.market_ticker.substring(0, 28) + '…' : order.market_ticker}
                       </a>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                        order.side === 'yes' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-                      }`}>
+                    <td className="px-2 py-1 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${order.side === 'yes' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                         {order.side.toUpperCase()}
                       </span>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-center text-gray-600">
-                      {order.action}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right font-mono text-gray-900">
-                      {order.quantity}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right font-mono text-gray-900">
-                      ${order.limit_price.toFixed(2)}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                        order.order_status === 'executed' ? 'bg-green-100 text-green-800' :
-                        order.order_status === 'resting' ? 'bg-yellow-100 text-yellow-800' :
-                        order.order_status === 'cancelled' ? 'bg-gray-100 text-gray-600' :
-                        order.order_status === 'pending' ? 'bg-blue-100 text-blue-800' :
-                        'bg-gray-100 text-gray-600'
-                      }`}>
-                        {order.order_status}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-gray-600 text-xs">
-                      {order.idea_name || '-'}
+                    <td className="px-2 py-1 text-right font-mono">{order.quantity}</td>
+                    <td className="px-2 py-1 text-right font-mono">${order.limit_price.toFixed(2)}</td>
+                    <td className="px-2 py-1 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${
+                        order.order_status === 'executed' ? 'bg-green-100 text-green-700' :
+                        order.order_status === 'resting' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-gray-100 text-gray-600'}`}>{order.order_status}</span>
                     </td>
                   </tr>
                 ))}
@@ -618,96 +605,60 @@ export default function AdminPage() {
             </table>
           </div>
         )}
-
         {adminStats && adminStats.recent_orders.length === 0 && (
-          <div className="text-center py-8 text-gray-500">
-            No recent orders found
-          </div>
+          <div className="text-center py-4 text-gray-500 text-sm">No recent orders</div>
         )}
       </div>
 
-      {/* Recent Trades Section */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            💰 Recent Trades (20)
-          </h2>
-        </div>
-
+      {/* Recent Trades Section - links to trade details */}
+      <div className="bg-white rounded-lg shadow p-4">
+        <h2 className="text-lg font-bold text-gray-900 mb-2">💰 Recent Trades</h2>
         {adminStats && adminStats.recent_trades.length > 0 && (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <table className="min-w-full text-xs">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ticker</th>
-                  <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Side</th>
-                  <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Action</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Filled</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Avg Price</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Idea</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Time</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">User</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Market</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">Side</th>
+                  <th className="px-2 py-1 text-right font-medium text-gray-500">Filled</th>
+                  <th className="px-2 py-1 text-right font-medium text-gray-500">Price</th>
+                  <th className="px-2 py-1 text-right font-medium text-gray-500">Total</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="divide-y divide-gray-100">
                 {adminStats.recent_trades.map((trade) => (
                   <tr key={trade.order_id} className="hover:bg-gray-50">
-                    <td className="px-3 py-2 whitespace-nowrap text-gray-600">
-                      {formatTimestamp(trade.completed_at || trade.placed_at)}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap font-medium text-gray-900">
-                      {trade.user_name}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <a 
-                        href={`/dashboard/trades?ticker=${trade.market_ticker}&user_name=${trade.user_name}`}
-                        className="text-blue-600 hover:underline font-mono text-xs"
-                      >
-                        {trade.market_ticker.length > 30 
-                          ? trade.market_ticker.substring(0, 30) + '...' 
-                          : trade.market_ticker}
+                    <td className="px-2 py-1 text-gray-600 whitespace-nowrap">{formatTimestamp(trade.completed_at || trade.placed_at)}</td>
+                    <td className="px-2 py-1 font-medium">{trade.user_name}</td>
+                    <td className="px-2 py-1">
+                      <a href={`/dashboard/trades?ticker=${trade.market_ticker}&user_name=${trade.user_name}`}
+                        className="text-blue-600 hover:underline font-mono">
+                        {trade.market_ticker.length > 28 ? trade.market_ticker.substring(0, 28) + '…' : trade.market_ticker}
                       </a>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                        trade.side === 'yes' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-                      }`}>
+                    <td className="px-2 py-1 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${trade.side === 'yes' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                         {trade.side.toUpperCase()}
                       </span>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-center text-gray-600">
-                      {trade.action}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right font-mono text-gray-900">
-                      {trade.filled_count}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right font-mono text-gray-900">
-                      ${trade.avg_fill_price.toFixed(2)}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right font-mono font-semibold text-green-600">
-                      ${trade.total_cost.toFixed(2)}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-gray-600 text-xs">
-                      {trade.idea_name || '-'}
-                      {trade.idea_version && <span className="text-gray-400 ml-1">v{trade.idea_version}</span>}
-                    </td>
+                    <td className="px-2 py-1 text-right font-mono">{trade.filled_count}</td>
+                    <td className="px-2 py-1 text-right font-mono">${trade.avg_fill_price.toFixed(2)}</td>
+                    <td className="px-2 py-1 text-right font-mono font-semibold text-green-600">${trade.total_cost.toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-
         {adminStats && adminStats.recent_trades.length === 0 && (
-          <div className="text-center py-8 text-gray-500">
-            No recent trades found
-          </div>
+          <div className="text-center py-4 text-gray-500 text-sm">No recent trades</div>
         )}
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-sm">
           {error}
         </div>
       )}

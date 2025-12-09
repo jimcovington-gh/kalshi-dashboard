@@ -156,10 +156,15 @@ export default function AdminPage() {
     return `https://kalshi.com/markets/${seriesTicker}/${eventTicker}`;
   }
 
-  // Helper function to build Kalshi market URL
-  function buildMarketUrl(seriesTicker: string, eventTicker: string, marketTicker: string): string {
-    if (!seriesTicker || !eventTicker) return '';
-    return `https://kalshi.com/markets/${seriesTicker}/${eventTicker}#${marketTicker}`;
+  // Helper function to build Kalshi event URL from market_ticker
+  function buildMarketUrlFromTicker(marketTicker: string): string {
+    if (!marketTicker) return '';
+    // Extract event ticker by removing the last segment (market suffix)
+    const parts = marketTicker.split('-');
+    if (parts.length < 2) return '';
+    const seriesTicker = parts[0];
+    const eventTicker = parts.slice(0, -1).join('-');
+    return `https://kalshi.com/markets/${seriesTicker}/${eventTicker}`;
   }
 
   // Helper function to format timestamp for display (compact)
@@ -492,6 +497,77 @@ export default function AdminPage() {
         )}
       </div>
 
+      {/* Side-by-side: Active Monitors Table + Upcoming Mentions (desktop) / Stacked (mobile) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Active Monitors Compact Table */}
+        <div className="bg-white rounded-lg shadow p-4 order-1">
+          <h2 className="text-lg font-bold text-gray-900 mb-2">🎯 Active Monitors</h2>
+          {mentionMonitors && mentionMonitors.monitors.length > 0 ? (
+            <table className="min-w-full text-xs">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Event</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">User</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">Phase</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Heartbeat</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {mentionMonitors.monitors.map((m) => (
+                  <tr key={m.event_ticker}>
+                    <td className="px-2 py-1">
+                      <a href={buildEventUrl(m.event_ticker)} target="_blank" rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline font-mono text-xs">{m.event_ticker}</a>
+                    </td>
+                    <td className="px-2 py-1">{m.user_name}</td>
+                    <td className="px-2 py-1 text-center">
+                      <span className={`px-1 py-0.5 rounded text-xs ${m.phase === 'phase1' ? 'bg-yellow-100 text-yellow-700' : m.phase === 'phase2' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{m.phase}</span>
+                    </td>
+                    <td className="px-2 py-1 text-gray-600">{m.last_heartbeat ? formatTimeAgo(m.last_heartbeat) : '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="text-center py-4 text-gray-500 text-sm">No active monitors</div>
+          )}
+        </div>
+
+        {/* Upcoming Mention Events */}
+        <div className="bg-white rounded-lg shadow p-4 order-2">
+          <h2 className="text-lg font-bold text-gray-900 mb-2">⏰ Upcoming Mentions (24h)</h2>
+          {adminStats && adminStats.upcoming_mention_events && adminStats.upcoming_mention_events.length > 0 ? (
+            <table className="min-w-full text-xs">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Event</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Title</th>
+                  <th className="px-2 py-1 text-right font-medium text-gray-500">Starts In</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {adminStats.upcoming_mention_events.map((evt) => (
+                  <tr key={evt.event_ticker} className={evt.hours_until_start < 2 ? 'bg-yellow-50' : ''}>
+                    <td className="px-2 py-1">
+                      <a href={buildEventUrl(evt.event_ticker)} target="_blank" rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline font-mono">{evt.event_ticker}</a>
+                    </td>
+                    <td className="px-2 py-1 text-gray-700 max-w-xs truncate" title={evt.title}>{evt.title}</td>
+                    <td className="px-2 py-1 text-right font-mono">
+                      <span className={evt.hours_until_start < 2 ? 'text-orange-600 font-semibold' : 'text-gray-600'}>
+                        {formatHoursUntil(evt.hours_until_start)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="text-center py-4 text-gray-500 text-sm">No upcoming mention events</div>
+          )}
+        </div>
+      </div>
+
       {/* Market Capture Runs Section */}
       <div className="bg-white rounded-lg shadow p-4">
         <div className="flex justify-between items-center mb-2">
@@ -523,40 +599,6 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* Upcoming Mention Events Section */}
-      <div className="bg-white rounded-lg shadow p-4">
-        <h2 className="text-lg font-bold text-gray-900 mb-2">⏰ Upcoming Mentions (24h)</h2>
-        {adminStats && adminStats.upcoming_mention_events && adminStats.upcoming_mention_events.length > 0 ? (
-          <table className="min-w-full text-xs">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-2 py-1 text-left font-medium text-gray-500">Event</th>
-                <th className="px-2 py-1 text-left font-medium text-gray-500">Title</th>
-                <th className="px-2 py-1 text-right font-medium text-gray-500">Starts In</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {adminStats.upcoming_mention_events.map((evt) => (
-                <tr key={evt.event_ticker} className={evt.hours_until_start < 2 ? 'bg-yellow-50' : ''}>
-                  <td className="px-2 py-1">
-                    <a href={buildEventUrl(evt.event_ticker)} target="_blank" rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline font-mono">{evt.event_ticker}</a>
-                  </td>
-                  <td className="px-2 py-1 text-gray-700 max-w-xs truncate" title={evt.title}>{evt.title}</td>
-                  <td className="px-2 py-1 text-right font-mono">
-                    <span className={evt.hours_until_start < 2 ? 'text-orange-600 font-semibold' : 'text-gray-600'}>
-                      {formatHoursUntil(evt.hours_until_start)}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="text-center py-4 text-gray-500 text-sm">No upcoming mention events</div>
-        )}
-      </div>
-
       {/* Recent Orders Section - links to Kalshi */}
       <div className="bg-white rounded-lg shadow p-4">
         <h2 className="text-lg font-bold text-gray-900 mb-2">📝 Recent Orders</h2>
@@ -580,7 +622,7 @@ export default function AdminPage() {
                     <td className="px-2 py-1 text-gray-600 whitespace-nowrap">{formatTimestamp(order.placed_at)}</td>
                     <td className="px-2 py-1 font-medium">{order.user_name}</td>
                     <td className="px-2 py-1">
-                      <a href={buildMarketUrl(order.series_ticker, order.event_ticker, order.market_ticker)}
+                      <a href={buildMarketUrlFromTicker(order.market_ticker)}
                         target="_blank" rel="noopener noreferrer"
                         className="text-blue-600 hover:underline font-mono">
                         {order.market_ticker.length > 28 ? order.market_ticker.substring(0, 28) + '…' : order.market_ticker}
@@ -625,6 +667,7 @@ export default function AdminPage() {
                   <th className="px-2 py-1 text-right font-medium text-gray-500">Filled</th>
                   <th className="px-2 py-1 text-right font-medium text-gray-500">Price</th>
                   <th className="px-2 py-1 text-right font-medium text-gray-500">Total</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Idea</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -646,6 +689,7 @@ export default function AdminPage() {
                     <td className="px-2 py-1 text-right font-mono">{trade.filled_count}</td>
                     <td className="px-2 py-1 text-right font-mono">${trade.avg_fill_price.toFixed(2)}</td>
                     <td className="px-2 py-1 text-right font-mono font-semibold text-green-600">${trade.total_cost.toFixed(2)}</td>
+                    <td className="px-2 py-1 text-gray-600">{trade.idea_name || '-'}</td>
                   </tr>
                 ))}
               </tbody>

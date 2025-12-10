@@ -171,11 +171,13 @@ Resources:
       Handler: trading-status.lambda_handler
       Description: Get and set trading shutdown status (admin only for POST)
       AutoPublishAlias: live
-      ProvisionedConcurrencyConfig:
-        ProvisionedConcurrentExecutions: 1
+      Layers:
+      - Ref: SharedCodeLayer
       Policies:
       - DynamoDBCrudPolicy:
           TableName: production-kalshi-trading-shutdown-signals
+      - S3ReadPolicy:
+          BucketName: production-kalshi-trading-config
       Events:
         GetTradingStatus:
           Type: Api

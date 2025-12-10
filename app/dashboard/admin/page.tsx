@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { isAdmin, getTradingStatus, setTradingStatus, TradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent } from '@/lib/api';
+import { isAdmin, getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
@@ -21,6 +21,9 @@ export default function AdminPage() {
   // Admin stats state
   const [adminStats, setAdminStats] = useState<AdminStatsResponse | null>(null);
   const [adminStatsLoading, setAdminStatsLoading] = useState(false);
+  
+  // Per-user/per-idea toggle state
+  const [toggleLoading, setToggleLoading] = useState<string | null>(null); // Format: "user_name#idea_id"
   
   const router = useRouter();
 
@@ -125,6 +128,68 @@ export default function AdminPage() {
       setError(err.message || 'Failed to update trading status');
     } finally {
       setTradingStatusLoading(false);
+    }
+  }
+
+  async function handleUserIdeaToggle(userName: string, ideaId: string, currentEnabled: boolean) {
+    const toggleKey = `${userName}#${ideaId}`;
+    const newEnabled = !currentEnabled;
+    
+    // Optimistic update: Update UI immediately before API call
+    if (tradingStatus?.users) {
+      setTradingStatusState(prev => {
+        if (!prev?.users) return prev;
+        return {
+          ...prev,
+          users: prev.users.map(user => {
+            if (user.user_name !== userName) return user;
+            return {
+              ...user,
+              ideas: {
+                ...user.ideas,
+                [ideaId]: {
+                  ...user.ideas[ideaId],
+                  enabled: newEnabled,
+                  updated_at: new Date().toISOString()
+                }
+              }
+            };
+          })
+        };
+      });
+    }
+    
+    setToggleLoading(toggleKey);
+    try {
+      await setUserIdeaToggle(userName, ideaId, newEnabled);
+      // Refresh to sync with server (in case of any discrepancies)
+      await loadTradingStatus();
+    } catch (err: any) {
+      // Rollback on error: revert to previous state
+      if (tradingStatus?.users) {
+        setTradingStatusState(prev => {
+          if (!prev?.users) return prev;
+          return {
+            ...prev,
+            users: prev.users.map(user => {
+              if (user.user_name !== userName) return user;
+              return {
+                ...user,
+                ideas: {
+                  ...user.ideas,
+                  [ideaId]: {
+                    ...user.ideas[ideaId],
+                    enabled: currentEnabled // Revert to original
+                  }
+                }
+              };
+            })
+          };
+        });
+      }
+      setError(err.message || 'Failed to toggle user idea status');
+    } finally {
+      setToggleLoading(null);
     }
   }
 
@@ -302,6 +367,111 @@ export default function AdminPage() {
               >
                 {tradingStatusLoading ? 'Stopping...' : 'STOP TRADING'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Per-User/Per-Idea Trading Controls */}
+      {tradingStatus?.ideas && tradingStatus?.users && tradingStatus.users.length > 0 && (
+        <div className="bg-white rounded-lg shadow p-4">
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+              🎛️ Trading Idea Controls
+              {tradingStatus.shutdown_active && (
+                <span className="text-xs font-normal text-red-600">(Master shutdown active)</span>
+              )}
+            </h2>
+            <button
+              onClick={loadTradingStatus}
+              disabled={tradingStatusLoading}
+              className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50"
+            >
+              🔄
+            </button>
+          </div>
+          
+          {/* Mobile-friendly responsive grid */}
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-2 py-2 text-left font-semibold text-gray-700 sticky left-0 bg-gray-50">User</th>
+                  {tradingStatus.ideas.map((idea) => (
+                    <th key={idea.idea_id} className="px-2 py-2 text-center font-semibold text-gray-700 whitespace-nowrap">
+                      <div title={idea.description}>{idea.display_name}</div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {tradingStatus.users.map((user) => (
+                  <tr key={user.user_name} className="hover:bg-gray-50">
+                    <td className="px-2 py-2 font-medium text-gray-900 sticky left-0 bg-white">
+                      {user.user_name}
+                    </td>
+                    {tradingStatus.ideas!.map((idea) => {
+                      const ideaStatus = user.ideas[idea.idea_id];
+                      const isEnabled = ideaStatus?.enabled ?? false;
+                      const toggleKey = `${user.user_name}#${idea.idea_id}`;
+                      const isLoading = toggleLoading === toggleKey;
+                      const isDisabledByMaster = tradingStatus.shutdown_active;
+                      
+                      return (
+                        <td key={idea.idea_id} className="px-2 py-2 text-center">
+                          <button
+                            onClick={() => handleUserIdeaToggle(user.user_name, idea.idea_id, isEnabled)}
+                            disabled={isLoading || isDisabledByMaster}
+                            className={`
+                              w-12 h-6 rounded-full relative transition-colors duration-200 
+                              ${isDisabledByMaster 
+                                ? 'bg-gray-300 cursor-not-allowed opacity-50' 
+                                : isEnabled 
+                                  ? 'bg-green-500 hover:bg-green-600' 
+                                  : 'bg-red-400 hover:bg-red-500'
+                              }
+                              ${isLoading ? 'animate-pulse' : ''}
+                            `}
+                            title={
+                              isDisabledByMaster 
+                                ? 'Master shutdown is active' 
+                                : `${isEnabled ? 'Enabled' : 'Disabled'} - Click to toggle`
+                            }
+                          >
+                            <span 
+                              className={`
+                                absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200
+                                ${isEnabled ? 'translate-x-6' : 'translate-x-0.5'}
+                              `}
+                            />
+                            {isLoading && (
+                              <span className="absolute inset-0 flex items-center justify-center text-white text-xs">
+                                ...
+                              </span>
+                            )}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          
+          {/* Legend */}
+          <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-500">
+            <div className="flex items-center gap-1">
+              <span className="w-4 h-4 rounded-full bg-green-500"></span>
+              <span>Enabled</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="w-4 h-4 rounded-full bg-red-400"></span>
+              <span>Disabled</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="w-4 h-4 rounded-full bg-gray-300"></span>
+              <span>Blocked by master</span>
             </div>
           </div>
         </div>

@@ -222,6 +222,22 @@ export async function getAnalytics(
 }
 
 // Trading Status Types and Functions
+export interface TradingIdea {
+  idea_id: string;
+  display_name: string;
+  description: string;
+}
+
+export interface UserIdeaStatus {
+  enabled: boolean;
+  updated_at: string;
+}
+
+export interface UserTradingStatus {
+  user_name: string;
+  ideas: Record<string, UserIdeaStatus>;
+}
+
 export interface TradingStatus {
   trading_enabled: boolean | null;
   shutdown_active: boolean | null;
@@ -229,6 +245,8 @@ export interface TradingStatus {
   triggered_at: string;
   triggered_by: string;
   error?: string;
+  ideas?: TradingIdea[];
+  users?: UserTradingStatus[];
 }
 
 export async function getTradingStatus(): Promise<TradingStatus> {
@@ -281,6 +299,48 @@ export async function setTradingStatus(enabled: boolean, reason?: string): Promi
     return data as unknown as TradingStatus;
   } catch (error) {
     console.error('Error setting trading status:', error);
+    throw error;
+  }
+}
+
+export interface UserIdeaToggleResult {
+  user_name: string;
+  idea_id: string;
+  enabled: boolean;
+  updated_at: string;
+  updated_by: string;
+}
+
+export async function setUserIdeaToggle(
+  userName: string,
+  ideaId: string,
+  enabled: boolean
+): Promise<UserIdeaToggleResult> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = post({
+      apiName: 'DashboardAPI',
+      path: '/trading-status',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: {
+          user_name: userName,
+          idea_id: ideaId,
+          enabled,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as unknown as UserIdeaToggleResult;
+  } catch (error) {
+    console.error('Error setting user idea toggle:', error);
     throw error;
   }
 }

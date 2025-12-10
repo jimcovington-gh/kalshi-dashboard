@@ -440,8 +440,8 @@ export default function AdminPage() {
                           >
                             <span 
                               className={`
-                                absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200
-                                ${isEnabled ? 'translate-x-6' : 'translate-x-0.5'}
+                                absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all duration-200
+                                ${isEnabled ? 'left-[26px]' : 'left-0.5'}
                               `}
                             />
                             {isLoading && (

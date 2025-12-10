@@ -415,7 +415,7 @@ export default function AdminPage() {
                       const isEnabled = ideaStatus?.enabled ?? false;
                       const toggleKey = `${user.user_name}#${idea.idea_id}`;
                       const isLoading = toggleLoading === toggleKey;
-                      const isDisabledByMaster = tradingStatus.shutdown_active;
+                      const isDisabledByMaster = tradingStatus.shutdown_active ?? false;
                       
                       return (
                         <td key={idea.idea_id} className="px-2 py-2 text-center">

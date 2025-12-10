@@ -423,32 +423,23 @@ export default function AdminPage() {
                             onClick={() => handleUserIdeaToggle(user.user_name, idea.idea_id, isEnabled)}
                             disabled={isLoading || isDisabledByMaster}
                             className={`
-                              w-12 h-6 rounded-full relative transition-colors duration-200 
+                              px-3 py-1 rounded text-xs font-bold uppercase tracking-wide
+                              transition-colors duration-200 min-w-[4rem]
                               ${isDisabledByMaster 
-                                ? 'bg-gray-300 cursor-not-allowed opacity-50' 
+                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
                                 : isEnabled 
-                                  ? 'bg-green-500 hover:bg-green-600' 
-                                  : 'bg-red-400 hover:bg-red-500'
+                                  ? 'bg-green-500 hover:bg-green-600 text-white' 
+                                  : 'bg-red-500 hover:bg-red-600 text-white'
                               }
                               ${isLoading ? 'animate-pulse' : ''}
                             `}
                             title={
                               isDisabledByMaster 
                                 ? 'Master shutdown is active' 
-                                : `${isEnabled ? 'Enabled' : 'Disabled'} - Click to toggle`
+                                : `Click to ${isEnabled ? 'disable' : 'enable'}`
                             }
                           >
-                            <span 
-                              className={`
-                                absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all duration-200
-                                ${isEnabled ? 'left-[26px]' : 'left-0.5'}
-                              `}
-                            />
-                            {isLoading && (
-                              <span className="absolute inset-0 flex items-center justify-center text-white text-xs">
-                                ...
-                              </span>
-                            )}
+                            {isLoading ? '...' : isEnabled ? 'ON' : 'OFF'}
                           </button>
                         </td>
                       );
@@ -462,15 +453,15 @@ export default function AdminPage() {
           {/* Legend */}
           <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-500">
             <div className="flex items-center gap-1">
-              <span className="w-4 h-4 rounded-full bg-green-500"></span>
-              <span>Enabled</span>
+              <span className="px-2 py-0.5 rounded bg-green-500 text-white text-xs font-bold">ON</span>
+              <span>Trading enabled</span>
             </div>
             <div className="flex items-center gap-1">
-              <span className="w-4 h-4 rounded-full bg-red-400"></span>
-              <span>Disabled</span>
+              <span className="px-2 py-0.5 rounded bg-red-500 text-white text-xs font-bold">OFF</span>
+              <span>Trading disabled</span>
             </div>
             <div className="flex items-center gap-1">
-              <span className="w-4 h-4 rounded-full bg-gray-300"></span>
+              <span className="px-2 py-0.5 rounded bg-gray-300 text-gray-500 text-xs font-bold">OFF</span>
               <span>Blocked by master</span>
             </div>
           </div>

@@ -105,11 +105,21 @@ export default function QuickBetsPage() {
           },
         });
 
-        if (!response.ok) {
-          throw new Error('Failed to fetch events');
+        const data = await response.json();
+
+        // Check for credentials error BEFORE checking response.ok
+        if (data.error_code === 'NO_TRADING_CREDENTIALS') {
+          setError('This account does not have Kalshi trading credentials configured. Please log in with a different account that has trading access.');
+          addLog('❌ No trading credentials for this account', 'error');
+          addLog('Please log out and sign in with a trading account', 'error');
+          setPageState('lobby');
+          return;
         }
 
-        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to fetch events');
+        }
+
         setAvailableEvents(data.available_events || []);
         setUserSessions(data.user_sessions || []);
         
@@ -180,8 +190,8 @@ export default function QuickBetsPage() {
       if (!response.ok) {
         // Handle specific error codes with user-friendly messages
         if (data.error_code === 'NO_TRADING_CREDENTIALS') {
-          setError('This account does not have Kalshi trading credentials configured. Please log in with a trading account (e.g., jimc or andrews).');
-          addLog('❌ No trading credentials for this user', 'error');
+          setError('This account does not have Kalshi trading credentials configured. Please log in with a different account that has trading access.');
+          addLog('❌ No trading credentials for this account', 'error');
           addLog('Please log out and sign in with a trading account', 'error');
         } else {
           setError(data.error || 'Failed to launch server');

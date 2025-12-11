@@ -29,6 +29,22 @@ interface TeamPrices {
   };
 }
 
+interface GameState {
+  home_points?: number;
+  away_points?: number;
+  home_team?: string;  // Team abbreviation (e.g., "ATL")
+  away_team?: string;  // Team abbreviation (e.g., "TB")
+  home_team_id?: string;
+  away_team_id?: string;
+  status?: string;
+  period_type?: string;
+  period_number?: number;
+  clock?: string;
+  possession_team?: string;  // Team abbreviation with possession
+  possession_team_id?: string;
+  winner?: string;
+}
+
 interface LogEntry {
   time: string;
   message: string;
@@ -53,6 +69,11 @@ export default function QuickBetsPage() {
   const [eventTitle, setEventTitle] = useState<string>('');
   const [connected, setConnected] = useState(false);
   const [prices, setPrices] = useState<TeamPrices>({});
+  const [gameState, setGameState] = useState<GameState>({});
+  
+  // Price log throttling (60 second interval)
+  const lastPriceLogTime = useRef<number>(0);
+  const PRICE_LOG_INTERVAL_MS = 60 * 1000; // 60 seconds
   
   // Logs
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -169,10 +190,22 @@ export default function QuickBetsPage() {
       case 'prices':
         if (data.data) {
           setPrices(data.data);
-          const teams = Object.keys(data.data).filter(k => k !== 'updated_at');
-          if (teams.length > 0) {
-            addLog(`Price update: ${teams.map(t => `${t}=${data.data[t]?.best_ask || '--'}¢`).join(', ')}`, 'price');
+          // Throttle price log display to every 60 seconds
+          const now = Date.now();
+          if (now - lastPriceLogTime.current >= PRICE_LOG_INTERVAL_MS) {
+            const teams = Object.keys(data.data).filter(k => k !== 'updated_at');
+            if (teams.length > 0) {
+              addLog(`Price update: ${teams.map(t => `${t}=${data.data[t]?.best_ask || '--'}¢`).join(', ')}`, 'price');
+            }
+            lastPriceLogTime.current = now;
           }
+        }
+        break;
+      
+      case 'game_update':
+        // Update game state (scores, period, clock, etc.)
+        if (data.data) {
+          setGameState(prev => ({ ...prev, ...data.data }));
         }
         break;
 
@@ -512,20 +545,35 @@ export default function QuickBetsPage() {
             {/* Team Cards */}
             <div className="grid grid-cols-2 gap-6 mb-4">
               {teams.length > 0 ? (
-                teams.map((team) => (
-                  <div key={team} className="bg-gray-800 rounded-2xl p-8 text-center">
-                    <div className="text-3xl font-bold mb-4">{team.toUpperCase()}</div>
-                    <div className="text-5xl font-bold text-cyan-400 mb-6">
-                      {prices[team]?.best_ask || '--'}¢
+                teams.map((team) => {
+                  // Determine score for this team based on home/away mapping
+                  let teamScore: number | undefined;
+                  if (gameState.home_team?.toUpperCase() === team.toUpperCase()) {
+                    teamScore = gameState.home_points;
+                  } else if (gameState.away_team?.toUpperCase() === team.toUpperCase()) {
+                    teamScore = gameState.away_points;
+                  }
+                  
+                  return (
+                    <div key={team} className="bg-gray-800 rounded-2xl p-8 text-center">
+                      <div className="text-3xl font-bold mb-4">
+                        {team.toUpperCase()}
+                        {teamScore !== undefined && (
+                          <span className="ml-3 text-yellow-400">{teamScore}</span>
+                        )}
+                      </div>
+                      <div className="text-5xl font-bold text-cyan-400 mb-6">
+                        {prices[team]?.best_ask || '--'}¢
+                      </div>
+                      <button
+                        onClick={() => sendBuy(team)}
+                        className="w-full py-5 text-2xl font-bold uppercase tracking-wider bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+                      >
+                        BUY {team.toUpperCase()}
+                      </button>
                     </div>
-                    <button
-                      onClick={() => sendBuy(team)}
-                      className="w-full py-5 text-2xl font-bold uppercase tracking-wider bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98]"
-                    >
-                      BUY {team.toUpperCase()}
-                    </button>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <div className="col-span-2 text-center py-12 text-gray-400">
                   Waiting for price updates...
@@ -533,9 +581,25 @@ export default function QuickBetsPage() {
               )}
             </div>
             
-            {/* Event Title Banner - below team cards */}
+            {/* Event/Game Status Banner - below team cards */}
             <div className="bg-green-900/50 border border-green-500 text-green-200 px-4 py-3 rounded-lg mb-6 text-center font-medium">
-              {eventTitle || eventTicker}
+              {/* Show game status if available, otherwise event title */}
+              {gameState.status && gameState.status !== 'scheduled' ? (
+                <span>
+                  {gameState.clock && <span>{gameState.clock}</span>}
+                  {gameState.period_type && gameState.period_number && (
+                    <span>{gameState.clock ? ' • ' : ''}{gameState.period_type.charAt(0).toUpperCase() + gameState.period_type.slice(1)} {gameState.period_number}</span>
+                  )}
+                  {gameState.status && (
+                    <span>{(gameState.clock || gameState.period_type) ? ' • ' : ''}{gameState.status.replace('_', ' ').toUpperCase()}</span>
+                  )}
+                  {gameState.possession_team && (
+                    <span> • 🏈 {gameState.possession_team.toUpperCase()}</span>
+                  )}
+                </span>
+              ) : (
+                eventTitle || eventTicker
+              )}
             </div>
           </>
         )}

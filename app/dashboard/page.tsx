@@ -183,7 +183,7 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
       {determinedPositions.length > 0 && (
         <PositionsTable 
           positions={sortedDeterminedPositions} 
-          title="Determined (Awaiting Settlement)" 
+          title="Awaiting Settlement" 
           userName={portfolio.user_name}
           badgeColor="gray"
         />

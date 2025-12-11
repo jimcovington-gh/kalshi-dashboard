@@ -154,68 +154,54 @@ export default function QuickBetsPage() {
     };
   }, [router, addLog]);
 
-  // Launch Fargate for selected event
-  const launchEvent = useCallback(async (selectedEvent: string, title?: string) => {
-    if (!authToken) {
-      addLog('Not authenticated', 'error');
-      return;
-    }
+  // Handle WebSocket messages - MUST be defined before connectWebSocket
+  const handleWebSocketMessage = useCallback((data: any) => {
+    const msgType = data.type;
     
-    setPageState('launching');
-    isLaunching.current = true;
-    setEventTicker(selectedEvent);
-    setEventTitle(title || selectedEvent);
-    addLog(`Launching server for ${title || selectedEvent}...`);
-    
-    // Request wake lock immediately to prevent screen sleep during launch
-    if ('wakeLock' in navigator) {
-      navigator.wakeLock.request('screen').then(lock => {
-        wakeLockRef.current = lock;
-        addLog('Screen wake lock acquired', 'info');
-      }).catch(() => {});
-    }
-    
-    try {
-      const response = await fetch(`${API_BASE}/launch`, {
-        method: 'POST',
-        headers: {
-          'Authorization': authToken,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ event_ticker: selectedEvent }),
-      });
-
-      const data = await response.json();
-      
-      if (!response.ok) {
-        // Handle specific error codes with user-friendly messages
-        if (data.error_code === 'NO_TRADING_CREDENTIALS') {
-          setError('This account does not have Kalshi trading credentials configured. Please log in with a different account that has trading access.');
-          addLog('❌ No trading credentials for this account', 'error');
-          addLog('Please log out and sign in with a trading account', 'error');
-        } else {
-          setError(data.error || 'Failed to launch server');
-          addLog(`Error: ${data.error || 'Failed to launch server'}`, 'error');
-        }
-        setPageState('lobby');
+    switch (msgType) {
+      case 'auth_success':
+        setConnected(true);
+        setPageState('trading');
         isLaunching.current = false;
-        return;
-      }
+        addLog(`Authenticated as ${data.user}`, 'success');
+        break;
       
-      addLog(`Server ${data.status}: ${data.message}`, 'success');
-      
-      // Connect to WebSocket - start immediately, retry handles NLB health check delay
-      const wsUrl = data.websocket_url;
-      connectWebSocket(wsUrl, authToken, selectedEvent);
-      
-    } catch (err: any) {
-      console.error('Error launching:', err);
-      setError(err.message);
-      addLog(`Error: ${err.message}`, 'error');
-      setPageState('lobby');
-    }
-  }, [authToken, addLog]);
+      case 'prices':
+        if (data.data) {
+          setPrices(data.data);
+          const teams = Object.keys(data.data).filter(k => k !== 'updated_at');
+          if (teams.length > 0) {
+            addLog(`Price update: ${teams.map(t => `${t}=${data.data[t]?.best_ask || '--'}¢`).join(', ')}`, 'price');
+          }
+        }
+        break;
 
+      case 'buy_result':
+        if (data.success) {
+          addLog(`✅ BUY SUCCESS: ${data.team} @ ${data.avg_price}¢ x${data.filled_count}`, 'success');
+        } else {
+          addLog(`❌ BUY FAILED: ${data.error}`, 'error');
+        }
+        break;
+
+      case 'sell_result':
+        const pnl = data.net_pnl >= 0 ? `+${data.net_pnl}` : data.net_pnl;
+        addLog(`💰 SELL: ${data.team} @ ${data.avg_price}¢, P&L: ${pnl}¢`, 'success');
+        break;
+
+      case 'pong':
+        break;
+
+      case 'error':
+        addLog(`Error: ${data.message || data.error}`, 'error');
+        break;
+
+      default:
+        addLog(`Message: ${JSON.stringify(data)}`, 'info');
+    }
+  }, [addLog]);
+
+  // Connect WebSocket - MUST be defined before launchEvent
   const connectWebSocket = useCallback((wsUrl: string, token: string, targetEvent: string, isRetry = false) => {
     // Store for retries
     currentWsUrl.current = wsUrl;
@@ -297,7 +283,69 @@ export default function QuickBetsPage() {
       addLog(`Connection failed: ${e.message}`, 'error');
       setPageState('lobby');
     }
-  }, [addLog]);
+  }, [addLog, handleWebSocketMessage]);
+
+  // Launch Fargate for selected event
+  const launchEvent = useCallback(async (selectedEvent: string, title?: string) => {
+    if (!authToken) {
+      addLog('Not authenticated', 'error');
+      return;
+    }
+    
+    setPageState('launching');
+    isLaunching.current = true;
+    setEventTicker(selectedEvent);
+    setEventTitle(title || selectedEvent);
+    addLog(`Launching server for ${title || selectedEvent}...`);
+    
+    // Request wake lock immediately to prevent screen sleep during launch
+    if ('wakeLock' in navigator) {
+      navigator.wakeLock.request('screen').then(lock => {
+        wakeLockRef.current = lock;
+        addLog('Screen wake lock acquired', 'info');
+      }).catch(() => {});
+    }
+    
+    try {
+      const response = await fetch(`${API_BASE}/launch`, {
+        method: 'POST',
+        headers: {
+          'Authorization': authToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ event_ticker: selectedEvent }),
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        // Handle specific error codes with user-friendly messages
+        if (data.error_code === 'NO_TRADING_CREDENTIALS') {
+          setError('This account does not have Kalshi trading credentials configured. Please log in with a different account that has trading access.');
+          addLog('❌ No trading credentials for this account', 'error');
+          addLog('Please log out and sign in with a trading account', 'error');
+        } else {
+          setError(data.error || 'Failed to launch server');
+          addLog(`Error: ${data.error || 'Failed to launch server'}`, 'error');
+        }
+        setPageState('lobby');
+        isLaunching.current = false;
+        return;
+      }
+      
+      addLog(`Server ${data.status}: ${data.message}`, 'success');
+      
+      // Connect to WebSocket - start immediately, retry handles NLB health check delay
+      const wsUrl = data.websocket_url;
+      connectWebSocket(wsUrl, authToken, selectedEvent);
+      
+    } catch (err: any) {
+      console.error('Error launching:', err);
+      setError(err.message);
+      addLog(`Error: ${err.message}`, 'error');
+      setPageState('lobby');
+    }
+  }, [authToken, addLog, connectWebSocket]);
 
   // Reconnect to existing session
   const reconnectSession = useCallback(async (session: UserSession) => {
@@ -309,52 +357,6 @@ export default function QuickBetsPage() {
     const wsUrl = session.websocket_url;
     connectWebSocket(wsUrl, authToken, session.event_ticker);
   }, [authToken, addLog, connectWebSocket]);
-
-  const handleWebSocketMessage = useCallback((data: any) => {
-    const msgType = data.type;
-    
-    switch (msgType) {
-      case 'auth_success':
-        setConnected(true);
-        setPageState('trading');
-        isLaunching.current = false;
-        addLog(`Authenticated as ${data.user}`, 'success');
-        break;
-      
-      case 'prices':
-        if (data.data) {
-          setPrices(data.data);
-          const teams = Object.keys(data.data).filter(k => k !== 'updated_at');
-          if (teams.length > 0) {
-            addLog(`Price update: ${teams.map(t => `${t}=${data.data[t]?.best_ask || '--'}¢`).join(', ')}`, 'price');
-          }
-        }
-        break;
-
-      case 'buy_result':
-        if (data.success) {
-          addLog(`✅ BUY SUCCESS: ${data.team} @ ${data.avg_price}¢ x${data.filled_count}`, 'success');
-        } else {
-          addLog(`❌ BUY FAILED: ${data.error}`, 'error');
-        }
-        break;
-
-      case 'sell_result':
-        const pnl = data.net_pnl >= 0 ? `+${data.net_pnl}` : data.net_pnl;
-        addLog(`💰 SELL: ${data.team} @ ${data.avg_price}¢, P&L: ${pnl}¢`, 'success');
-        break;
-
-      case 'pong':
-        break;
-
-      case 'error':
-        addLog(`Error: ${data.message || data.error}`, 'error');
-        break;
-
-      default:
-        addLog(`Message: ${JSON.stringify(data)}`, 'info');
-    }
-  }, [addLog]);
 
   const sendBuy = useCallback((team: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -392,8 +394,11 @@ export default function QuickBetsPage() {
     window.location.reload();
   }, []);
 
-  // Filter teams from prices
-  const teams = Object.keys(prices).filter(k => k !== 'updated_at');
+  // Filter teams from prices (exclude tie/draw for 3-outcome games like soccer)
+  const teams = Object.keys(prices).filter(k => 
+    k !== 'updated_at' && 
+    !['tie', 'draw', 'tied', 'drawn'].includes(k.toLowerCase())
+  );
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6">

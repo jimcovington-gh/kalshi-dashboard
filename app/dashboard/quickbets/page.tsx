@@ -178,7 +178,18 @@ export default function QuickBetsPage() {
       const data = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to launch server');
+        // Handle specific error codes with user-friendly messages
+        if (data.error_code === 'NO_TRADING_CREDENTIALS') {
+          setError('This account does not have Kalshi trading credentials configured. Please log in with a trading account (e.g., jimc or andrews).');
+          addLog('❌ No trading credentials for this user', 'error');
+          addLog('Please log out and sign in with a trading account', 'error');
+        } else {
+          setError(data.error || 'Failed to launch server');
+          addLog(`Error: ${data.error || 'Failed to launch server'}`, 'error');
+        }
+        setPageState('lobby');
+        isLaunching.current = false;
+        return;
       }
       
       addLog(`Server ${data.status}: ${data.message}`, 'success');

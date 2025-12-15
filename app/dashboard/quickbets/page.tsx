@@ -204,8 +204,22 @@ export default function QuickBetsPage() {
       
       case 'game_update':
         // Update game state (scores, period, clock, etc.)
+        // Map sportsfeeder field names to our state structure
         if (data.data) {
-          setGameState(prev => ({ ...prev, ...data.data }));
+          setGameState(prev => ({
+            ...prev,
+            home_points: data.data.home_points ?? prev.home_points,
+            away_points: data.data.away_points ?? prev.away_points,
+            home_team: data.data.home_team_abbr ?? data.data.home_team ?? prev.home_team,
+            away_team: data.data.away_team_abbr ?? data.data.away_team ?? prev.away_team,
+            home_team_id: data.data.home_team_id ?? prev.home_team_id,
+            away_team_id: data.data.away_team_id ?? prev.away_team_id,
+            status: data.data.status ?? prev.status,
+            period_type: data.data.period_type ?? prev.period_type,
+            period_number: data.data.period_number ?? prev.period_number,
+            clock: data.data.clock ?? prev.clock,
+            possession_team: data.data.possession_team_id ?? data.data.possession_team ?? prev.possession_team,
+          }));
         }
         break;
 
@@ -367,6 +381,23 @@ export default function QuickBetsPage() {
       }
       
       addLog(`Server ${data.status}: ${data.message}`, 'success');
+      
+      // If we got preliminary game state from sportsfeeder, use it immediately
+      // This shows data to the user while the WebSocket is still connecting
+      if (data.game_state) {
+        addLog('Received preliminary game state from sportsfeeder', 'info');
+        setGameState({
+          home_points: data.game_state.home_points,
+          away_points: data.game_state.away_points,
+          home_team: data.game_state.home_team_abbr,
+          away_team: data.game_state.away_team_abbr,
+          status: data.game_state.status,
+          period_type: data.game_state.period_type,
+          period_number: data.game_state.period_number,
+          clock: data.game_state.clock,
+          possession_team: data.game_state.possession_team_id,
+        });
+      }
       
       // Connect to WebSocket - start immediately, retry handles NLB health check delay
       const wsUrl = data.websocket_url;

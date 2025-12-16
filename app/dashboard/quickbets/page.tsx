@@ -187,6 +187,28 @@ export default function QuickBetsPage() {
         addLog(`Authenticated as ${data.user}`, 'success');
         break;
       
+      case 'subscribed':
+        // Initial game state from sportsfeeder when we first subscribe
+        if (data.games && data.games.length > 0) {
+          const game = data.games[0];
+          addLog(`Subscribed to ${game.title || game.event_ticker}`, 'success');
+          setGameState(prev => ({
+            ...prev,
+            home_points: game.home_points ?? prev.home_points,
+            away_points: game.away_points ?? prev.away_points,
+            home_team: game.home_team_abbr ?? prev.home_team,
+            away_team: game.away_team_abbr ?? prev.away_team,
+            home_team_id: game.home_team_id ?? prev.home_team_id,
+            away_team_id: game.away_team_id ?? prev.away_team_id,
+            status: game.status ?? prev.status,
+            period_type: game.period_type ?? prev.period_type,
+            period_number: game.period_number ?? prev.period_number,
+            clock: game.clock ?? prev.clock,
+            possession_team: game.possession_team_id ?? prev.possession_team,
+          }));
+        }
+        break;
+      
       case 'prices':
         if (data.data) {
           setPrices(data.data);

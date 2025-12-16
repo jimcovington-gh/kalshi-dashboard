@@ -10,6 +10,7 @@ interface AvailableEvent {
   series_ticker: string;
   close_time: string;
   event_time: string;
+  event_timestamp: number;  // Unix timestamp of game start
   status: string;
 }
 
@@ -57,20 +58,24 @@ type PageState = 'loading' | 'lobby' | 'launching' | 'trading';
 
 const API_BASE = 'https://5uthw49k2c.execute-api.us-east-1.amazonaws.com/prod';
 
-// Helper function to format relative time
-function formatRelativeTime(eventTime: string): string {
-  const now = new Date();
-  const eventDate = new Date(eventTime);
-  const diffMs = eventDate.getTime() - now.getTime();
-  const diffMinutes = Math.abs(Math.floor(diffMs / 60000));
-  const hours = Math.floor(diffMinutes / 60);
-  const minutes = diffMinutes % 60;
+// Helper function to get event type prefix from series_ticker (e.g., "KXNFLGAME" -> "KXNFLGAME")
+function getEventTypePrefix(seriesTicker: string): string {
+  if (!seriesTicker) return 'Other';
+  return seriesTicker;  // Use full series_ticker as header
+}
+
+// Helper function to format relative time from unix timestamp
+function formatRelativeTime(timestamp: number): string {
+  if (!timestamp) return '';
+  const now = Math.floor(Date.now() / 1000);
+  const diffSeconds = timestamp - now;
+  const absDiff = Math.abs(diffSeconds);
+  const hours = Math.floor(absDiff / 3600);
+  const minutes = Math.floor((absDiff % 3600) / 60);
   
-  const timeStr = hours > 0 
-    ? `${hours}:${minutes.toString().padStart(2, '0')}`
-    : `0:${minutes.toString().padStart(2, '0')}`;
+  const timeStr = `${hours}:${minutes.toString().padStart(2, '0')}`;
   
-  if (diffMs < 0) {
+  if (diffSeconds < 0) {
     return `Started ${timeStr} ago`;
   } else {
     return `Starts in ${timeStr}`;
@@ -692,35 +697,45 @@ export default function QuickBetsPage() {
               {availableEvents.length === 0 ? (
                 <p className="text-gray-400 text-center py-8">No live events available right now</p>
               ) : (
-                <div className="space-y-3">
-                  {[...availableEvents]
-                    .sort((a, b) => {
-                      // Sort by series_ticker first, then by event_time
+                <div className="space-y-2">
+                  {(() => {
+                    const sorted = [...availableEvents].sort((a, b) => {
                       const seriesCompare = (a.series_ticker || '').localeCompare(b.series_ticker || '');
                       if (seriesCompare !== 0) return seriesCompare;
-                      return (a.event_time || '').localeCompare(b.event_time || '');
-                    })
-                    .map((event) => (
-                    <div 
-                      key={event.event_ticker}
-                      className="flex items-center justify-between bg-gray-700 rounded-lg p-4 hover:bg-gray-600 transition-colors"
-                    >
-                      <div className="flex-1">
-                        <div className="font-bold">{event.title || event.event_ticker}</div>
-                        <div className="text-sm text-gray-400">
-                          <span className="text-gray-300">{event.event_ticker}</span>
-                          {event.event_time && <span className="mx-2">•</span>}
-                          {event.event_time && <span className="text-cyan-400">{formatRelativeTime(event.event_time)}</span>}
+                      return (a.event_timestamp || 0) - (b.event_timestamp || 0);
+                    });
+                    let lastPrefix = '';
+                    return sorted.map((event) => {
+                      const currentPrefix = getEventTypePrefix(event.series_ticker);
+                      const showHeader = currentPrefix !== lastPrefix;
+                      lastPrefix = currentPrefix;
+                      return (
+                        <div key={event.event_ticker}>
+                          {showHeader && (
+                            <div className="text-sm font-semibold text-gray-400 uppercase tracking-wider pt-3 pb-1">
+                              {currentPrefix}
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between bg-gray-700 rounded-lg p-4 hover:bg-gray-600 transition-colors">
+                            <div className="flex-1">
+                              <div className="font-bold">{event.title || event.event_ticker}</div>
+                              <div className="text-sm text-gray-400">
+                                <span className="text-gray-300">{event.event_ticker}</span>
+                                {event.event_timestamp && <span className="mx-2">•</span>}
+                                {event.event_timestamp && <span className="text-cyan-400">{formatRelativeTime(event.event_timestamp)}</span>}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => launchEvent(event.event_ticker, event.title)}
+                              className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg font-medium transition-colors"
+                            >
+                              Select
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                      <button
-                        onClick={() => launchEvent(event.event_ticker, event.title)}
-                        className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg font-medium transition-colors"
-                      >
-                        Select
-                      </button>
-                    </div>
-                  ))}
+                      );
+                    });
+                  })()}
                 </div>
               )}
             </div>

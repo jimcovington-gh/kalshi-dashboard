@@ -263,12 +263,21 @@ export default function QuickBetsPage() {
       case 'pong':
         break;
 
+      case 'event_mode_started':
+        // Silently acknowledge - UI already shows connected state
+        break;
+        
+      case 'auth_success':
+        // Silently acknowledge - handled by connection state
+        break;
+
       case 'error':
         addLog(`Error: ${data.message || data.error}`, 'error');
         break;
 
       default:
-        addLog(`Message: ${JSON.stringify(data)}`, 'info');
+        // Only log truly unknown messages
+        console.log('Unknown message type:', data.type, data);
     }
   }, [addLog]);
 

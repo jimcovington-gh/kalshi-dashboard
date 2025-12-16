@@ -86,6 +86,7 @@ export default function QuickBetsPage() {
   const wsRetryTimeout = useRef<NodeJS.Timeout | null>(null);
   const currentWsUrl = useRef<string>('');
   const isLaunching = useRef(false);
+  const isReconnecting = useRef<string | null>(null);  // event_ticker if reconnecting to existing session
   
   const router = useRouter();
 
@@ -184,6 +185,7 @@ export default function QuickBetsPage() {
         setConnected(true);
         setPageState('trading');
         isLaunching.current = false;
+        isReconnecting.current = null;  // Clear reconnection tracking on success
         addLog(`Authenticated as ${data.user}`, 'success');
         break;
       
@@ -340,7 +342,17 @@ export default function QuickBetsPage() {
             connectWebSocket(currentWsUrl.current, token, targetEvent, true);
           }, delay);
         } else if (!isLaunching.current) {
-          addLog(`Disconnected (code: ${event.code})`, 'error');
+          // Check if this was a reconnection attempt to a stale session
+          if (isReconnecting.current && (event.code === 1006 || event.code === 1001)) {
+            const staleTicker = isReconnecting.current;
+            addLog(`Session expired. Removing stale session and returning to lobby.`, 'error');
+            // Remove the stale session from the list
+            setUserSessions(prev => prev.filter(s => s.event_ticker !== staleTicker));
+            isReconnecting.current = null;
+            setPageState('lobby');
+          } else {
+            addLog(`Disconnected (code: ${event.code})`, 'error');
+          }
         }
       };
 
@@ -365,7 +377,7 @@ export default function QuickBetsPage() {
     isLaunching.current = true;
     setEventTicker(selectedEvent);
     setEventTitle(title || selectedEvent);
-    addLog(`Launching server for ${title || selectedEvent}...`);
+    addLog(`Connecting to ${title || selectedEvent}...`);
     
     // Request wake lock immediately to prevent screen sleep during launch
     if ('wakeLock' in navigator) {
@@ -376,53 +388,124 @@ export default function QuickBetsPage() {
     }
     
     try {
-      const response = await fetch(`${API_BASE}/launch`, {
-        method: 'POST',
-        headers: {
-          'Authorization': authToken,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ event_ticker: selectedEvent }),
-      });
-
-      const data = await response.json();
+      // Try new router endpoint first (direct connection)
+      let useDirectConnection = true;
+      let wsUrl = '';
+      let routerData: any = null;
       
-      if (!response.ok) {
-        // Handle specific error codes with user-friendly messages
-        if (data.error_code === 'NO_TRADING_CREDENTIALS') {
-          setError('This account does not have Kalshi trading credentials configured. Please log in with a different account that has trading access.');
-          addLog('❌ No trading credentials for this account', 'error');
-          addLog('Please log out and sign in with a trading account', 'error');
+      try {
+        const routerResponse = await fetch(`${API_BASE}/connect`, {
+          method: 'POST',
+          headers: {
+            'Authorization': authToken,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ event_ticker: selectedEvent }),
+        });
+        
+        if (routerResponse.ok || routerResponse.status === 202) {
+          routerData = await routerResponse.json();
+          
+          if (routerData.status === 'ready') {
+            // Container running - use direct WebSocket URL
+            wsUrl = routerData.ws_url;
+            addLog('Container ready, connecting directly...', 'success');
+          } else if (routerData.status === 'launching') {
+            // Container starting - poll for ready
+            addLog('Container starting, waiting...', 'info');
+            
+            // Poll every 2 seconds for up to 60 seconds
+            for (let i = 0; i < 30; i++) {
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              
+              const pollResponse = await fetch(`${API_BASE}/connect`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': authToken,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ event_ticker: selectedEvent }),
+              });
+              
+              const pollData = await pollResponse.json();
+              
+              if (pollData.status === 'ready') {
+                wsUrl = pollData.ws_url;
+                routerData = pollData;
+                addLog('Container ready!', 'success');
+                break;
+              }
+              
+              if (pollData.status === 'error') {
+                throw new Error(pollData.error || 'Container failed to start');
+              }
+              
+              addLog(`Starting... (${i * 2 + 2}s)`, 'info');
+            }
+            
+            if (!wsUrl) {
+              throw new Error('Container startup timeout');
+            }
+          }
         } else {
-          setError(data.error || 'Failed to launch server');
-          addLog(`Error: ${data.error || 'Failed to launch server'}`, 'error');
+          // Router endpoint not available, fall back to old launch
+          useDirectConnection = false;
         }
-        setPageState('lobby');
-        isLaunching.current = false;
-        return;
+      } catch (routerErr: any) {
+        // Router endpoint failed - fall back to old launch endpoint
+        console.log('Router failed, using launch endpoint:', routerErr.message);
+        useDirectConnection = false;
       }
       
-      addLog(`Server ${data.status}: ${data.message}`, 'success');
+      // Fall back to old NLB-based launch if router didn't work
+      if (!useDirectConnection || !wsUrl) {
+        addLog('Using legacy launcher...', 'info');
+        const response = await fetch(`${API_BASE}/launch`, {
+          method: 'POST',
+          headers: {
+            'Authorization': authToken,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ event_ticker: selectedEvent }),
+        });
+
+        const data = await response.json();
+        
+        if (!response.ok) {
+          if (data.error_code === 'NO_TRADING_CREDENTIALS') {
+            setError('This account does not have Kalshi trading credentials configured.');
+            addLog('❌ No trading credentials for this account', 'error');
+          } else {
+            setError(data.error || 'Failed to launch server');
+            addLog(`Error: ${data.error || 'Failed to launch server'}`, 'error');
+          }
+          setPageState('lobby');
+          isLaunching.current = false;
+          return;
+        }
+        
+        wsUrl = data.websocket_url;
+        routerData = data;
+        addLog(`Server ${data.status}: ${data.message}`, 'success');
+      }
       
-      // If we got preliminary game state from sportsfeeder, use it immediately
-      // This shows data to the user while the WebSocket is still connecting
-      if (data.game_state) {
-        addLog('Received preliminary game state from sportsfeeder', 'info');
+      // If we got preliminary game state, use it immediately
+      if (routerData?.game_state) {
+        addLog('Received preliminary game state', 'info');
         setGameState({
-          home_points: data.game_state.home_points,
-          away_points: data.game_state.away_points,
-          home_team: data.game_state.home_team_abbr,
-          away_team: data.game_state.away_team_abbr,
-          status: data.game_state.status,
-          period_type: data.game_state.period_type,
-          period_number: data.game_state.period_number,
-          clock: data.game_state.clock,
-          possession_team: data.game_state.possession_team_id,
+          home_points: routerData.game_state.home_points,
+          away_points: routerData.game_state.away_points,
+          home_team: routerData.game_state.home_team_abbr,
+          away_team: routerData.game_state.away_team_abbr,
+          status: routerData.game_state.status,
+          period_type: routerData.game_state.period_type,
+          period_number: routerData.game_state.period_number,
+          clock: routerData.game_state.clock,
+          possession_team: routerData.game_state.possession_team_id,
         });
       }
       
-      // Connect to WebSocket - start immediately, retry handles NLB health check delay
-      const wsUrl = data.websocket_url;
+      // Connect to WebSocket
       connectWebSocket(wsUrl, authToken, selectedEvent);
       
     } catch (err: any) {
@@ -438,6 +521,7 @@ export default function QuickBetsPage() {
     setPageState('launching');
     setEventTicker(session.event_ticker);
     setEventTitle(session.title || session.event_ticker);
+    isReconnecting.current = session.event_ticker;  // Track that we're reconnecting
     addLog(`Reconnecting to ${session.title || session.event_ticker}...`);
     
     const wsUrl = session.websocket_url;

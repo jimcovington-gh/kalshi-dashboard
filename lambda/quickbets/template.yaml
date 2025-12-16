@@ -1,0 +1,242 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: QuickBets API - Low-latency order signing for real-time trading
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: python3.12
+    MemorySize: 256
+
+Parameters:
+  CognitoUserPoolArn:
+    Type: String
+    Description: ARN of the Cognito User Pool for authentication
+    Default: 'arn:aws:cognito-idp:us-east-1:355149669325:userpool/us-east-1_WEozUeojc'
+
+Resources:
+  # API Gateway
+  QuickBetsApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: quickbets-api
+      StageName: prod
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+        MaxAge: "'600'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !Ref CognitoUserPoolArn
+            Identity:
+              Header: Authorization
+        AddDefaultAuthorizerToCorsPreflight: false
+
+  # Lambda: QuickBets Sign
+  QuickBetsSignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: quickbets-sign
+      CodeUri: ./
+      Handler: quickbets-sign.lambda_handler
+      Description: Sign Kalshi API requests for QuickBets (CORS test and order signing)
+      Layers:
+        - !Ref CryptoLayer
+      Environment:
+        Variables:
+          USER_SECRET_PREFIX: production/kalshi/users
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:us-east-1:355149669325:secret:production/kalshi/users/*
+      Events:
+        QuickBetsSign:
+          Type: Api
+          Properties:
+            RestApiId: !Ref QuickBetsApi
+            Path: /sign
+            Method: POST
+        QuickBetsSignOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref QuickBetsApi
+            Path: /sign
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+
+  # Lambda: QuickBets Sessions
+  QuickBetsSessionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: quickbets-sessions
+      CodeUri: ./
+      Handler: quickbets-sessions.lambda_handler
+      Description: Get active QuickBets Fargate sessions from DynamoDB
+      Environment:
+        Variables:
+          SESSIONS_TABLE: production-kalshi-quickbets-sessions
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+                - dynamodb:GetItem
+              Resource:
+                - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-quickbets-sessions
+      Events:
+        QuickBetsSessions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref QuickBetsApi
+            Path: /sessions
+            Method: GET
+        QuickBetsSessionsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref QuickBetsApi
+            Path: /sessions
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+
+  # Lambda: QuickBets Events (fetch available sports events)
+  QuickBetsEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: quickbets-events
+      CodeUri: ./
+      Handler: quickbets-events.lambda_handler
+      Timeout: 15
+      Description: Fetch available sports events from Kalshi API
+      Layers:
+        - !Ref CryptoLayer
+      Environment:
+        Variables:
+          SESSIONS_TABLE: production-kalshi-quickbets-sessions
+          KALSHI_API_BASE_URL: https://api.elections.kalshi.com
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+                - dynamodb:GetItem
+              Resource:
+                - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-quickbets-sessions
+            - Effect: Allow
+              Action:
+                - secretsmanager:DescribeSecret
+              Resource:
+                - arn:aws:secretsmanager:us-east-1:355149669325:secret:production/kalshi/users/*
+      Events:
+        QuickBetsEvents:
+          Type: Api
+          Properties:
+            RestApiId: !Ref QuickBetsApi
+            Path: /events
+            Method: GET
+        QuickBetsEventsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref QuickBetsApi
+            Path: /events
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+
+  # Lambda: QuickBets Launch (Fargate with specific event)
+  QuickBetsLaunchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: quickbets-launch
+      CodeUri: ./
+      Handler: quickbets-launch.lambda_handler
+      Timeout: 60
+      MemorySize: 256
+      Description: Launch QuickBets Fargate task for a specific event
+      Layers:
+        - !Ref CryptoLayer
+      Environment:
+        Variables:
+          ECS_CLUSTER: production-kalshi-fargate-cluster
+          TASK_DEFINITION: kalshi-quickbets
+          SUBNET_ID: subnet-0ba02a0291289ed61
+          SECURITY_GROUP: sg-056792d76ef21c4c5
+          TARGET_GROUP_ARN: arn:aws:elasticloadbalancing:us-east-1:355149669325:targetgroup/quickbets-tg/cb8af6cb45089d10
+          WEBSOCKET_URL: wss://quickbets.apexmarkets.us
+          QUICKBETS_TABLE: production-kalshi-quickbets-sessions
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ecs:RunTask
+                - ecs:DescribeTasks
+                - ecs:DescribeTaskDefinition
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource:
+                - arn:aws:iam::355149669325:role/kalshi-fill-monitor-roles-FillMonitorTaskExecutionR-PM4A4JdBsy6x
+                - arn:aws:iam::355149669325:role/kalshi-quickbets-task-role
+            - Effect: Allow
+              Action:
+                - elasticloadbalancing:RegisterTargets
+                - elasticloadbalancing:DeregisterTargets
+              Resource:
+                - arn:aws:elasticloadbalancing:us-east-1:355149669325:targetgroup/quickbets-tg/cb8af6cb45089d10
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+              Resource:
+                - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-quickbets-sessions
+            - Effect: Allow
+              Action:
+                - secretsmanager:DescribeSecret
+              Resource:
+                - arn:aws:secretsmanager:us-east-1:355149669325:secret:production/kalshi/users/*
+      Events:
+        QuickBetsLaunch:
+          Type: Api
+          Properties:
+            RestApiId: !Ref QuickBetsApi
+            Path: /launch
+            Method: POST
+        QuickBetsLaunchOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref QuickBetsApi
+            Path: /launch
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+
+  # Lambda Layer: Cryptography library
+  CryptoLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: quickbets-crypto
+      Description: Cryptography library for RSA-PSS signing
+      ContentUri: layer/
+      CompatibleRuntimes:
+        - python3.12
+    Metadata:
+      BuildMethod: python3.12
+
+Outputs:
+  ApiEndpoint:
+    Description: QuickBets API Gateway endpoint URL
+    Value: !Sub 'https://${QuickBetsApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+  
+  QuickBetsSignFunctionArn:
+    Description: QuickBets Sign Lambda ARN
+    Value: !GetAtt QuickBetsSignFunction.Arn

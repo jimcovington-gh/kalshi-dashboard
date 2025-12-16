@@ -38,7 +38,8 @@ amplify/
 .amplify/
 amplify_outputs.json
 
-# Lambda and SAM
-lambda/
-*.zip
-.aws-sam/
+# Lambda and SAM - track source, ignore build artifacts
+lambda/**/*.zip
+lambda/**/.aws-sam/
+lambda/**/__pycache__/
+lambda/**/layer/

@@ -27,8 +27,8 @@ interface TeamPrices {
     best_bid: number;
     ticker: string;
     type: string;
-    bids?: { price: number; quantity: number }[];
-    asks?: { price: number; quantity: number }[];
+    bids?: { price: number; size: number }[];
+    asks?: { price: number; size: number }[];
   };
 }
 
@@ -699,7 +699,12 @@ export default function QuickBetsPage() {
               ) : (
                 <div className="space-y-2">
                   {(() => {
-                    const sorted = [...availableEvents].sort((a, b) => {
+                    const now = Math.floor(Date.now() / 1000);
+                    const fiveHoursAgo = now - (5 * 3600);
+                    const filtered = availableEvents.filter(e => 
+                      e.event_timestamp && e.event_timestamp <= now && e.event_timestamp >= fiveHoursAgo
+                    );
+                    const sorted = [...filtered].sort((a, b) => {
                       const seriesCompare = (a.series_ticker || '').localeCompare(b.series_ticker || '');
                       if (seriesCompare !== 0) return seriesCompare;
                       return (a.event_timestamp || 0) - (b.event_timestamp || 0);
@@ -772,17 +777,12 @@ export default function QuickBetsPage() {
                   
                   return (
                     <div key={team} className="bg-gray-800 rounded-2xl p-6 text-center">
-                      {/* Best Ask Price */}
-                      <div className="text-5xl font-bold text-cyan-400 mb-4">
-                        {teamData?.best_ask || '--'}¢
-                      </div>
-                      
-                      {/* Bids above button (descending - highest first) */}
-                      <div className="font-mono text-xs text-green-400 mb-2 space-y-0.5">
-                        {bids.slice(0, 3).map((bid, i) => (
-                          <div key={`bid-${i}`}>{bid.price}-{bid.quantity}</div>
+                      {/* Asks above button (ascending - lowest at bottom, closest to button) */}
+                      <div className="font-mono text-xs text-red-400 mb-2 space-y-0.5">
+                        {[...asks].slice(0, 3).reverse().map((ask, i) => (
+                          <div key={`ask-${i}`}>{ask.price}-{ask.size}</div>
                         ))}
-                        {bids.length === 0 && <div className="text-gray-600">--</div>}
+                        {asks.length === 0 && <div className="text-gray-600">--</div>}
                       </div>
                       
                       {/* Buy Button - Team + Score */}
@@ -793,12 +793,12 @@ export default function QuickBetsPage() {
                         {team.toUpperCase()}{teamScore !== undefined ? ` ${teamScore}` : ''}
                       </button>
                       
-                      {/* Asks below button (descending - highest first) */}
-                      <div className="font-mono text-xs text-red-400 mt-2 space-y-0.5">
-                        {[...asks].slice(0, 3).reverse().map((ask, i) => (
-                          <div key={`ask-${i}`}>{ask.price}-{ask.quantity}</div>
+                      {/* Bids below button (descending - highest at top, closest to button) */}
+                      <div className="font-mono text-xs text-green-400 mt-2 space-y-0.5">
+                        {bids.slice(0, 3).map((bid, i) => (
+                          <div key={`bid-${i}`}>{bid.price}-{bid.size}</div>
                         ))}
-                        {asks.length === 0 && <div className="text-gray-600">--</div>}
+                        {bids.length === 0 && <div className="text-gray-600">--</div>}
                       </div>
                     </div>
                   );

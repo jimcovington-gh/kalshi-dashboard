@@ -26,6 +26,8 @@ interface TeamPrices {
     best_bid: number;
     ticker: string;
     type: string;
+    bids?: { price: number; quantity: number }[];
+    asks?: { price: number; quantity: number }[];
   };
 }
 
@@ -54,6 +56,26 @@ interface LogEntry {
 type PageState = 'loading' | 'lobby' | 'launching' | 'trading';
 
 const API_BASE = 'https://5uthw49k2c.execute-api.us-east-1.amazonaws.com/prod';
+
+// Helper function to format relative time
+function formatRelativeTime(eventTime: string): string {
+  const now = new Date();
+  const eventDate = new Date(eventTime);
+  const diffMs = eventDate.getTime() - now.getTime();
+  const diffMinutes = Math.abs(Math.floor(diffMs / 60000));
+  const hours = Math.floor(diffMinutes / 60);
+  const minutes = diffMinutes % 60;
+  
+  const timeStr = hours > 0 
+    ? `${hours}:${minutes.toString().padStart(2, '0')}`
+    : `0:${minutes.toString().padStart(2, '0')}`;
+  
+  if (diffMs < 0) {
+    return `Started ${timeStr} ago`;
+  } else {
+    return `Starts in ${timeStr}`;
+  }
+}
 
 export default function QuickBetsPage() {
   // Page state
@@ -671,7 +693,14 @@ export default function QuickBetsPage() {
                 <p className="text-gray-400 text-center py-8">No live events available right now</p>
               ) : (
                 <div className="space-y-3">
-                  {availableEvents.map((event) => (
+                  {[...availableEvents]
+                    .sort((a, b) => {
+                      // Sort by series_ticker first, then by event_time
+                      const seriesCompare = (a.series_ticker || '').localeCompare(b.series_ticker || '');
+                      if (seriesCompare !== 0) return seriesCompare;
+                      return (a.event_time || '').localeCompare(b.event_time || '');
+                    })
+                    .map((event) => (
                     <div 
                       key={event.event_ticker}
                       className="flex items-center justify-between bg-gray-700 rounded-lg p-4 hover:bg-gray-600 transition-colors"
@@ -681,7 +710,7 @@ export default function QuickBetsPage() {
                         <div className="text-sm text-gray-400">
                           <span className="text-gray-300">{event.event_ticker}</span>
                           {event.event_time && <span className="mx-2">•</span>}
-                          {event.event_time && <span className="text-cyan-400">{event.event_time}</span>}
+                          {event.event_time && <span className="text-cyan-400">{formatRelativeTime(event.event_time)}</span>}
                         </div>
                       </div>
                       <button
@@ -722,23 +751,40 @@ export default function QuickBetsPage() {
                     teamScore = gameState.away_points;
                   }
                   
+                  const teamData = prices[team];
+                  const bids = teamData?.bids || [];
+                  const asks = teamData?.asks || [];
+                  
                   return (
-                    <div key={team} className="bg-gray-800 rounded-2xl p-8 text-center">
-                      <div className="text-3xl font-bold mb-4">
-                        {team.toUpperCase()}
-                        {teamScore !== undefined && (
-                          <span className="ml-3 text-yellow-400">{teamScore}</span>
-                        )}
+                    <div key={team} className="bg-gray-800 rounded-2xl p-6 text-center">
+                      {/* Best Ask Price */}
+                      <div className="text-5xl font-bold text-cyan-400 mb-4">
+                        {teamData?.best_ask || '--'}¢
                       </div>
-                      <div className="text-5xl font-bold text-cyan-400 mb-6">
-                        {prices[team]?.best_ask || '--'}¢
+                      
+                      {/* Bids above button (descending - highest first) */}
+                      <div className="font-mono text-xs text-green-400 mb-2 space-y-0.5">
+                        {bids.slice(0, 3).map((bid, i) => (
+                          <div key={`bid-${i}`}>{bid.price}-{bid.quantity}</div>
+                        ))}
+                        {bids.length === 0 && <div className="text-gray-600">--</div>}
                       </div>
+                      
+                      {/* Buy Button - Team + Score */}
                       <button
                         onClick={() => sendBuy(team)}
-                        className="w-full py-5 text-2xl font-bold uppercase tracking-wider bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+                        className="w-full py-5 text-2xl font-bold uppercase tracking-wider bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] mb-2"
                       >
-                        BUY {team.toUpperCase()}
+                        {team.toUpperCase()}{teamScore !== undefined ? ` ${teamScore}` : ''}
                       </button>
+                      
+                      {/* Asks below button (descending - highest first) */}
+                      <div className="font-mono text-xs text-red-400 mt-2 space-y-0.5">
+                        {[...asks].slice(0, 3).reverse().map((ask, i) => (
+                          <div key={`ask-${i}`}>{ask.price}-{ask.quantity}</div>
+                        ))}
+                        {asks.length === 0 && <div className="text-gray-600">--</div>}
+                      </div>
                     </div>
                   );
                 })

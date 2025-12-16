@@ -322,6 +322,28 @@ export default function QuickBetsPage() {
         setConnected(false);
         wsRef.current = null;
         
+        // 4003 = Invalid/expired token - need to refresh auth
+        if (event.code === 4003) {
+          addLog('Auth token expired, refreshing...', 'info');
+          // Refresh the token and retry
+          fetchAuthSession({ forceRefresh: true }).then(async (authSession) => {
+            if (!authSession.tokens?.idToken) {
+              addLog('Failed to refresh auth token', 'error');
+              setPageState('lobby');
+              return;
+            }
+            const newToken = authSession.tokens.idToken.toString();
+            setAuthToken(newToken);
+            addLog('Token refreshed, reconnecting...', 'info');
+            // Retry with new token
+            connectWebSocket(currentWsUrl.current, newToken, targetEvent, true);
+          }).catch((err) => {
+            addLog(`Failed to refresh token: ${err.message}`, 'error');
+            setPageState('lobby');
+          });
+          return;
+        }
+        
         // 4010 = connected to wrong container, retry to hit correct one
         if (event.code === 4010) {
           if (wsRetryCount.current < 30) {

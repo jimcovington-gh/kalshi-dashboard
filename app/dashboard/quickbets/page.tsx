@@ -247,7 +247,8 @@ export default function QuickBetsPage() {
           if (now - lastPriceLogTime.current >= PRICE_LOG_INTERVAL_MS) {
             const teams = Object.keys(data.data).filter(k => k !== 'updated_at');
             if (teams.length > 0) {
-              addLog(`Price update: ${teams.map(t => `${t}=${data.data[t]?.best_ask || '--'}¢`).join(', ')}`, 'price');
+              // Round prices to nearest cent for display (prices are in dollars)
+              addLog(`Price update: ${teams.map(t => `${t}=${data.data[t]?.best_ask ? Math.round(data.data[t].best_ask * 100) : '--'}¢`).join(', ')}`, 'price');
             }
             lastPriceLogTime.current = now;
           }

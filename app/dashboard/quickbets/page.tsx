@@ -97,6 +97,7 @@ export default function QuickBetsPage() {
   const [connected, setConnected] = useState(false);
   const [prices, setPrices] = useState<TeamPrices>({});
   const [gameState, setGameState] = useState<GameState>({});
+  const [betAmount, setBetAmount] = useState<string>('$10');  // Bet amount selector);
   
   // Price log throttling (60 second interval)
   const lastPriceLogTime = useRef<number>(0);
@@ -592,12 +593,13 @@ export default function QuickBetsPage() {
       return;
     }
 
-    addLog(`Sending BUY for ${team}...`);
+    addLog(`Sending BUY for ${team} (${betAmount})...`);
     wsRef.current.send(JSON.stringify({
       type: 'buy',
-      team: team
+      team: team,
+      bet_amount: betAmount  // Send selected bet amount
     }));
-  }, [addLog]);
+  }, [addLog, betAmount]);
 
   const backToLobby = useCallback(() => {
     if (wsRef.current) {
@@ -771,6 +773,22 @@ export default function QuickBetsPage() {
                     teamScore = gameState.away_points;
                   }
                   
+                  // Check if this team has possession
+                  let hasPossession = false;
+                  const poss = gameState.possession_team;
+                  if (poss) {
+                    if (poss.length > 10) {
+                      // It's a team ID - check against home/away team IDs
+                      const isHome = gameState.home_team?.toUpperCase() === team.toUpperCase();
+                      const isAway = gameState.away_team?.toUpperCase() === team.toUpperCase();
+                      hasPossession = (isHome && gameState.home_team_id === poss) || 
+                                     (isAway && gameState.away_team_id === poss);
+                    } else {
+                      // It's an abbreviation
+                      hasPossession = poss.toUpperCase() === team.toUpperCase();
+                    }
+                  }
+                  
                   const teamData = prices[team];
                   const bids = teamData?.bids || [];
                   const asks = teamData?.asks || [];
@@ -780,23 +798,23 @@ export default function QuickBetsPage() {
                       {/* Asks above button (ascending - lowest at bottom, closest to button) */}
                       <div className="font-mono text-xs text-red-400 mb-2 space-y-0.5">
                         {[...asks].slice(0, 3).reverse().map((ask, i) => (
-                          <div key={`ask-${i}`}>{ask.price}-{ask.size}</div>
+                          <div key={`ask-${i}`}>{Math.round(ask.price * 100)}-{ask.size}</div>
                         ))}
                         {asks.length === 0 && <div className="text-gray-600">--</div>}
                       </div>
                       
-                      {/* Buy Button - Team + Score */}
+                      {/* Buy Button - Team + Score (with possession icon if applicable) */}
                       <button
                         onClick={() => sendBuy(team)}
                         className="w-full py-5 text-2xl font-bold uppercase tracking-wider bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] mb-2"
                       >
-                        {team.toUpperCase()}{teamScore !== undefined ? ` ${teamScore}` : ''}
+                        {hasPossession && '🏈 '}{team.toUpperCase()}{teamScore !== undefined ? ` ${teamScore}` : ''}
                       </button>
                       
                       {/* Bids below button (descending - highest at top, closest to button) */}
                       <div className="font-mono text-xs text-green-400 mt-2 space-y-0.5">
                         {bids.slice(0, 3).map((bid, i) => (
-                          <div key={`bid-${i}`}>{bid.price}-{bid.size}</div>
+                          <div key={`bid-${i}`}>{Math.round(bid.price * 100)}-{bid.size}</div>
                         ))}
                         {bids.length === 0 && <div className="text-gray-600">--</div>}
                       </div>
@@ -810,6 +828,23 @@ export default function QuickBetsPage() {
               )}
             </div>
             
+            {/* Bet Amount Selector */}
+            <div className="flex justify-center gap-2 mb-4">
+              {['$10', '10%', '20%', '50%', '95%'].map((amount) => (
+                <button
+                  key={amount}
+                  onClick={() => setBetAmount(amount)}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    betAmount === amount
+                      ? 'bg-cyan-600 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  {amount}
+                </button>
+              ))}
+            </div>
+            
             {/* Event/Game Status Banner - below team cards */}
             <div className="bg-green-900/50 border border-green-500 text-green-200 px-4 py-3 rounded-lg mb-6 text-center font-medium">
               {/* Show game status if available, otherwise event title */}
@@ -821,9 +856,6 @@ export default function QuickBetsPage() {
                   )}
                   {gameState.status && (
                     <span>{(gameState.clock || gameState.period_type) ? ' • ' : ''}{gameState.status.replace('_', ' ').toUpperCase()}</span>
-                  )}
-                  {gameState.possession_team && (
-                    <span> • 🏈 {gameState.possession_team.toUpperCase()}</span>
                   )}
                 </span>
               ) : (

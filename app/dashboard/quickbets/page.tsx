@@ -843,48 +843,50 @@ export default function QuickBetsPage() {
                       e.event_timestamp && e.event_timestamp <= now && e.event_timestamp >= fiveHoursAgo
                     );
                     
-                    // Group events by series
+                    // Group events by series_title (human-readable name)
                     const groupedBySeries: Record<string, AvailableEvent[]> = {};
                     filtered.forEach(event => {
-                      const series = event.series_ticker || 'Other';
-                      if (!groupedBySeries[series]) {
-                        groupedBySeries[series] = [];
+                      const seriesTitle = event.series_title || event.series_ticker || 'Other';
+                      if (!groupedBySeries[seriesTitle]) {
+                        groupedBySeries[seriesTitle] = [];
                       }
-                      groupedBySeries[series].push(event);
+                      groupedBySeries[seriesTitle].push(event);
                     });
                     
                     // Sort series by league priority, then alphabetically
+                    // Use first event's ticker for priority lookup
                     const sortedSeriesKeys = Object.keys(groupedBySeries).sort((a, b) => {
-                      const priorityA = getLeaguePriority(a);
-                      const priorityB = getLeaguePriority(b);
+                      const firstEventA = groupedBySeries[a][0];
+                      const firstEventB = groupedBySeries[b][0];
+                      const priorityA = getLeaguePriority(firstEventA?.series_ticker || a);
+                      const priorityB = getLeaguePriority(firstEventB?.series_ticker || b);
                       if (priorityA !== priorityB) return priorityA - priorityB;
                       return a.localeCompare(b);
                     });
                     
                     // Sort events within each series by start time
-                    sortedSeriesKeys.forEach(series => {
-                      groupedBySeries[series].sort((a, b) => 
+                    sortedSeriesKeys.forEach(seriesTitle => {
+                      groupedBySeries[seriesTitle].sort((a, b) => 
                         (a.event_timestamp || 0) - (b.event_timestamp || 0)
                       );
                     });
                     
-                    return sortedSeriesKeys.map((seriesTicker) => {
-                      const events = groupedBySeries[seriesTicker];
+                    return sortedSeriesKeys.map((seriesTitle) => {
+                      const events = groupedBySeries[seriesTitle];
                       const firstEvent = events[0];
-                      const seriesTitle = firstEvent?.series_title || seriesTicker;
-                      const isExpanded = expandedSeries.has(seriesTicker);
+                      const isExpanded = expandedSeries.has(seriesTitle);
                       
                       return (
-                        <div key={seriesTicker} className="border border-gray-700 rounded-lg overflow-hidden">
+                        <div key={seriesTitle} className="border border-gray-700 rounded-lg overflow-hidden">
                           {/* Series Header - Clickable to expand/collapse */}
                           <button
                             onClick={() => {
                               setExpandedSeries(prev => {
                                 const newSet = new Set(prev);
-                                if (newSet.has(seriesTicker)) {
-                                  newSet.delete(seriesTicker);
+                                if (newSet.has(seriesTitle)) {
+                                  newSet.delete(seriesTitle);
                                 } else {
-                                  newSet.add(seriesTicker);
+                                  newSet.add(seriesTitle);
                                 }
                                 return newSet;
                               });

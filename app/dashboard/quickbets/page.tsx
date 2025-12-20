@@ -986,7 +986,7 @@ export default function QuickBetsPage() {
                           {/* Buy Button - Team + Score (with possession icon if applicable) */}
                           <button
                             onClick={() => sendBuy(team)}
-                            className={`w-full py-4 text-xl font-bold uppercase tracking-wider rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] mb-2 ${textColor}`}
+                            className={`w-full py-8 text-xl font-bold uppercase tracking-wider rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] mb-2 ${textColor}`}
                             style={{ backgroundColor: teamColor === 'transparent' ? undefined : teamColor }}
                           >
                             {hasPossession && '🏈 '}{team.toUpperCase()}{teamScore !== undefined ? ` ${teamScore}` : ''}

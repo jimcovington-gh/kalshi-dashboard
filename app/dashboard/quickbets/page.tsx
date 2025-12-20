@@ -119,6 +119,7 @@ export default function QuickBetsPage() {
   const [eventTitle, setEventTitle] = useState<string>('');
   const [connected, setConnected] = useState(false);
   const [prices, setPrices] = useState<TeamPrices>({});
+  const [previousPrices, setPreviousPrices] = useState<TeamPrices>({});  // Track previous prices for change detection
   const [gameState, setGameState] = useState<GameState>({});
   const [betAmount, setBetAmount] = useState<string>('$10');  // Bet amount selector
   const [sellDelay, setSellDelay] = useState<number>(8);  // Sell delay in seconds
@@ -268,8 +269,32 @@ export default function QuickBetsPage() {
       
       case 'prices':
         if (data.data) {
-          setPrices(data.data);
-          // Price updates no longer logged - they update the UI silently
+          setPrices(prev => {
+            // Track significant price changes (>= 3 cents)
+            const teams = Object.keys(data.data).filter(k => k !== 'updated_at');
+            const priceChanges: string[] = [];
+            
+            teams.forEach(team => {
+              const newAsk = data.data[team]?.best_ask;
+              const prevAsk = prev[team]?.best_ask;
+              
+              if (newAsk !== undefined && prevAsk !== undefined) {
+                const priceDiff = Math.abs(newAsk - prevAsk);
+                if (priceDiff >= 0.03) {  // 3 cents or more
+                  const direction = newAsk > prevAsk ? '↑' : '↓';
+                  const newCents = Math.round(newAsk * 100);
+                  const prevCents = Math.round(prevAsk * 100);
+                  priceChanges.push(`${team}: ${prevCents}¢ → ${newCents}¢ ${direction}`);
+                }
+              }
+            });
+            
+            if (priceChanges.length > 0) {
+              addLog(`💰 ${priceChanges.join(' | ')}`, 'info');
+            }
+            
+            return data.data;
+          });
         }
         break;
       
@@ -648,6 +673,14 @@ export default function QuickBetsPage() {
     isReconnecting.current = session.event_ticker;  // Track that we're reconnecting
     addLog(`Reconnecting to ${session.title || session.event_ticker}...`);
     
+    // Request wake lock on reconnection to prevent screen sleep
+    if ('wakeLock' in navigator) {
+      navigator.wakeLock.request('screen').then(lock => {
+        wakeLockRef.current = lock;
+        addLog('Screen wake lock acquired', 'info');
+      }).catch(() => {});
+    }
+    
     const wsUrl = session.websocket_url;
     connectWebSocket(wsUrl, authToken, session.event_ticker);
   }, [authToken, addLog, connectWebSocket]);
@@ -939,9 +972,9 @@ export default function QuickBetsPage() {
                     
                     return (
                       <React.Fragment key={team}>
-                        <div className="flex-1 bg-gray-800 rounded-2xl p-4 text-center relative">
+                        <div className="flex-1 bg-gray-800 rounded-2xl p-4 text-center relative flex flex-col">
                           {/* Color picker button - small rainbow icon in upper left */}
-                          <div className="absolute top-2 left-2">
+                          <div className="absolute top-2 left-2 z-10">
                             <button
                               onClick={() => setColorPickerOpen(colorPickerOpen === team ? null : team)}
                               className="w-6 h-6 rounded border border-gray-600 hover:border-cyan-400 transition-colors"
@@ -975,8 +1008,8 @@ export default function QuickBetsPage() {
                             )}
                           </div>
                           
-                          {/* Asks above button (ascending - lowest at bottom, closest to button) */}
-                          <div className="font-mono text-xs text-red-400 mb-2 space-y-0.5">
+                          {/* Asks above button - fixed height container */}
+                          <div className="font-mono text-xs text-red-400 mb-2 space-y-0.5" style={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
                             {[...asks].slice(0, 3).reverse().map((ask, i) => (
                               <div key={`ask-${i}`}>{Math.round(ask.price * 100)}-{ask.size}</div>
                             ))}
@@ -992,8 +1025,8 @@ export default function QuickBetsPage() {
                             {hasPossession && '🏈 '}{team.toUpperCase()}{teamScore !== undefined ? ` ${teamScore}` : ''}
                           </button>
                           
-                          {/* Bids below button (descending - highest at top, closest to button) */}
-                          <div className="font-mono text-xs text-green-400 mt-2 space-y-0.5">
+                          {/* Bids below button - fixed height container */}
+                          <div className="font-mono text-xs text-green-400 mt-2 space-y-0.5" style={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
                             {bids.slice(0, 3).map((bid, i) => (
                               <div key={`bid-${i}`}>{Math.round(bid.price * 100)}-{bid.size}</div>
                             ))}

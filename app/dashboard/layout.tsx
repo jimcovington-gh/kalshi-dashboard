@@ -61,14 +61,14 @@ export default function DashboardLayout({
           <div className="flex justify-between h-14 md:h-16">
             <div className="flex items-center space-x-4 md:space-x-8">
               <Link href="/dashboard" className="text-base md:text-xl font-bold text-blue-600">
-                📊 <span className="hidden sm:inline">Kalshi Dashboard</span>
+                📊 <span className="hidden sm:inline">GameFeed Dashboard</span>
               </Link>
               <div className="flex space-x-2 md:space-x-4">
                 <Link
                   href="/dashboard"
                   className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100"
                 >
-                  Portfolio
+                  Positions
                 </Link>
                 <Link
                   href="/dashboard/analytics"
@@ -80,7 +80,7 @@ export default function DashboardLayout({
                   href="/dashboard/quickbets"
                   className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-green-600 hover:text-green-800 hover:bg-green-50"
                 >
-                  QuickBets
+                  GameFeed
                 </Link>
                 {isAdminUser && (
                   <Link

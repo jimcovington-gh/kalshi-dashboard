@@ -142,7 +142,6 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
     <div className="space-y-4 md:space-y-6">
       {/* Portfolio Summary */}
       <div className="bg-white rounded-lg shadow p-4 md:p-6">
-        <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-3 md:mb-4">Portfolio Overview</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
           <div className="bg-blue-50 p-3 md:p-4 rounded-lg">
             <div className="text-xs md:text-sm text-gray-600">Total Positions</div>

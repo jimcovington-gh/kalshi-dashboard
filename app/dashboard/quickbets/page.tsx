@@ -278,12 +278,26 @@ export default function QuickBetsPage() {
         // Map sportsfeeder field names to our state structure
         if (data.data) {
           setGameState(prev => {
+            // Check if this update is for the current event
+            // If we have teams set and the update has different teams, ignore it
+            const updateHomeTeam = data.data.home_team_abbr ?? data.data.home_team;
+            const updateAwayTeam = data.data.away_team_abbr ?? data.data.away_team;
+            
+            // Only filter if we have teams established and the update has team info
+            if (prev.home_team && prev.away_team && updateHomeTeam && updateAwayTeam) {
+              // If teams don't match, this is for a different event - ignore it
+              if (updateHomeTeam !== prev.home_team || updateAwayTeam !== prev.away_team) {
+                console.log(`Ignoring game_update for ${updateAwayTeam} vs ${updateHomeTeam} (current: ${prev.away_team} vs ${prev.home_team})`);
+                return prev;  // Don't update state or log anything
+              }
+            }
+            
             const newState = {
               ...prev,
               home_points: data.data.home_points ?? prev.home_points,
               away_points: data.data.away_points ?? prev.away_points,
-              home_team: data.data.home_team_abbr ?? data.data.home_team ?? prev.home_team,
-              away_team: data.data.away_team_abbr ?? data.data.away_team ?? prev.away_team,
+              home_team: updateHomeTeam ?? prev.home_team,
+              away_team: updateAwayTeam ?? prev.away_team,
               home_team_id: data.data.home_team_id ?? prev.home_team_id,
               away_team_id: data.data.away_team_id ?? prev.away_team_id,
               status: data.data.status ?? prev.status,
@@ -774,7 +788,7 @@ export default function QuickBetsPage() {
 
             {/* Available Events - Grouped by Series */}
             <div className="bg-gray-800 rounded-xl p-6">
-              <h2 className="text-lg font-semibold mb-4">Select an Event to Start Trading</h2>
+              <h2 className="text-lg font-semibold mb-4">Select an Event to Start Monitoring</h2>
               
               {availableEvents.length === 0 ? (
                 <p className="text-gray-400 text-center py-8">No live events available right now</p>
@@ -1016,7 +1030,7 @@ export default function QuickBetsPage() {
                   onChange={(e) => setBetAmount(e.target.value)}
                   className="bg-gray-700 text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-cyan-500 focus:outline-none"
                 >
-                  <option value="$10">$10</option>
+                  <option value="$10">10</option>
                   <option value="10%">10%</option>
                   <option value="20%">20%</option>
                   <option value="50%">50%</option>

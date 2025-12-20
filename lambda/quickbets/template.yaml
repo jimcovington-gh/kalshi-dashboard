@@ -120,6 +120,8 @@ Resources:
       Environment:
         Variables:
           SESSIONS_TABLE: production-kalshi-quickbets-sessions
+          EVENT_METADATA_TABLE: production-kalshi-event-metadata
+          SERIES_METADATA_TABLE: production-kalshi-series-metadata
           KALSHI_API_BASE_URL: https://api.elections.kalshi.com
       Policies:
         - Statement:
@@ -129,6 +131,18 @@ Resources:
                 - dynamodb:GetItem
               Resource:
                 - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-quickbets-sessions
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource:
+                - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-event-metadata
+            - Effect: Allow
+              Action:
+                - dynamodb:BatchGetItem
+              Resource:
+                - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-series-metadata
             - Effect: Allow
               Action:
                 - secretsmanager:DescribeSecret

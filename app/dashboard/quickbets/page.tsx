@@ -269,16 +269,7 @@ export default function QuickBetsPage() {
       case 'prices':
         if (data.data) {
           setPrices(data.data);
-          // Throttle price log display to every 60 seconds
-          const now = Date.now();
-          if (now - lastPriceLogTime.current >= PRICE_LOG_INTERVAL_MS) {
-            const teams = Object.keys(data.data).filter(k => k !== 'updated_at');
-            if (teams.length > 0) {
-              // Round prices to nearest cent for display (prices are in dollars)
-              addLog(`Price update: ${teams.map(t => `${t}=${data.data[t]?.best_ask ? Math.round(data.data[t].best_ask * 100) : '--'}¢`).join(', ')}`, 'price');
-            }
-            lastPriceLogTime.current = now;
-          }
+          // Price updates no longer logged - they update the UI silently
         }
         break;
       
@@ -286,20 +277,52 @@ export default function QuickBetsPage() {
         // Update game state (scores, period, clock, etc.)
         // Map sportsfeeder field names to our state structure
         if (data.data) {
-          setGameState(prev => ({
-            ...prev,
-            home_points: data.data.home_points ?? prev.home_points,
-            away_points: data.data.away_points ?? prev.away_points,
-            home_team: data.data.home_team_abbr ?? data.data.home_team ?? prev.home_team,
-            away_team: data.data.away_team_abbr ?? data.data.away_team ?? prev.away_team,
-            home_team_id: data.data.home_team_id ?? prev.home_team_id,
-            away_team_id: data.data.away_team_id ?? prev.away_team_id,
-            status: data.data.status ?? prev.status,
-            period_type: data.data.period_type ?? prev.period_type,
-            period_number: data.data.period_number ?? prev.period_number,
-            clock: data.data.clock ?? prev.clock,
-            possession_team: data.data.possession_team_id ?? data.data.possession_team ?? prev.possession_team,
-          }));
+          setGameState(prev => {
+            const newState = {
+              ...prev,
+              home_points: data.data.home_points ?? prev.home_points,
+              away_points: data.data.away_points ?? prev.away_points,
+              home_team: data.data.home_team_abbr ?? data.data.home_team ?? prev.home_team,
+              away_team: data.data.away_team_abbr ?? data.data.away_team ?? prev.away_team,
+              home_team_id: data.data.home_team_id ?? prev.home_team_id,
+              away_team_id: data.data.away_team_id ?? prev.away_team_id,
+              status: data.data.status ?? prev.status,
+              period_type: data.data.period_type ?? prev.period_type,
+              period_number: data.data.period_number ?? prev.period_number,
+              clock: data.data.clock ?? prev.clock,
+              possession_team: data.data.possession_team_id ?? data.data.possession_team ?? prev.possession_team,
+            };
+            
+            // Log meaningful game state changes
+            const changes: string[] = [];
+            
+            // Score changes
+            if (newState.home_points !== prev.home_points || newState.away_points !== prev.away_points) {
+              changes.push(`Score: ${newState.away_team || 'AWAY'} ${newState.away_points} - ${newState.home_team || 'HOME'} ${newState.home_points}`);
+            }
+            
+            // Period changes
+            if (newState.period_number !== prev.period_number || newState.period_type !== prev.period_type) {
+              const periodLabel = newState.period_type || 'Period';
+              changes.push(`${periodLabel} ${newState.period_number}`);
+            }
+            
+            // Clock changes (only log significant changes, not every tick)
+            if (newState.clock !== prev.clock && newState.clock) {
+              // Only log clock at certain times (start of period, timeouts, etc.)
+              const clockMinutes = parseInt(newState.clock.split(':')[0] || '0');
+              const prevClockMinutes = parseInt((prev.clock || '0:00').split(':')[0] || '0');
+              if (clockMinutes !== prevClockMinutes) {
+                changes.push(`Clock: ${newState.clock}`);
+              }
+            }
+            
+            if (changes.length > 0) {
+              addLog(`🏀 ${changes.join(' | ')}`, 'info');
+            }
+            
+            return newState;
+          });
         }
         break;
 
@@ -903,8 +926,8 @@ export default function QuickBetsPage() {
                     return (
                       <React.Fragment key={team}>
                         <div className="flex-1 bg-gray-800 rounded-2xl p-4 text-center relative">
-                          {/* Color picker button - small rainbow icon */}
-                          <div className="absolute top-2 right-2">
+                          {/* Color picker button - small rainbow icon in upper left */}
+                          <div className="absolute top-2 left-2">
                             <button
                               onClick={() => setColorPickerOpen(colorPickerOpen === team ? null : team)}
                               className="w-6 h-6 rounded border border-gray-600 hover:border-cyan-400 transition-colors"
@@ -914,10 +937,13 @@ export default function QuickBetsPage() {
                               title="Change team color"
                             />
                             
-                            {/* Color picker popup */}
+                            {/* Color picker popup - expands right and down from upper left */}
                             {colorPickerOpen === team && (
-                              <div className="absolute top-8 right-0 z-50 bg-gray-900 border border-gray-600 rounded-lg p-2 shadow-xl">
-                                <div className="grid grid-cols-4 gap-1">
+                              <div 
+                                className="absolute z-50 bg-gray-900 border border-gray-600 rounded-lg p-3 shadow-xl"
+                                style={{ top: '32px', left: '0', minWidth: '140px' }}
+                              >
+                                <div className="grid grid-cols-4 gap-2">
                                   {colorPalette.map((color) => (
                                     <button
                                       key={color}
@@ -925,7 +951,7 @@ export default function QuickBetsPage() {
                                         setTeamColors(prev => ({ ...prev, [team]: color }));
                                         setColorPickerOpen(null);
                                       }}
-                                      className={`w-6 h-6 rounded border ${teamColors[team] === color || (!teamColors[team] && idx === 0 && color === '#ffffff') ? 'border-cyan-400 ring-2 ring-cyan-400' : 'border-gray-600 hover:border-gray-400'}`}
+                                      className={`w-7 h-7 rounded border-2 ${teamColors[team] === color || (!teamColors[team] && idx === 0 && color === '#ffffff') ? 'border-cyan-400 ring-2 ring-cyan-400' : 'border-gray-600 hover:border-gray-400'}`}
                                       style={{ backgroundColor: color }}
                                       title={color}
                                     />
@@ -985,7 +1011,6 @@ export default function QuickBetsPage() {
             {/* Controls Row: Bet Amount + Sell Delay */}
             <div className="flex justify-center items-center gap-4 mb-4">
               <div className="flex items-center gap-2">
-                <label className="text-gray-400 text-sm">Bet:</label>
                 <select
                   value={betAmount}
                   onChange={(e) => setBetAmount(e.target.value)}
@@ -1000,7 +1025,6 @@ export default function QuickBetsPage() {
               </div>
               
               <div className="flex items-center gap-2">
-                <label className="text-gray-400 text-sm">Sell delay:</label>
                 <select
                   value={sellDelay}
                   onChange={(e) => setSellDelay(parseInt(e.target.value))}

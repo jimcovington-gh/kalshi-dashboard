@@ -66,13 +66,18 @@ const LEAGUE_PRIORITY: Record<string, number> = {
   'KXNBAGAME': 3,   // NBA
   'KXMLBGAME': 4,   // MLB
   'KXMLSGAME': 5,   // MLS
-  'KXNCAAFGAME': 10, // NCAA Football
-  'KXNCAABGAME': 11, // NCAA Basketball
-  // International leagues get higher numbers (later in sort)
+  'KXNCAAFGAME': 20, // NCAA Football
+  'KXNCAABGAME': 21, // NCAA Basketball
+  'KXNCAAWBBGAME': 22, // NCAA Women's Basketball
+  // International and other leagues get priority 50+ (after NCAA)
 };
 
 function getLeaguePriority(seriesTicker: string): number {
-  return LEAGUE_PRIORITY[seriesTicker] || 99; // Default to end
+  // Check for NCAA pattern (KXNCAA*) - give them priority 25 if not explicitly listed
+  if (seriesTicker.startsWith('KXNCAA')) {
+    return LEAGUE_PRIORITY[seriesTicker] || 25;
+  }
+  return LEAGUE_PRIORITY[seriesTicker] || 50; // International/other leagues after NCAA
 }
 
 // Helper function to get event type prefix from series_ticker (e.g., "KXNFLGAME" -> "KXNFLGAME")
@@ -107,7 +112,7 @@ export default function QuickBetsPage() {
   // Lobby state
   const [availableEvents, setAvailableEvents] = useState<AvailableEvent[]>([]);
   const [userSessions, setUserSessions] = useState<UserSession[]>([]);
-  const [collapsedSeries, setCollapsedSeries] = useState<Set<string>>(new Set());  // Collapsed series groups
+  const [expandedSeries, setExpandedSeries] = useState<Set<string>>(new Set());  // Expanded series groups (default: all collapsed)
   
   // Trading state
   const [eventTicker, setEventTicker] = useState<string>('');
@@ -119,6 +124,7 @@ export default function QuickBetsPage() {
   const [sellDelay, setSellDelay] = useState<number>(8);  // Sell delay in seconds
   const [teamsSwapped, setTeamsSwapped] = useState(false);  // Swap left/right teams
   const [teamColors, setTeamColors] = useState<{[team: string]: string}>({});  // Per-team colors
+  const [colorPickerOpen, setColorPickerOpen] = useState<string | null>(null);  // Which team's color picker is open
   
   // Price log throttling (60 second interval)
   const lastPriceLogTime = useRef<number>(0);
@@ -787,14 +793,14 @@ export default function QuickBetsPage() {
                       const events = groupedBySeries[seriesTicker];
                       const firstEvent = events[0];
                       const seriesTitle = firstEvent?.series_title || seriesTicker;
-                      const isCollapsed = collapsedSeries.has(seriesTicker);
+                      const isExpanded = expandedSeries.has(seriesTicker);
                       
                       return (
                         <div key={seriesTicker} className="border border-gray-700 rounded-lg overflow-hidden">
                           {/* Series Header - Clickable to expand/collapse */}
                           <button
                             onClick={() => {
-                              setCollapsedSeries(prev => {
+                              setExpandedSeries(prev => {
                                 const newSet = new Set(prev);
                                 if (newSet.has(seriesTicker)) {
                                   newSet.delete(seriesTicker);
@@ -807,14 +813,14 @@ export default function QuickBetsPage() {
                             className="w-full flex items-center justify-between bg-gray-700 hover:bg-gray-600 px-4 py-3 transition-colors text-left"
                           >
                             <div className="flex items-center gap-2">
-                              <span className="text-gray-400">{isCollapsed ? '▶' : '▼'}</span>
+                              <span className="text-gray-400">{isExpanded ? '▼' : '▶'}</span>
                               <span className="font-semibold text-cyan-400">{seriesTitle}</span>
                               <span className="text-sm text-gray-400">({events.length} {events.length === 1 ? 'event' : 'events'})</span>
                             </div>
                           </button>
                           
                           {/* Events List */}
-                          {!isCollapsed && (
+                          {isExpanded && (
                             <div className="divide-y divide-gray-700">
                               {events.map((event) => (
                                 <div 
@@ -896,18 +902,37 @@ export default function QuickBetsPage() {
                     
                     return (
                       <React.Fragment key={team}>
-                        <div className="flex-1 bg-gray-800 rounded-2xl p-4 text-center">
-                          {/* Color picker row */}
-                          <div className="flex flex-wrap justify-center gap-1 mb-2">
-                            {colorPalette.map((color) => (
-                              <button
-                                key={color}
-                                onClick={() => setTeamColors(prev => ({ ...prev, [team]: color }))}
-                                className={`w-4 h-4 rounded-sm border ${teamColors[team] === color || (!teamColors[team] && idx === 0 && color === '#ffffff') ? 'border-cyan-400 ring-1 ring-cyan-400' : 'border-gray-600'}`}
-                                style={{ backgroundColor: color }}
-                                title={color}
-                              />
-                            ))}
+                        <div className="flex-1 bg-gray-800 rounded-2xl p-4 text-center relative">
+                          {/* Color picker button - small rainbow icon */}
+                          <div className="absolute top-2 right-2">
+                            <button
+                              onClick={() => setColorPickerOpen(colorPickerOpen === team ? null : team)}
+                              className="w-6 h-6 rounded border border-gray-600 hover:border-cyan-400 transition-colors"
+                              style={{ 
+                                background: 'linear-gradient(135deg, #ef4444 0%, #f97316 17%, #eab308 33%, #22c55e 50%, #06b6d4 67%, #6366f1 83%, #a855f7 100%)'
+                              }}
+                              title="Change team color"
+                            />
+                            
+                            {/* Color picker popup */}
+                            {colorPickerOpen === team && (
+                              <div className="absolute top-8 right-0 z-50 bg-gray-900 border border-gray-600 rounded-lg p-2 shadow-xl">
+                                <div className="grid grid-cols-4 gap-1">
+                                  {colorPalette.map((color) => (
+                                    <button
+                                      key={color}
+                                      onClick={() => {
+                                        setTeamColors(prev => ({ ...prev, [team]: color }));
+                                        setColorPickerOpen(null);
+                                      }}
+                                      className={`w-6 h-6 rounded border ${teamColors[team] === color || (!teamColors[team] && idx === 0 && color === '#ffffff') ? 'border-cyan-400 ring-2 ring-cyan-400' : 'border-gray-600 hover:border-gray-400'}`}
+                                      style={{ backgroundColor: color }}
+                                      title={color}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                           
                           {/* Asks above button (ascending - lowest at bottom, closest to button) */}

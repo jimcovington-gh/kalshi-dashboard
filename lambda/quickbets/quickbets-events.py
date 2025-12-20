@@ -28,6 +28,7 @@ KALSHI_API_BASE = os.environ.get('KALSHI_API_BASE_URL', 'https://api.elections.k
 # DynamoDB tables
 SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE', 'production-kalshi-quickbets-sessions')
 EVENT_METADATA_TABLE = os.environ.get('EVENT_METADATA_TABLE', 'production-kalshi-event-metadata')
+SERIES_METADATA_TABLE = os.environ.get('SERIES_METADATA_TABLE', 'production-kalshi-series-metadata')
 
 # Secrets Manager for Kalshi API credentials
 KALSHI_API_KEY_SECRET = os.environ.get('KALSHI_API_KEY_SECRET', 'production-kalshi-api-key-id')
@@ -210,6 +211,50 @@ def cache_start_date(event_ticker: str, start_timestamp: int):
         print(f"Failed to cache start_date for {event_ticker}: {e}")
 
 
+def get_series_titles(series_tickers: list) -> dict:
+    """Fetch series titles from DynamoDB for the given series tickers.
+    
+    Args:
+        series_tickers: List of series ticker strings
+        
+    Returns:
+        Dict mapping series_ticker to title
+    """
+    if not series_tickers:
+        return {}
+    
+    # Deduplicate
+    unique_tickers = list(set(series_tickers))
+    titles = {}
+    
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(SERIES_METADATA_TABLE)
+    
+    try:
+        # Batch get items (max 100 per call)
+        for i in range(0, len(unique_tickers), 100):
+            batch = unique_tickers[i:i+100]
+            response = dynamodb.meta.client.batch_get_item(
+                RequestItems={
+                    SERIES_METADATA_TABLE: {
+                        'Keys': [{'series_ticker': ticker} for ticker in batch],
+                        'ProjectionExpression': 'series_ticker, title'
+                    }
+                }
+            )
+            
+            for item in response.get('Responses', {}).get(SERIES_METADATA_TABLE, []):
+                ticker = item.get('series_ticker')
+                title = item.get('title', '')
+                if ticker:
+                    titles[ticker] = title
+                    
+    except Exception as e:
+        print(f"Error fetching series titles: {e}")
+        
+    return titles
+
+
 def get_active_sports_events():
     """Fetch active sports events from DynamoDB event metadata, filtered to 5 hours ago through 1 hour ahead."""
     events = []
@@ -332,6 +377,16 @@ def get_active_sports_events():
     
     # Sort by start time (soonest first)
     events.sort(key=lambda x: x.get('event_timestamp', 0))
+    
+    # Fetch series titles for all events
+    if events:
+        series_tickers = [e.get('series_ticker', '') for e in events]
+        series_titles = get_series_titles(series_tickers)
+        
+        # Add series_title to each event
+        for evt in events:
+            series_ticker = evt.get('series_ticker', '')
+            evt['series_title'] = series_titles.get(series_ticker, '')
     
     return events
 

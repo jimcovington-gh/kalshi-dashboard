@@ -1,0 +1,1 @@
+{"statusCode": 500, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}, "body": "{\"error\": \"An error occurred (ValidationException) when calling the Query operation: Query condition missed key schema element: settled_time_ts\"}"}

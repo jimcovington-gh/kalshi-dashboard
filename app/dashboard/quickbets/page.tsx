@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useRouter } from 'next/navigation';
 
@@ -8,6 +8,7 @@ interface AvailableEvent {
   event_ticker: string;
   title: string;
   series_ticker: string;
+  series_title?: string;  // Human-readable series name from DynamoDB
   close_time: string;
   event_time: string;
   event_timestamp: number;  // Unix timestamp of game start
@@ -58,6 +59,22 @@ type PageState = 'loading' | 'lobby' | 'launching' | 'trading';
 
 const API_BASE = 'https://5uthw49k2c.execute-api.us-east-1.amazonaws.com/prod';
 
+// League priority order: American pro leagues first, NCAA second, international last
+const LEAGUE_PRIORITY: Record<string, number> = {
+  'KXNFLGAME': 1,   // NFL
+  'KXNHLGAME': 2,   // NHL
+  'KXNBAGAME': 3,   // NBA
+  'KXMLBGAME': 4,   // MLB
+  'KXMLSGAME': 5,   // MLS
+  'KXNCAAFGAME': 10, // NCAA Football
+  'KXNCAABGAME': 11, // NCAA Basketball
+  // International leagues get higher numbers (later in sort)
+};
+
+function getLeaguePriority(seriesTicker: string): number {
+  return LEAGUE_PRIORITY[seriesTicker] || 99; // Default to end
+}
+
 // Helper function to get event type prefix from series_ticker (e.g., "KXNFLGAME" -> "KXNFLGAME")
 function getEventTypePrefix(seriesTicker: string): string {
   if (!seriesTicker) return 'Other';
@@ -90,6 +107,7 @@ export default function QuickBetsPage() {
   // Lobby state
   const [availableEvents, setAvailableEvents] = useState<AvailableEvent[]>([]);
   const [userSessions, setUserSessions] = useState<UserSession[]>([]);
+  const [collapsedSeries, setCollapsedSeries] = useState<Set<string>>(new Set());  // Collapsed series groups
   
   // Trading state
   const [eventTicker, setEventTicker] = useState<string>('');
@@ -97,7 +115,10 @@ export default function QuickBetsPage() {
   const [connected, setConnected] = useState(false);
   const [prices, setPrices] = useState<TeamPrices>({});
   const [gameState, setGameState] = useState<GameState>({});
-  const [betAmount, setBetAmount] = useState<string>('$10');  // Bet amount selector);
+  const [betAmount, setBetAmount] = useState<string>('$10');  // Bet amount selector
+  const [sellDelay, setSellDelay] = useState<number>(8);  // Sell delay in seconds
+  const [teamsSwapped, setTeamsSwapped] = useState(false);  // Swap left/right teams
+  const [teamColors, setTeamColors] = useState<{[team: string]: string}>({});  // Per-team colors
   
   // Price log throttling (60 second interval)
   const lastPriceLogTime = useRef<number>(0);
@@ -594,13 +615,14 @@ export default function QuickBetsPage() {
       return;
     }
 
-    addLog(`Sending BUY for ${team} (${betAmount})...`);
+    addLog(`Sending BUY for ${team} (${betAmount}, ${sellDelay}s)...`);
     wsRef.current.send(JSON.stringify({
       type: 'buy',
       team: team,
-      bet_amount: betAmount  // Send selected bet amount
+      bet_amount: betAmount,  // Send selected bet amount
+      sell_delay: sellDelay   // Send selected sell delay
     }));
-  }, [addLog, betAmount]);
+  }, [addLog, betAmount, sellDelay]);
 
   const backToLobby = useCallback(() => {
     if (wsRef.current) {
@@ -626,10 +648,38 @@ export default function QuickBetsPage() {
   }, []);
 
   // Filter teams from prices (exclude tie/draw for 3-outcome games like soccer)
-  const teams = Object.keys(prices).filter(k => 
+  const teamsRaw = Object.keys(prices).filter(k => 
     k !== 'updated_at' && 
     !['tie', 'draw', 'tied', 'drawn'].includes(k.toLowerCase())
   );
+  
+  // Sort teams: home team first by default
+  const teamsSorted = [...teamsRaw].sort((a, b) => {
+    const aIsHome = gameState.home_team?.toUpperCase() === a.toUpperCase();
+    const bIsHome = gameState.home_team?.toUpperCase() === b.toUpperCase();
+    if (aIsHome && !bIsHome) return -1;
+    if (!aIsHome && bIsHome) return 1;
+    return 0;
+  });
+  
+  // Apply swap if needed
+  const teams = teamsSwapped ? [...teamsSorted].reverse() : teamsSorted;
+  
+  // Set default color for home team (white) when teams first appear
+  useEffect(() => {
+    if (teamsSorted.length >= 2 && Object.keys(teamColors).length === 0) {
+      const homeTeam = teamsSorted[0];
+      setTeamColors({ [homeTeam]: '#ffffff' });
+    }
+  }, [teamsSorted, teamColors]);
+  
+  // 16-color palette for team buttons
+  const colorPalette = [
+    '#ffffff', '#ef4444', '#f97316', '#eab308',
+    '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6',
+    '#6366f1', '#8b5cf6', '#a855f7', '#d946ef',
+    '#ec4899', '#f43f5e', '#78716c', '#1f2937'
+  ];
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6">
@@ -693,53 +743,100 @@ export default function QuickBetsPage() {
               </div>
             )}
 
-            {/* Available Events */}
+            {/* Available Events - Grouped by Series */}
             <div className="bg-gray-800 rounded-xl p-6">
               <h2 className="text-lg font-semibold mb-4">Select an Event to Start Trading</h2>
               
               {availableEvents.length === 0 ? (
                 <p className="text-gray-400 text-center py-8">No live events available right now</p>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {(() => {
                     const now = Math.floor(Date.now() / 1000);
                     const fiveHoursAgo = now - (5 * 3600);
                     const filtered = availableEvents.filter(e => 
                       e.event_timestamp && e.event_timestamp <= now && e.event_timestamp >= fiveHoursAgo
                     );
-                    const sorted = [...filtered].sort((a, b) => {
-                      const seriesCompare = (a.series_ticker || '').localeCompare(b.series_ticker || '');
-                      if (seriesCompare !== 0) return seriesCompare;
-                      return (a.event_timestamp || 0) - (b.event_timestamp || 0);
+                    
+                    // Group events by series
+                    const groupedBySeries: Record<string, AvailableEvent[]> = {};
+                    filtered.forEach(event => {
+                      const series = event.series_ticker || 'Other';
+                      if (!groupedBySeries[series]) {
+                        groupedBySeries[series] = [];
+                      }
+                      groupedBySeries[series].push(event);
                     });
-                    let lastPrefix = '';
-                    return sorted.map((event) => {
-                      const currentPrefix = getEventTypePrefix(event.series_ticker);
-                      const showHeader = currentPrefix !== lastPrefix;
-                      lastPrefix = currentPrefix;
+                    
+                    // Sort series by league priority, then alphabetically
+                    const sortedSeriesKeys = Object.keys(groupedBySeries).sort((a, b) => {
+                      const priorityA = getLeaguePriority(a);
+                      const priorityB = getLeaguePriority(b);
+                      if (priorityA !== priorityB) return priorityA - priorityB;
+                      return a.localeCompare(b);
+                    });
+                    
+                    // Sort events within each series by start time
+                    sortedSeriesKeys.forEach(series => {
+                      groupedBySeries[series].sort((a, b) => 
+                        (a.event_timestamp || 0) - (b.event_timestamp || 0)
+                      );
+                    });
+                    
+                    return sortedSeriesKeys.map((seriesTicker) => {
+                      const events = groupedBySeries[seriesTicker];
+                      const firstEvent = events[0];
+                      const seriesTitle = firstEvent?.series_title || seriesTicker;
+                      const isCollapsed = collapsedSeries.has(seriesTicker);
+                      
                       return (
-                        <div key={event.event_ticker}>
-                          {showHeader && (
-                            <div className="text-sm font-semibold text-gray-400 uppercase tracking-wider pt-3 pb-1">
-                              {currentPrefix}
+                        <div key={seriesTicker} className="border border-gray-700 rounded-lg overflow-hidden">
+                          {/* Series Header - Clickable to expand/collapse */}
+                          <button
+                            onClick={() => {
+                              setCollapsedSeries(prev => {
+                                const newSet = new Set(prev);
+                                if (newSet.has(seriesTicker)) {
+                                  newSet.delete(seriesTicker);
+                                } else {
+                                  newSet.add(seriesTicker);
+                                }
+                                return newSet;
+                              });
+                            }}
+                            className="w-full flex items-center justify-between bg-gray-700 hover:bg-gray-600 px-4 py-3 transition-colors text-left"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-400">{isCollapsed ? '▶' : '▼'}</span>
+                              <span className="font-semibold text-cyan-400">{seriesTitle}</span>
+                              <span className="text-sm text-gray-400">({events.length} {events.length === 1 ? 'event' : 'events'})</span>
+                            </div>
+                          </button>
+                          
+                          {/* Events List */}
+                          {!isCollapsed && (
+                            <div className="divide-y divide-gray-700">
+                              {events.map((event) => (
+                                <div 
+                                  key={event.event_ticker}
+                                  className="flex items-center justify-between bg-gray-800 px-4 py-3 hover:bg-gray-750 transition-colors"
+                                >
+                                  <div className="flex-1">
+                                    <div className="font-medium">{event.title || event.event_ticker}</div>
+                                    <div className="text-sm text-gray-400">
+                                      {event.event_timestamp && <span className="text-cyan-400">{formatRelativeTime(event.event_timestamp)}</span>}
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => launchEvent(event.event_ticker, event.title)}
+                                    className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg font-medium transition-colors text-sm"
+                                  >
+                                    Select
+                                  </button>
+                                </div>
+                              ))}
                             </div>
                           )}
-                          <div className="flex items-center justify-between bg-gray-700 rounded-lg p-4 hover:bg-gray-600 transition-colors">
-                            <div className="flex-1">
-                              <div className="font-bold">{event.title || event.event_ticker}</div>
-                              <div className="text-sm text-gray-400">
-                                <span className="text-gray-300">{event.event_ticker}</span>
-                                {event.event_timestamp && <span className="mx-2">•</span>}
-                                {event.event_timestamp && <span className="text-cyan-400">{formatRelativeTime(event.event_timestamp)}</span>}
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => launchEvent(event.event_ticker, event.title)}
-                              className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg font-medium transition-colors"
-                            >
-                              Select
-                            </button>
-                          </div>
                         </div>
                       );
                     });
@@ -762,88 +859,133 @@ export default function QuickBetsPage() {
         {/* TRADING STATE */}
         {pageState === 'trading' && connected && (
           <>
-            {/* Team Cards */}
-            <div className="grid grid-cols-2 gap-6 mb-4">
+            {/* Team Cards with Swap Button */}
+            <div className="flex items-center gap-2 mb-4">
               {teams.length > 0 ? (
-                teams.map((team) => {
-                  // Determine score for this team based on home/away mapping
-                  let teamScore: number | undefined;
-                  if (gameState.home_team?.toUpperCase() === team.toUpperCase()) {
-                    teamScore = gameState.home_points;
-                  } else if (gameState.away_team?.toUpperCase() === team.toUpperCase()) {
-                    teamScore = gameState.away_points;
-                  }
-                  
-                  // Check if this team has possession
-                  let hasPossession = false;
-                  const poss = gameState.possession_team;
-                  if (poss) {
-                    if (poss.length > 10) {
-                      // It's a team ID - check against home/away team IDs
-                      const isHome = gameState.home_team?.toUpperCase() === team.toUpperCase();
-                      const isAway = gameState.away_team?.toUpperCase() === team.toUpperCase();
-                      hasPossession = (isHome && gameState.home_team_id === poss) || 
-                                     (isAway && gameState.away_team_id === poss);
-                    } else {
-                      // It's an abbreviation
-                      hasPossession = poss.toUpperCase() === team.toUpperCase();
+                <>
+                  {teams.map((team, idx) => {
+                    // Determine score for this team based on home/away mapping
+                    let teamScore: number | undefined;
+                    if (gameState.home_team?.toUpperCase() === team.toUpperCase()) {
+                      teamScore = gameState.home_points;
+                    } else if (gameState.away_team?.toUpperCase() === team.toUpperCase()) {
+                      teamScore = gameState.away_points;
                     }
-                  }
-                  
-                  const teamData = prices[team];
-                  const bids = teamData?.bids || [];
-                  const asks = teamData?.asks || [];
-                  
-                  return (
-                    <div key={team} className="bg-gray-800 rounded-2xl p-6 text-center">
-                      {/* Asks above button (ascending - lowest at bottom, closest to button) */}
-                      <div className="font-mono text-xs text-red-400 mb-2 space-y-0.5">
-                        {[...asks].slice(0, 3).reverse().map((ask, i) => (
-                          <div key={`ask-${i}`}>{Math.round(ask.price * 100)}-{ask.size}</div>
-                        ))}
-                        {asks.length === 0 && <div className="text-gray-600">--</div>}
-                      </div>
-                      
-                      {/* Buy Button - Team + Score (with possession icon if applicable) */}
-                      <button
-                        onClick={() => sendBuy(team)}
-                        className="w-full py-5 text-2xl font-bold uppercase tracking-wider bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] mb-2"
-                      >
-                        {hasPossession && '🏈 '}{team.toUpperCase()}{teamScore !== undefined ? ` ${teamScore}` : ''}
-                      </button>
-                      
-                      {/* Bids below button (descending - highest at top, closest to button) */}
-                      <div className="font-mono text-xs text-green-400 mt-2 space-y-0.5">
-                        {bids.slice(0, 3).map((bid, i) => (
-                          <div key={`bid-${i}`}>{Math.round(bid.price * 100)}-{bid.size}</div>
-                        ))}
-                        {bids.length === 0 && <div className="text-gray-600">--</div>}
-                      </div>
-                    </div>
-                  );
-                })
+                    
+                    // Check if this team has possession
+                    let hasPossession = false;
+                    const poss = gameState.possession_team;
+                    if (poss) {
+                      if (poss.length > 10) {
+                        // It's a team ID - check against home/away team IDs
+                        const isHome = gameState.home_team?.toUpperCase() === team.toUpperCase();
+                        const isAway = gameState.away_team?.toUpperCase() === team.toUpperCase();
+                        hasPossession = (isHome && gameState.home_team_id === poss) || 
+                                       (isAway && gameState.away_team_id === poss);
+                      } else {
+                        // It's an abbreviation
+                        hasPossession = poss.toUpperCase() === team.toUpperCase();
+                      }
+                    }
+                    
+                    const teamData = prices[team];
+                    const bids = teamData?.bids || [];
+                    const asks = teamData?.asks || [];
+                    const teamColor = teamColors[team] || (idx === 0 ? '#ffffff' : 'transparent');
+                    const textColor = teamColor === '#ffffff' || teamColor === '#fbbf24' || teamColor === '#22c55e' || teamColor === '#06b6d4' ? 'text-gray-900' : 'text-white';
+                    
+                    return (
+                      <React.Fragment key={team}>
+                        <div className="flex-1 bg-gray-800 rounded-2xl p-4 text-center">
+                          {/* Color picker row */}
+                          <div className="flex flex-wrap justify-center gap-1 mb-2">
+                            {colorPalette.map((color) => (
+                              <button
+                                key={color}
+                                onClick={() => setTeamColors(prev => ({ ...prev, [team]: color }))}
+                                className={`w-4 h-4 rounded-sm border ${teamColors[team] === color || (!teamColors[team] && idx === 0 && color === '#ffffff') ? 'border-cyan-400 ring-1 ring-cyan-400' : 'border-gray-600'}`}
+                                style={{ backgroundColor: color }}
+                                title={color}
+                              />
+                            ))}
+                          </div>
+                          
+                          {/* Asks above button (ascending - lowest at bottom, closest to button) */}
+                          <div className="font-mono text-xs text-red-400 mb-2 space-y-0.5">
+                            {[...asks].slice(0, 3).reverse().map((ask, i) => (
+                              <div key={`ask-${i}`}>{Math.round(ask.price * 100)}-{ask.size}</div>
+                            ))}
+                            {asks.length === 0 && <div className="text-gray-600">--</div>}
+                          </div>
+                          
+                          {/* Buy Button - Team + Score (with possession icon if applicable) */}
+                          <button
+                            onClick={() => sendBuy(team)}
+                            className={`w-full py-4 text-xl font-bold uppercase tracking-wider rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] mb-2 ${textColor}`}
+                            style={{ backgroundColor: teamColor === 'transparent' ? undefined : teamColor }}
+                          >
+                            {hasPossession && '🏈 '}{team.toUpperCase()}{teamScore !== undefined ? ` ${teamScore}` : ''}
+                          </button>
+                          
+                          {/* Bids below button (descending - highest at top, closest to button) */}
+                          <div className="font-mono text-xs text-green-400 mt-2 space-y-0.5">
+                            {bids.slice(0, 3).map((bid, i) => (
+                              <div key={`bid-${i}`}>{Math.round(bid.price * 100)}-{bid.size}</div>
+                            ))}
+                            {bids.length === 0 && <div className="text-gray-600">--</div>}
+                          </div>
+                        </div>
+                        
+                        {/* Swap button between teams */}
+                        {idx === 0 && teams.length > 1 && (
+                          <button
+                            onClick={() => setTeamsSwapped(!teamsSwapped)}
+                            className="px-2 py-4 bg-gray-700 hover:bg-gray-600 rounded-lg text-xl transition-colors"
+                            title="Swap teams"
+                          >
+                            ⇄
+                          </button>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </>
               ) : (
-                <div className="col-span-2 text-center py-12 text-gray-400">
+                <div className="flex-1 text-center py-12 text-gray-400">
                   Waiting for price updates...
                 </div>
               )}
             </div>
             
-            {/* Bet Amount Selector */}
-            <div className="flex justify-center gap-2 mb-4">
-              {['$10', '10%', '20%', '50%', '95%'].map((amount) => (
-                <button
-                  key={amount}
-                  onClick={() => setBetAmount(amount)}
-                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                    betAmount === amount
-                      ? 'bg-cyan-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
+            {/* Controls Row: Bet Amount + Sell Delay */}
+            <div className="flex justify-center items-center gap-4 mb-4">
+              <div className="flex items-center gap-2">
+                <label className="text-gray-400 text-sm">Bet:</label>
+                <select
+                  value={betAmount}
+                  onChange={(e) => setBetAmount(e.target.value)}
+                  className="bg-gray-700 text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-cyan-500 focus:outline-none"
                 >
-                  {amount}
-                </button>
-              ))}
+                  <option value="$10">$10</option>
+                  <option value="10%">10%</option>
+                  <option value="20%">20%</option>
+                  <option value="50%">50%</option>
+                  <option value="95%">95%</option>
+                </select>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <label className="text-gray-400 text-sm">Sell delay:</label>
+                <select
+                  value={sellDelay}
+                  onChange={(e) => setSellDelay(parseInt(e.target.value))}
+                  className="bg-gray-700 text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-cyan-500 focus:outline-none"
+                >
+                  {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((s) => (
+                    <option key={s} value={s}>{s}s</option>
+                  ))}
+                </select>
+              </div>
             </div>
             
             {/* Event/Game Status Banner - below team cards */}

@@ -53,6 +53,7 @@ interface LogEntry {
   time: string;
   message: string;
   type: 'info' | 'success' | 'error' | 'price';
+  color?: string;  // Optional color for custom styling
 }
 
 type PageState = 'loading' | 'lobby' | 'launching' | 'trading';
@@ -149,9 +150,9 @@ export default function QuickBetsPage() {
   // Wake Lock to prevent screen sleep (like watching a video)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
-  const addLog = useCallback((message: string, type: LogEntry['type'] = 'info') => {
+  const addLog = useCallback((message: string, type: LogEntry['type'] = 'info', color?: string) => {
     const time = new Date().toLocaleTimeString();
-    setLogs(prev => [...prev.slice(-100), { time, message, type }]);
+    setLogs(prev => [...prev.slice(-100), { time, message, type, color }]);
   }, []);
 
   // Auto-scroll logs
@@ -270,9 +271,9 @@ export default function QuickBetsPage() {
       case 'prices':
         if (data.data) {
           setPrices(prev => {
-            // Track significant price changes (>= 3 cents)
+            // Track significant price changes (>= 4 cents)
             const teams = Object.keys(data.data).filter(k => k !== 'updated_at');
-            const priceChanges: string[] = [];
+            const priceChanges: {team: string, message: string, isUp: boolean}[] = [];
             
             teams.forEach(team => {
               const newAsk = data.data[team]?.best_ask;
@@ -280,17 +281,25 @@ export default function QuickBetsPage() {
               
               if (newAsk !== undefined && prevAsk !== undefined) {
                 const priceDiff = Math.abs(newAsk - prevAsk);
-                if (priceDiff >= 0.03) {  // 3 cents or more
-                  const direction = newAsk > prevAsk ? '↑' : '↓';
+                if (priceDiff >= 0.04) {  // 4 cents or more
+                  const isUp = newAsk > prevAsk;
+                  const arrow = isUp ? '↑' : '↓';  // ↑ or ↓
                   const newCents = Math.round(newAsk * 100);
                   const prevCents = Math.round(prevAsk * 100);
-                  priceChanges.push(`${team}: ${prevCents}¢ → ${newCents}¢ ${direction}`);
+                  priceChanges.push({
+                    team,
+                    message: `${arrow} ${team}: ${prevCents}¢ → ${newCents}¢`,
+                    isUp
+                  });
                 }
               }
             });
             
             if (priceChanges.length > 0) {
-              addLog(`💰 ${priceChanges.join(' | ')}`, 'info');
+              // Format with team colors
+              priceChanges.forEach(({team, message, isUp}) => {
+                addLog(message, 'price', teamColors[team] || '#ffffff');
+              });
             }
             
             return data.data;
@@ -397,7 +406,7 @@ export default function QuickBetsPage() {
         // Only log truly unknown messages
         console.log('Unknown message type:', data.type, data);
     }
-  }, [addLog]);
+  }, [addLog, teamColors]);
 
   // Connect WebSocket - MUST be defined before launchEvent
   const connectWebSocket = useCallback((wsUrl: string, token: string, targetEvent: string, isRetry = false) => {
@@ -967,7 +976,7 @@ export default function QuickBetsPage() {
                     const teamData = prices[team];
                     const bids = teamData?.bids || [];
                     const asks = teamData?.asks || [];
-                    const teamColor = teamColors[team] || (idx === 0 ? '#ffffff' : 'transparent');
+                    const teamColor = teamColors[team] || 'transparent';
                     const textColor = teamColor === '#ffffff' || teamColor === '#fbbf24' || teamColor === '#22c55e' || teamColor === '#06b6d4' ? 'text-gray-900' : 'text-white';
                     
                     return (
@@ -1120,6 +1129,7 @@ export default function QuickBetsPage() {
                   log.type === 'price' ? 'text-cyan-400' :
                   'text-gray-400'
                 }`}
+                style={log.color ? { color: log.color, fontWeight: 'bold' } : undefined}
               >
                 [{log.time}] {log.message}
               </div>

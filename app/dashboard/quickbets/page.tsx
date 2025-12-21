@@ -399,7 +399,14 @@ export default function QuickBetsPage() {
         break;
 
       case 'error':
-        addLog(`Error: ${data.message || data.error}`, 'error');
+        addLog(`${data.error || data.message}`, 'error');
+        // Handle game-complete errors by returning to lobby
+        if (data.error_code === 'game_complete' || data.error_code === 'game_cancelled') {
+          // Give user time to read the message before returning to lobby
+          setTimeout(() => {
+            setPageState('lobby');
+          }, 3000);
+        }
         break;
 
       default:

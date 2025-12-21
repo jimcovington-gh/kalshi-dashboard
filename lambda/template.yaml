@@ -96,9 +96,12 @@ Resources:
           RATE_LIMITER_TABLE_NAME: production-kalshi-rate-limiter
           USER_SECRET_PREFIX: production/kalshi/users
           KALSHI_API_BASE_URL: https://api.elections.kalshi.com
+          POSITIONS_LIVE_TABLE: production-kalshi-positions-live
       Policies:
         - DynamoDBReadPolicy:
             TableName: production-kalshi-market-positions
+        - DynamoDBReadPolicy:
+            TableName: production-kalshi-positions-live
         - DynamoDBReadPolicy:
             TableName: production-kalshi-portfolio-snapshots
         - DynamoDBReadPolicy:

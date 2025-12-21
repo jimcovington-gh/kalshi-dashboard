@@ -230,7 +230,7 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
     logger.info(f"🔍 POSITION COUNT - Returning {len(position_details)} positions to client for {user_name}")
     logger.info(f"Portfolio complete for {user_name}: {len(position_details)} positions, total value: ${cash_balance + total_position_value:.2f}")
     
-    return {
+    portfolio_result = {
         'user_name': user_name,
         'cash_balance': cash_balance,
         'position_count': len(position_details),
@@ -239,6 +239,122 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
         'data_source': 'api_with_enrichment',  # Indicate data freshness
         'fetched_at': portfolio_api.get('fetched_at')
     }
+    
+    # PHASE 4: Add comparison logging with positions-live
+    logger.info("🔍 PHASE 4: Starting positions-live comparison...")
+    live_comparison = get_positions_live_comparison(user_name)
+    compare_portfolios_log_diff(portfolio_result, live_comparison)
+    
+    return portfolio_result
+
+
+def get_positions_live_comparison(user_name: str) -> Dict[str, Any]:
+    """
+    Read positions from DynamoDB positions-live table in COMPARISON MODE
+    
+    This function reads from the positions-live table (updated via WebSocket feeder)
+    and compares it with the API response to validate data freshness.
+    
+    Table schema: user_name (HASH) + market_ticker (RANGE)
+    Uses query() to get all positions for a user.
+    
+    Returns comparison metrics:
+    - status: 'available' or 'not_available'
+    - live_position_count: Number of positions stored
+    - live_tickers: List of market tickers
+    - staleness_minutes: Age of most recent update
+    
+    Phase 4: Comparison mode - both tables are returned, logs show differences
+    """
+    try:
+        # Get the live table from environment
+        positions_live_table_name = os.environ.get('POSITIONS_LIVE_TABLE')
+        if not positions_live_table_name:
+            logger.warning(f"POSITIONS_LIVE_TABLE not configured, skipping comparison for {user_name}")
+            return {}
+        
+        positions_live_table = dynamodb.Table(positions_live_table_name)
+        
+        # Query positions-live table for all positions for this user
+        # Table schema: user_name (HASH) + market_ticker (RANGE)
+        response = positions_live_table.query(
+            KeyConditionExpression='user_name = :user',
+            ExpressionAttributeValues={':user': user_name}
+        )
+        
+        live_items = response.get('Items', [])
+        
+        if not live_items:
+            logger.warning(f"No positions-live data found for {user_name}")
+            return {'status': 'not_available'}
+        
+        # Extract position information and find staleness
+        live_tickers = []
+        max_staleness_minutes = 0
+        
+        for item in live_items:
+            market_ticker = item.get('market_ticker', '')
+            updated_at = item.get('updated_at', '')
+            
+            if market_ticker and market_ticker != 'CASH_BALANCE':
+                live_tickers.append(market_ticker)
+            
+            # Calculate staleness from most recent update
+            if updated_at:
+                try:
+                    update_dt = datetime.fromisoformat(updated_at)
+                    now_dt = datetime.now(timezone.utc)
+                    staleness_seconds = (now_dt - update_dt).total_seconds()
+                    staleness_minutes = staleness_seconds / 60
+                    max_staleness_minutes = max(max_staleness_minutes, staleness_minutes)
+                except:
+                    pass
+        
+        logger.info(f"COMPARISON: positions-live for {user_name} - {len(live_tickers)} positions, staleness: {max_staleness_minutes:.1f} min")
+        
+        # Build comparison metrics
+        return {
+            'status': 'available',
+            'live_position_count': len(live_tickers),
+            'live_tickers': sorted(live_tickers),
+            'staleness_minutes': max_staleness_minutes
+        }
+        
+    except Exception as e:
+        logger.error(f"Error reading positions-live for {user_name}: {e}", exc_info=True)
+        return {'status': 'error', 'error': str(e)}
+
+
+def compare_portfolios_log_diff(api_portfolio: Dict[str, Any], live_comparison: Dict[str, Any]) -> None:
+    """
+    Log differences between API portfolio and positions-live data
+    
+    This is used in Phase 4 comparison mode to identify any discrepancies
+    between the REST API and the WebSocket-fed positions-live table.
+    """
+    if live_comparison.get('status') != 'available':
+        return
+    
+    api_tickers = set([p['ticker'] for p in api_portfolio.get('positions', [])])
+    live_tickers = set(live_comparison.get('live_tickers', []))
+    
+    if api_tickers == live_tickers:
+        logger.info(f"✓ COMPARISON: Tickers match - API and positions-live in sync")
+    else:
+        missing_in_live = api_tickers - live_tickers
+        extra_in_live = live_tickers - api_tickers
+        
+        if missing_in_live:
+            logger.warning(f"⚠ COMPARISON: Missing in positions-live: {missing_in_live}")
+        if extra_in_live:
+            logger.warning(f"⚠ COMPARISON: Extra in positions-live: {extra_in_live}")
+    
+    # Log staleness warning if live data is too old (> 5 minutes)
+    staleness = live_comparison.get('staleness_minutes', -1)
+    if staleness > 5:
+        logger.warning(f"⚠ COMPARISON: positions-live is stale ({staleness:.1f} min old)")
+    elif staleness >= 0:
+        logger.info(f"✓ COMPARISON: positions-live is fresh ({staleness:.1f} min old)")
 
 
 def get_portfolio_history(api_key_id: str, period: str = '24h') -> List[Dict[str, Any]]:

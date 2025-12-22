@@ -573,77 +573,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* Monitors Table */}
-        {mentionMonitors && mentionMonitors.monitors.length > 0 && (
-          <div className="overflow-x-auto">
-            <h3 className="text-sm font-semibold text-gray-700 uppercase mb-3">Active Monitors</h3>
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Event</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phase</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">State</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Time</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Heartbeat</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {mentionMonitors.monitors.map((monitor) => (
-                  <tr key={monitor.event_ticker} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <a 
-                        href={buildEventUrl(monitor.event_ticker)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline"
-                      >
-                        {monitor.event_ticker}
-                      </a>
-                      {monitor.fargate_instance_id && (
-                        <div className="text-xs text-gray-400">Instance: {monitor.fargate_instance_id}</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                      {monitor.user_name}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        monitor.phase === 'phase1' ? 'bg-yellow-100 text-yellow-800' :
-                        monitor.phase === 'phase2' ? 'bg-blue-100 text-blue-800' :
-                        monitor.phase === 'phase3' ? 'bg-green-100 text-green-800' :
-                        monitor.phase === 'phase4' ? 'bg-purple-100 text-purple-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {monitor.phase}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        monitor.fargate_state === 'active' ? 'bg-green-100 text-green-800' :
-                        monitor.fargate_state === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                        monitor.fargate_state === 'running' ? 'bg-cyan-100 text-cyan-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {monitor.fargate_state}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                      {monitor.start_date ? new Date(monitor.start_date).toLocaleString() : '-'}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                      {monitor.last_heartbeat ? (
-                        <span title={monitor.last_heartbeat}>
-                          {formatTimeAgo(monitor.last_heartbeat)}
-                        </span>
-                      ) : '-'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {/* Monitors Table - REMOVED as per user request */}
 
         {mentionMonitors && mentionMonitors.monitors.length === 0 && (
           <div className="text-center py-8 text-gray-500">
@@ -670,6 +600,7 @@ export default function AdminPage() {
                   <th className="px-2 py-1 text-left font-medium text-gray-500">Event</th>
                   <th className="px-2 py-1 text-left font-medium text-gray-500">User</th>
                   <th className="px-2 py-1 text-center font-medium text-gray-500">Phase</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Start Time</th>
                   <th className="px-2 py-1 text-left font-medium text-gray-500">Heartbeat</th>
                 </tr>
               </thead>
@@ -683,6 +614,9 @@ export default function AdminPage() {
                     <td className="px-2 py-1">{m.user_name}</td>
                     <td className="px-2 py-1 text-center">
                       <span className={`px-1 py-0.5 rounded text-xs ${m.phase === 'phase1' ? 'bg-yellow-100 text-yellow-700' : m.phase === 'phase2' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{m.phase}</span>
+                    </td>
+                    <td className="px-2 py-1 text-gray-600 text-xs">
+                      {m.start_date ? new Date(m.start_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '-'}
                     </td>
                     <td className="px-2 py-1 text-gray-600">{m.last_heartbeat ? formatTimeAgo(m.last_heartbeat) : '-'}</td>
                   </tr>

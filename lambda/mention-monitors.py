@@ -69,12 +69,17 @@ def get_mention_monitors():
     """
     Get current mention monitor status for all users.
     
+    This function displays the ACTUAL state from DynamoDB without modification.
+    The dashboard should accurately reflect reality so admins can spot problems.
+    Cleanup is handled by the Fargate containers on graceful shutdown (SIGTERM).
+    
     Returns:
         - monitors: List of active/running monitors with event details
         - users: Summary counts by user
         - total_running: Total number of running Fargate tasks
     """
     table = dynamodb.Table(MENTION_STATE_TABLE)
+    now = datetime.now(timezone.utc)
     
     try:
         # Scan for all items
@@ -89,7 +94,7 @@ def get_mention_monitors():
         # Separate into Fargate task records (USER#xxx) and event records
         fargate_tasks = {}  # user_name -> task info
         event_records = []  # List of event monitor records
-        
+
         for item in items:
             event_ticker = item.get('event_ticker', '')
             

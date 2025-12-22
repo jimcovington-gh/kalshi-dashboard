@@ -219,25 +219,25 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className={bgColor}>
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Market
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Fill Date
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Idea
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Side
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   QTY
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Fill Price
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Current Price
                 </th>
               </tr>
@@ -256,7 +256,7 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
 
                 return (
                   <tr key={idx} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 whitespace-nowrap">
+                    <td className="px-3 py-1 whitespace-nowrap">
                       {marketUrl ? (
                         <a href={marketUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate max-w-md block">
                           {position.market_title}
@@ -265,15 +265,15 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                         <div className="text-xs text-gray-500 truncate max-w-md">{position.market_title}</div>
                       )}
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap">
+                    <td className="px-3 py-1 whitespace-nowrap">
                       <a href={tradeUrl} className="text-xs text-blue-600 hover:underline">
                         {fillDateTime}
                       </a>
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-600">
+                    <td className="px-3 py-1 whitespace-nowrap text-xs text-gray-600">
                       {position.idea_name || '-'}
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap">
+                    <td className="px-3 py-1 whitespace-nowrap">
                       <span
                         className={`px-2 py-0.5 inline-flex text-xs leading-4 font-semibold rounded-full ${
                           position.side === 'yes'
@@ -284,13 +284,13 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                         {position.side.toUpperCase()}
                       </span>
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-right text-xs text-gray-900">
+                    <td className="px-3 py-1 whitespace-nowrap text-right text-xs text-gray-900">
                       {Math.abs(position.contracts)}
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-right text-xs text-gray-600">
+                    <td className="px-3 py-1 whitespace-nowrap text-right text-xs text-gray-600">
                       {position.fill_price ? `$${position.fill_price.toFixed(2)}` : '-'}
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-right text-xs font-semibold">
+                    <td className="px-3 py-1 whitespace-nowrap text-right text-xs font-semibold">
                       <span className={`${
                         position.current_price >= 0.95
                           ? 'text-green-600'
@@ -324,7 +324,7 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
           const tradeUrl = `/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`;
 
           return (
-            <div key={idx} className="bg-white rounded-lg shadow p-4">
+            <div key={idx} className="bg-white rounded-lg shadow p-3">
               {/* Market Title */}
               {marketUrl ? (
                 <a href={marketUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-600 hover:underline block mb-2">
@@ -335,14 +335,14 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
               )}
               
               {/* Fill Date/Time - clickable to trades page */}
-              <a href={tradeUrl} className="text-xs text-blue-600 hover:underline block mb-3">
+              <a href={tradeUrl} className="text-xs text-blue-600 hover:underline block mb-2">
                 {fillDateTime}
               </a>
               
               {/* Stats Grid */}
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-4 gap-2 text-xs">
                 <div>
-                  <div className="text-xs text-gray-500 mb-1">Side</div>
+                  <div className="text-gray-500 mb-1">Side</div>
                   <span className={`px-2 py-0.5 inline-flex text-xs leading-4 font-semibold rounded-full ${
                     position.side === 'yes'
                       ? 'bg-green-100 text-green-800'
@@ -352,18 +352,18 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                   </span>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500 mb-1">QTY</div>
-                  <div className="text-sm font-semibold text-gray-900">{Math.abs(position.contracts)}</div>
+                  <div className="text-gray-500 mb-1">QTY</div>
+                  <div className="font-semibold text-gray-900">{Math.abs(position.contracts)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500 mb-1">Fill</div>
-                  <div className="text-sm font-medium text-gray-600">
+                  <div className="text-gray-500 mb-1">Fill</div>
+                  <div className="font-medium text-gray-600">
                     {position.fill_price ? `$${position.fill_price.toFixed(2)}` : '-'}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500 mb-1">Price</div>
-                  <div className={`text-sm font-semibold ${
+                  <div className="text-gray-500 mb-1">Price</div>
+                  <div className={`font-semibold ${
                     position.current_price >= 0.95
                       ? 'text-green-600'
                       : position.current_price >= 0.85

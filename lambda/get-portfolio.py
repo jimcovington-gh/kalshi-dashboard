@@ -209,6 +209,9 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                 # Get market status (active, closed, settled, etc.)
                 market_status = market.get('status', 'unknown')
                 
+                # Extract series_ticker from market ticker if not in metadata
+                series = market.get('series_ticker') or (ticker.split('-')[0] if ticker else '')
+                
                 position_details.append({
                     'ticker': ticker,
                     'contracts': int(contracts),
@@ -221,13 +224,15 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                     'market_title': full_title,
                     'close_time': market.get('close_time', ''),
                     'event_ticker': market.get('event_ticker', ''),
-                    'series_ticker': market.get('series_ticker', ''),
+                    'series_ticker': series,
                     'market_status': market_status
                 })
                 
             except Exception as e:
                 logger.warning(f"Failed to get metadata for {ticker}: {e}")
                 # Use API data only
+                # Extract series_ticker from market ticker (prefix before first dash)
+                series = ticker.split('-')[0] if ticker else ''
                 position_details.append({
                     'ticker': ticker,
                     'contracts': int(contracts),
@@ -240,7 +245,7 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                     'market_title': ticker,
                     'close_time': '',
                     'event_ticker': '',
-                    'series_ticker': '',
+                    'series_ticker': series,
                     'market_status': 'unknown'
                 })
     
@@ -389,6 +394,8 @@ def get_positions_from_live_table(user_name: str) -> Dict[str, Any]:
             market_value = abs(position_count) * current_price
             
             # Include market metadata from API response
+            # Extract series_ticker from market ticker (prefix before first dash)
+            series = ticker.split('-')[0] if ticker else ''
             positions[ticker] = {
                 'position': position_count,
                 'current_price': current_price,
@@ -398,7 +405,7 @@ def get_positions_from_live_table(user_name: str) -> Dict[str, Any]:
                 'market_status': data.get('status', 'unknown'),
                 'close_time': data.get('close_time', ''),
                 'event_ticker': data.get('event_ticker', ''),
-                'series_ticker': ''  # Not available from /markets endpoint
+                'series_ticker': series
             }
             
             total_position_value += market_value

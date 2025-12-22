@@ -334,16 +334,17 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                 <div className="text-sm font-medium text-gray-900 mb-1.5">{position.market_title}</div>
               )}
               
-              {/* Fill Date/Time - clickable to trades page */}
-              <a href={tradeUrl} className="text-xs text-blue-600 hover:underline block mb-1.5">
-                {fillDateTime}
-              </a>
-              
-              {/* Stats Grid */}
-              <div className="grid grid-cols-4 gap-1.5 text-xs">
+              {/* Stats Grid - 5 columns with Time first */}
+              <div className="grid grid-cols-5 gap-1 text-xs">
                 <div>
-                  <div className="text-gray-500 mb-1">Side</div>
-                  <span className={`px-2 py-0.5 inline-flex text-xs leading-4 font-semibold rounded-full ${
+                  <div className="text-gray-500 mb-0.5">Time</div>
+                  <a href={tradeUrl} className="text-blue-600 hover:underline text-xs">
+                    {fillDateTime}
+                  </a>
+                </div>
+                <div>
+                  <div className="text-gray-500 mb-0.5">Side</div>
+                  <span className={`px-1.5 py-0.5 inline-flex text-xs leading-4 font-semibold rounded-full ${
                     position.side === 'yes'
                       ? 'bg-green-100 text-green-800'
                       : 'bg-blue-100 text-blue-800'
@@ -352,17 +353,17 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                   </span>
                 </div>
                 <div>
-                  <div className="text-gray-500 mb-1">QTY</div>
+                  <div className="text-gray-500 mb-0.5">QTY</div>
                   <div className="font-semibold text-gray-900">{Math.abs(position.contracts)}</div>
                 </div>
                 <div>
-                  <div className="text-gray-500 mb-1">Fill</div>
+                  <div className="text-gray-500 mb-0.5">Fill</div>
                   <div className="font-medium text-gray-600">
                     {position.fill_price ? `$${position.fill_price.toFixed(2)}` : '-'}
                   </div>
                 </div>
                 <div>
-                  <div className="text-gray-500 mb-1">Price</div>
+                  <div className="text-gray-500 mb-0.5">Price</div>
                   <div className={`font-semibold ${
                     position.current_price >= 0.95
                       ? 'text-green-600'

@@ -220,10 +220,10 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
             <thead className={bgColor}>
               <tr>
                 <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Market
+                  Time
                 </th>
                 <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Fill Date
+                  Market
                 </th>
                 <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Idea
@@ -257,6 +257,11 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                 return (
                   <tr key={idx} className="hover:bg-gray-50">
                     <td className="px-3 py-0.5 whitespace-nowrap">
+                      <a href={tradeUrl} className="text-xs text-blue-600 hover:underline">
+                        {fillDateTime}
+                      </a>
+                    </td>
+                    <td className="px-3 py-0.5 whitespace-nowrap">
                       {marketUrl ? (
                         <a href={marketUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate max-w-md block">
                           {position.market_title}
@@ -264,11 +269,6 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                       ) : (
                         <div className="text-xs text-gray-500 truncate max-w-md">{position.market_title}</div>
                       )}
-                    </td>
-                    <td className="px-3 py-0.5 whitespace-nowrap">
-                      <a href={tradeUrl} className="text-xs text-blue-600 hover:underline">
-                        {fillDateTime}
-                      </a>
                     </td>
                     <td className="px-3 py-0.5 whitespace-nowrap text-xs text-gray-600">
                       {position.idea_name || '-'}

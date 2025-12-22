@@ -110,7 +110,7 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
     # STEP 2: Get fill prices AND fill times by querying each ticker in parallel
     def query_ticker_fill_data(ticker: str) -> tuple:
         """Query fill price and fill time for a single ticker using market_ticker-index.
-        Returns (ticker, avg_fill_price, earliest_fill_time, idea_name)"""
+        Returns (ticker, avg_fill_price, most_recent_fill_time, idea_name)"""
         try:
             response = trades_table.query(
                 IndexName='market_ticker-index',
@@ -126,9 +126,9 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
             if items:
                 total_contracts = sum(int(t.get('filled_count', 0)) for t in items)
                 total_cost = sum(int(t.get('filled_count', 0)) * float(t.get('avg_fill_price', 0)) for t in items)
-                # Get earliest fill time (placed_at or completed_at)
+                # Get most recent fill time (latest trade, not earliest)
                 fill_times = [t.get('completed_at') or t.get('placed_at') for t in items if t.get('completed_at') or t.get('placed_at')]
-                earliest_fill = min(fill_times) if fill_times else None
+                most_recent_fill = max(fill_times) if fill_times else None
                 
                 # Get idea_name - if multiple trades, check if they're all the same
                 idea_names = [t.get('idea_name') for t in items if t.get('idea_name')]
@@ -139,7 +139,7 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                     idea_name = None
                 
                 if total_contracts > 0:
-                    return ticker, total_cost / total_contracts, earliest_fill, idea_name
+                    return ticker, total_cost / total_contracts, most_recent_fill, idea_name
             return ticker, None, None, None
         except Exception as e:
             logger.warning(f"Failed to query fill data for {ticker}: {e}")

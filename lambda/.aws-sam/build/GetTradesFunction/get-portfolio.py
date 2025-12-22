@@ -12,7 +12,7 @@ import json
 import boto3
 import logging
 from decimal import Decimal
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import os
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
@@ -50,13 +50,13 @@ def get_api_key_id(user_name: str) -> str:
 
 def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, Any]:
     """
-    Get current portfolio positions and values using PortfolioFetcherLayer + DynamoDB enrichment
+    Get current portfolio positions and values using positions-live (primary) or API (fallback)
     
-    Architecture:
-    1. Fetch fresh portfolio from Kalshi API (current positions & balance)
-    2. Query DynamoDB trades table for fill price history
-    3. Query DynamoDB metadata table for market titles and context
-    4. Combine API data with historical enrichment
+    PHASE 4.6 Architecture:
+    1. Try positions-live table first (WebSocket-fed, real-time)
+    2. Fall back to REST API if positions-live is stale (>5 min) or unavailable
+    3. Enrich with fill price history and market metadata from DynamoDB
+    4. Return combined view with current state + historical context
     
     Args:
         user_name: Username to fetch portfolio for
@@ -66,28 +66,46 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
         Dictionary with current portfolio state + historical enrichment
     """
     
-    logger.info(f"Fetching portfolio for {user_name} using PortfolioFetcherLayer")
+    logger.info(f"Fetching portfolio for {user_name}")
     
-    # STEP 1: Fetch fresh portfolio from Kalshi API via layer
-    try:
-        portfolio_api = fetch_user_portfolio_from_api(
-            user_name=user_name,
-            user_secret_prefix='production/kalshi/users',  # Will construct 'production/kalshi/users/{user}/metadata'
-            kalshi_base_url=os.environ.get('KALSHI_API_BASE_URL', 'https://api.elections.kalshi.com'),
-            rate_limiter_table_name=os.environ.get('RATE_LIMITER_TABLE_NAME', 'production-kalshi-rate-limiter'),
-            market_metadata_table_name=os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'),
-            logger=logger
-        )
-    except Exception as e:
-        logger.error(f"Failed to fetch portfolio from API for {user_name}: {e}", exc_info=True)
-        raise
+    # PHASE 4.6: Try positions-live as PRIMARY source
+    portfolio_live = get_positions_from_live_table(user_name)
     
-    cash_balance = portfolio_api['balance_dollars']
-    api_positions = portfolio_api['positions']  # Dict[ticker, {position, current_price, market_value}]
-    total_position_value = portfolio_api['total_portfolio_value'] - cash_balance
+    # Track if positions already have metadata (from batch API call)
+    has_metadata = False
     
-    logger.info(f"🔍 POSITION COUNT - Layer returned {len(api_positions)} positions for {user_name}")
-    logger.info(f"🔍 LAYER TICKERS: {sorted(list(api_positions.keys()))}")
+    if portfolio_live:
+        # SUCCESS: Using positions-live (WebSocket data)
+        logger.info(f"✓ Using positions-live for {user_name}: {len(portfolio_live['positions'])} positions")
+        cash_balance = portfolio_live['balance_dollars']
+        api_positions = portfolio_live['positions']
+        total_position_value = portfolio_live['total_portfolio_value'] - cash_balance
+        data_source = 'positions_live'
+        fetched_at = portfolio_live.get('fetched_at')
+        has_metadata = portfolio_live.get('has_metadata', False)
+    else:
+        # FALLBACK: Use REST API via PortfolioFetcherLayer
+        logger.info(f"⚠ Falling back to REST API for {user_name} (positions-live unavailable/stale)")
+        try:
+            portfolio_api = fetch_user_portfolio_from_api(
+                user_name=user_name,
+                user_secret_prefix='production/kalshi/users',
+                kalshi_base_url=os.environ.get('KALSHI_API_BASE_URL', 'https://api.elections.kalshi.com'),
+                rate_limiter_table_name=os.environ.get('RATE_LIMITER_TABLE_NAME', 'production-kalshi-rate-limiter'),
+                market_metadata_table_name=os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'),
+                logger=logger
+            )
+        except Exception as e:
+            logger.error(f"Failed to fetch portfolio from API for {user_name}: {e}", exc_info=True)
+            raise
+        
+        cash_balance = portfolio_api['balance_dollars']
+        api_positions = portfolio_api['positions']
+        total_position_value = portfolio_api['total_portfolio_value'] - cash_balance
+        data_source = 'api_with_enrichment'
+        fetched_at = portfolio_api.get('fetched_at')
+    
+    logger.info(f"🔍 POSITION COUNT - Got {len(api_positions)} positions for {user_name} from {data_source}")
     
     # STEP 2: Get fill prices AND fill times by querying each ticker in parallel
     def query_ticker_fill_data(ticker: str) -> tuple:
@@ -159,19 +177,9 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
         market_value = position_data['market_value']
         current_price = position_data['current_price']
         
-        # Get market metadata for titles and context
-        try:
-            market_response = market_metadata_table.get_item(Key={'market_ticker': ticker})
-            market = market_response.get('Item', {})
-            
-            # Combine event and market titles
-            event_title = market.get('event_title', '')
-            market_title = market.get('market_title', market.get('title', ''))
-            full_title = f"{event_title}: {market_title}" if event_title and market_title else (market_title or event_title or ticker)
-            
-            # Get market status (active, closed, settled, etc.)
-            market_status = market.get('status', 'unknown')
-            
+        # Check if position already has metadata (from positions-live batch API)
+        if has_metadata:
+            # Use metadata from positions-live (already fetched from Kalshi API)
             position_details.append({
                 'ticker': ticker,
                 'contracts': int(contracts),
@@ -181,33 +189,62 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                 'idea_name': idea_names.get(ticker),
                 'current_price': float(current_price),
                 'market_value': float(market_value),
-                'market_title': full_title,
-                'close_time': market.get('close_time', ''),
-                'event_ticker': market.get('event_ticker', ''),
-                'series_ticker': market.get('series_ticker', ''),
-                'market_status': market_status
+                'market_title': position_data.get('market_title', ticker),
+                'close_time': position_data.get('close_time', ''),
+                'event_ticker': position_data.get('event_ticker', ''),
+                'series_ticker': position_data.get('series_ticker', ''),
+                'market_status': position_data.get('market_status', 'unknown')
             })
-            
-        except Exception as e:
-            logger.warning(f"Failed to get metadata for {ticker}: {e}")
-            # Use API data only
-            position_details.append({
-                'ticker': ticker,
-                'contracts': int(contracts),
-                'side': 'yes' if contracts > 0 else 'no',
-                'fill_price': float(fill_prices.get(ticker, 0)) if fill_prices.get(ticker) else None,
-                'fill_time': fill_times.get(ticker),
-                'idea_name': idea_names.get(ticker),
-                'current_price': float(current_price),
-                'market_value': float(market_value),
-                'market_title': ticker,
-                'close_time': '',
-                'event_ticker': '',
-                'series_ticker': '',
-                'market_status': 'unknown'
-            })
+        else:
+            # Fallback: Get market metadata from DynamoDB (slower, 1 call per ticker)
+            try:
+                market_response = market_metadata_table.get_item(Key={'market_ticker': ticker})
+                market = market_response.get('Item', {})
+                
+                # Combine event and market titles
+                event_title = market.get('event_title', '')
+                market_title = market.get('market_title', market.get('title', ''))
+                full_title = f"{event_title}: {market_title}" if event_title and market_title else (market_title or event_title or ticker)
+                
+                # Get market status (active, closed, settled, etc.)
+                market_status = market.get('status', 'unknown')
+                
+                position_details.append({
+                    'ticker': ticker,
+                    'contracts': int(contracts),
+                    'side': 'yes' if contracts > 0 else 'no',
+                    'fill_price': float(fill_prices.get(ticker, 0)) if fill_prices.get(ticker) else None,
+                    'fill_time': fill_times.get(ticker),
+                    'idea_name': idea_names.get(ticker),
+                    'current_price': float(current_price),
+                    'market_value': float(market_value),
+                    'market_title': full_title,
+                    'close_time': market.get('close_time', ''),
+                    'event_ticker': market.get('event_ticker', ''),
+                    'series_ticker': market.get('series_ticker', ''),
+                    'market_status': market_status
+                })
+                
+            except Exception as e:
+                logger.warning(f"Failed to get metadata for {ticker}: {e}")
+                # Use API data only
+                position_details.append({
+                    'ticker': ticker,
+                    'contracts': int(contracts),
+                    'side': 'yes' if contracts > 0 else 'no',
+                    'fill_price': float(fill_prices.get(ticker, 0)) if fill_prices.get(ticker) else None,
+                    'fill_time': fill_times.get(ticker),
+                    'idea_name': idea_names.get(ticker),
+                    'current_price': float(current_price),
+                    'market_value': float(market_value),
+                    'market_title': ticker,
+                    'close_time': '',
+                    'event_ticker': '',
+                    'series_ticker': '',
+                    'market_status': 'unknown'
+                })
     
-    logger.info(f"🔍 POSITION COUNT - After enrichment loop: {len(position_details)} positions")
+    logger.info(f"🔍 POSITION COUNT - After enrichment loop: {len(position_details)} positions (has_metadata={has_metadata})")
     logger.info(f"🔍 ENRICHED TICKERS: {sorted([p['ticker'] for p in position_details])}")
     
     # DEBUG: Log market_status distribution
@@ -236,47 +273,35 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
         'position_count': len(position_details),
         'total_position_value': float(total_position_value),
         'positions': position_details,
-        'data_source': 'api_with_enrichment',  # Indicate data freshness
-        'fetched_at': portfolio_api.get('fetched_at')
+        'data_source': data_source,  # 'positions_live' or 'api_with_enrichment'
+        'fetched_at': fetched_at
     }
-    
-    # PHASE 4: Add comparison logging with positions-live
-    logger.info("🔍 PHASE 4: Starting positions-live comparison...")
-    live_comparison = get_positions_live_comparison(user_name)
-    compare_portfolios_log_diff(portfolio_result, live_comparison)
     
     return portfolio_result
 
 
-def get_positions_live_comparison(user_name: str) -> Dict[str, Any]:
+def get_positions_from_live_table(user_name: str) -> Dict[str, Any]:
     """
-    Read positions from DynamoDB positions-live table in COMPARISON MODE
+    PHASE 4.6: Read positions from DynamoDB positions-live table as PRIMARY source
     
-    This function reads from the positions-live table (updated via WebSocket feeder)
-    and compares it with the API response to validate data freshness.
+    Architecture:
+    1. Query positions-live table for user's positions and cash balance (1 DynamoDB call)
+    2. Batch fetch current prices from Kalshi API (1 API call with comma-separated tickers)
+    3. Calculate market_value = abs(position) * current_price
     
-    Table schema: user_name (HASH) + market_ticker (RANGE)
-    Uses query() to get all positions for a user.
-    
-    Returns comparison metrics:
-    - status: 'available' or 'not_available'
-    - live_position_count: Number of positions stored
-    - live_tickers: List of market tickers
-    - staleness_minutes: Age of most recent update
-    
-    Phase 4: Comparison mode - both tables are returned, logs show differences
+    Returns:
+        - None if table is unavailable, empty, or Kalshi API fails
+        - Dict with balance_dollars, positions, total_portfolio_value, fetched_at if available
     """
     try:
-        # Get the live table from environment
         positions_live_table_name = os.environ.get('POSITIONS_LIVE_TABLE')
         if not positions_live_table_name:
-            logger.warning(f"POSITIONS_LIVE_TABLE not configured, skipping comparison for {user_name}")
-            return {}
+            logger.warning(f"POSITIONS_LIVE_TABLE not configured")
+            return None
         
         positions_live_table = dynamodb.Table(positions_live_table_name)
         
-        # Query positions-live table for all positions for this user
-        # Table schema: user_name (HASH) + market_ticker (RANGE)
+        # STEP 1: Query all positions for this user from positions-live
         response = positions_live_table.query(
             KeyConditionExpression='user_name = :user',
             ExpressionAttributeValues={':user': user_name}
@@ -286,11 +311,245 @@ def get_positions_live_comparison(user_name: str) -> Dict[str, Any]:
         
         if not live_items:
             logger.warning(f"No positions-live data found for {user_name}")
+            return None
+        
+        # Parse positions and cash balance
+        raw_positions = {}  # ticker -> position_count
+        cash_balance = 0.0
+        freshest_update = None
+        
+        for item in live_items:
+            market_ticker = item.get('market_ticker', '')
+            updated_at = item.get('updated_at', '')
+            
+            # Track freshest update for logging
+            if updated_at:
+                try:
+                    update_dt = datetime.fromisoformat(updated_at)
+                    if freshest_update is None or update_dt > freshest_update:
+                        freshest_update = update_dt
+                except:
+                    pass
+            
+            if market_ticker == 'CASH_BALANCE':
+                # Cash balance stored in position_cost field (dollars)
+                cash_balance = float(item.get('position_cost', 0))
+            else:
+                # Regular position
+                position_count = int(item.get('position', 0))
+                if position_count != 0:  # Only include non-zero positions
+                    raw_positions[market_ticker] = position_count
+        
+        # Log data age for monitoring (but don't reject based on it)
+        if freshest_update:
+            now_dt = datetime.now(timezone.utc)
+            staleness_minutes = (now_dt - freshest_update).total_seconds() / 60
+            logger.info(f"✓ positions-live for {user_name}: {len(raw_positions)} positions, data age {staleness_minutes:.1f} min")
+        
+        if not raw_positions:
+            # No positions, just cash
+            return {
+                'balance_dollars': cash_balance,
+                'positions': {},
+                'total_portfolio_value': cash_balance,
+                'fetched_at': freshest_update.isoformat() if freshest_update else None,
+                'data_source': 'positions_live',
+                'has_metadata': True  # Signal that positions include metadata
+            }
+        
+        # STEP 2: Batch fetch current prices AND metadata from Kalshi API
+        market_data = fetch_market_data_batch(user_name, list(raw_positions.keys()))
+        
+        if market_data is None:
+            logger.warning(f"Failed to fetch market data for {user_name}, falling back to API")
+            return None
+        
+        # STEP 3: Calculate market values and include metadata
+        positions = {}
+        total_position_value = 0.0
+        
+        for ticker, position_count in raw_positions.items():
+            data = market_data.get(ticker)
+            
+            if data is None:
+                # Market not found or no price - skip it (likely settled)
+                logger.debug(f"No data for {ticker}, skipping")
+                continue
+            
+            last_price = data['price']
+            
+            # Calculate current_price based on position side
+            if position_count > 0:
+                # Long = YES contracts, use YES price
+                current_price = last_price
+            else:
+                # Short = NO contracts, NO price = 1 - YES price
+                current_price = 1.0 - last_price
+            
+            market_value = abs(position_count) * current_price
+            
+            # Include market metadata from API response
+            positions[ticker] = {
+                'position': position_count,
+                'current_price': current_price,
+                'market_value': market_value,
+                # Metadata from Kalshi API
+                'market_title': data.get('title', ticker),
+                'market_status': data.get('status', 'unknown'),
+                'close_time': data.get('close_time', ''),
+                'event_ticker': data.get('event_ticker', ''),
+                'series_ticker': ''  # Not available from /markets endpoint
+            }
+            
+            total_position_value += market_value
+        
+        logger.info(f"✓ positions-live complete for {user_name}: {len(positions)} positions, ${total_position_value:.2f} position value")
+        
+        return {
+            'balance_dollars': cash_balance,
+            'positions': positions,
+            'total_portfolio_value': cash_balance + total_position_value,
+            'fetched_at': freshest_update.isoformat() if freshest_update else None,
+            'data_source': 'positions_live',
+            'has_metadata': True  # Signal that positions include metadata
+        }
+        
+    except Exception as e:
+        logger.error(f"Error reading positions-live for {user_name}: {e}", exc_info=True)
+        return None
+
+
+def fetch_market_data_batch(user_name: str, tickers: List[str]) -> Optional[Dict[str, dict]]:
+    """
+    Fetch current prices AND metadata for multiple markets in a single Kalshi API call.
+    
+    Uses GET /markets?tickers=T1,T2,T3... with pagination if >1000 tickers.
+    
+    Args:
+        user_name: Username for API authentication
+        tickers: List of market tickers to fetch
+    
+    Returns:
+        Dict mapping ticker -> {price, title, status, close_time, event_ticker}, or None on error
+    """
+    from kalshi_client import KalshiClient
+    
+    if not tickers:
+        return {}
+    
+    try:
+        # Load user credentials
+        metadata_secret_name = f'production/kalshi/users/{user_name}/metadata'
+        metadata_response = secretsmanager.get_secret_value(SecretId=metadata_secret_name)
+        metadata = json.loads(metadata_response['SecretString'])
+        
+        api_key_id = metadata.get('api_key_id')
+        if not api_key_id:
+            logger.error(f"api_key_id not found for {user_name}")
+            return None
+        
+        private_key_secret_name = f'production/kalshi/users/{user_name}/private-key'
+        private_key_response = secretsmanager.get_secret_value(SecretId=private_key_secret_name)
+        private_key = private_key_response['SecretString']
+        
+        # Initialize client
+        client = KalshiClient(
+            base_url=os.environ.get('KALSHI_API_BASE_URL', 'https://api.elections.kalshi.com'),
+            api_key_id=api_key_id,
+            private_key_pem=private_key,
+            logger=logger,
+            requests_per_second=20,
+            write_requests_per_second=10,
+            rate_limiter_table_name=os.environ.get('RATE_LIMITER_TABLE_NAME', 'production-kalshi-rate-limiter')
+        )
+        
+        market_data = {}
+        
+        # Process in batches of 1000 (API limit)
+        BATCH_SIZE = 1000
+        for i in range(0, len(tickers), BATCH_SIZE):
+            batch_tickers = tickers[i:i + BATCH_SIZE]
+            tickers_param = ','.join(batch_tickers)
+            
+            # Paginate through results
+            cursor = None
+            while True:
+                path = f'/trade-api/v2/markets?tickers={tickers_param}&limit=1000'
+                if cursor:
+                    path += f'&cursor={cursor}'
+                
+                response = client._make_request(method='GET', path=path)
+                
+                markets = response.get('markets', [])
+                for market in markets:
+                    ticker = market.get('ticker')
+                    status = market.get('status', '')
+                    last_price_str = market.get('last_price_dollars')
+                    
+                    # Skip only finalized/settled markets (already converted to cash)
+                    # Include 'closed' (awaiting settlement) - still has value
+                    if status in ('finalized', 'settled'):
+                        logger.debug(f"Skipping {ticker}: market status is {status} (already settled)")
+                        continue
+                    
+                    if ticker and last_price_str:
+                        try:
+                            price = float(last_price_str)
+                            # Also skip zero-price markets (settled)
+                            if price == 0.0:
+                                logger.debug(f"Skipping {ticker}: last_price is 0 (settled market)")
+                                continue
+                            
+                            # Store full market data
+                            market_data[ticker] = {
+                                'price': price,
+                                'title': market.get('title', ticker),
+                                'status': status,
+                                'close_time': market.get('close_time', ''),
+                                'event_ticker': market.get('event_ticker', ''),
+                                'subtitle': market.get('subtitle', '')
+                            }
+                        except (ValueError, TypeError):
+                            pass
+                
+                # Check for more pages
+                cursor = response.get('cursor')
+                if not cursor or not markets:
+                    break
+        
+        logger.info(f"Fetched data for {len(market_data)}/{len(tickers)} active markets from Kalshi API")
+        return market_data
+        
+    except Exception as e:
+        logger.error(f"Error fetching market prices batch: {e}", exc_info=True)
+        return None
+
+
+def get_positions_live_comparison(user_name: str) -> Dict[str, Any]:
+    """
+    DEPRECATED: Kept for backward compatibility during Phase 4 transition
+    Read positions from DynamoDB positions-live table in COMPARISON MODE
+    """
+    try:
+        positions_live_table_name = os.environ.get('POSITIONS_LIVE_TABLE')
+        if not positions_live_table_name:
+            return {}
+        
+        positions_live_table = dynamodb.Table(positions_live_table_name)
+        
+        response = positions_live_table.query(
+            KeyConditionExpression='user_name = :user',
+            ExpressionAttributeValues={':user': user_name}
+        )
+        
+        live_items = response.get('Items', [])
+        
+        if not live_items:
             return {'status': 'not_available'}
         
-        # Extract position information and find staleness
         live_tickers = []
-        max_staleness_minutes = 0
+        min_staleness_minutes = float('inf')
+        freshest_update = None
         
         for item in live_items:
             market_ticker = item.get('market_ticker', '')
@@ -299,25 +558,27 @@ def get_positions_live_comparison(user_name: str) -> Dict[str, Any]:
             if market_ticker and market_ticker != 'CASH_BALANCE':
                 live_tickers.append(market_ticker)
             
-            # Calculate staleness from most recent update
             if updated_at:
                 try:
                     update_dt = datetime.fromisoformat(updated_at)
                     now_dt = datetime.now(timezone.utc)
                     staleness_seconds = (now_dt - update_dt).total_seconds()
                     staleness_minutes = staleness_seconds / 60
-                    max_staleness_minutes = max(max_staleness_minutes, staleness_minutes)
+                    if staleness_minutes < min_staleness_minutes:
+                        min_staleness_minutes = staleness_minutes
+                        freshest_update = updated_at
                 except:
                     pass
         
-        logger.info(f"COMPARISON: positions-live for {user_name} - {len(live_tickers)} positions, staleness: {max_staleness_minutes:.1f} min")
+        if min_staleness_minutes == float('inf'):
+            min_staleness_minutes = -1
         
-        # Build comparison metrics
         return {
             'status': 'available',
             'live_position_count': len(live_tickers),
             'live_tickers': sorted(live_tickers),
-            'staleness_minutes': max_staleness_minutes
+            'staleness_minutes': min_staleness_minutes,
+            'freshest_update': freshest_update
         }
         
     except Exception as e:

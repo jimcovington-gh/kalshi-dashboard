@@ -213,7 +213,7 @@ export default function AdminPage() {
     }
   }
 
-  // Helper function to format relative time (past or future) in mm:ss or h:mm:ss format
+  // Helper function to format relative time (past or future) in HH:MM format
   function formatRelativeTime(dateString: string): string {
     try {
       const date = new Date(dateString);
@@ -221,18 +221,12 @@ export default function AdminPage() {
       const diffMs = date.getTime() - now.getTime();
       const isFuture = diffMs > 0;
       const absDiffMs = Math.abs(diffMs);
-      const absDiffSec = Math.floor(absDiffMs / 1000);
+      const absDiffMin = Math.floor(absDiffMs / 60000);
       
-      const hours = Math.floor(absDiffSec / 3600);
-      const mins = Math.floor((absDiffSec % 3600) / 60);
-      const secs = absDiffSec % 60;
+      const hours = Math.floor(absDiffMin / 60);
+      const mins = absDiffMin % 60;
       
-      let timeStr: string;
-      if (hours > 0) {
-        timeStr = `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-      } else {
-        timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
-      }
+      const timeStr = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
       
       return isFuture ? `in ${timeStr}` : `${timeStr} ago`;
     } catch {

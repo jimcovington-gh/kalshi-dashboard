@@ -219,14 +219,14 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className={bgColor}>
               <tr>
-                <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/2">
+                <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">
                   Time
+                </th>
+                <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">
+                  Idea
                 </th>
                 <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Market
-                </th>
-                <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Idea
                 </th>
                 <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Side
@@ -256,10 +256,13 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
 
                 return (
                   <tr key={idx} className="hover:bg-gray-50">
-                    <td className="px-3 py-0.5 whitespace-nowrap w-1/2">
+                    <td className="px-3 py-0.5 whitespace-nowrap w-1/4">
                       <a href={tradeUrl} className="text-xs text-blue-600 hover:underline">
                         {fillDateTime}
                       </a>
+                    </td>
+                    <td className="px-3 py-0.5 whitespace-nowrap w-1/4 text-xs text-gray-600">
+                      {position.idea_name || '-'}
                     </td>
                     <td className="px-3 py-0.5 whitespace-nowrap">
                       {marketUrl ? (
@@ -269,9 +272,6 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                       ) : (
                         <div className="text-xs text-gray-500 truncate max-w-md">{position.market_title}</div>
                       )}
-                    </td>
-                    <td className="px-3 py-0.5 whitespace-nowrap text-xs text-gray-600">
-                      {position.idea_name || '-'}
                     </td>
                     <td className="px-3 py-0.5 whitespace-nowrap">
                       <span
@@ -334,13 +334,17 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                 <div className="text-sm font-medium text-gray-900 mb-1.5">{position.market_title}</div>
               )}
               
-              {/* Stats Grid - 5 columns with Time first (50% wider) */}
+              {/* Stats Grid - 6 columns with Time and Idea first (25% each) */}
               <div className="grid grid-cols-8 gap-1 text-xs">
-                <div className="col-span-4">
+                <div className="col-span-2">
                   <div className="text-gray-500 mb-0.5">Time</div>
                   <a href={tradeUrl} className="text-blue-600 hover:underline text-xs">
                     {fillDateTime}
                   </a>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-gray-500 mb-0.5">Idea</div>
+                  <div className="text-gray-600 truncate">{position.idea_name || '-'}</div>
                 </div>
                 <div className="col-span-1">
                   <div className="text-gray-500 mb-0.5">Side</div>

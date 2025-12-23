@@ -213,6 +213,33 @@ export default function AdminPage() {
     }
   }
 
+  // Helper function to format relative time (past or future) in mm:ss or h:mm:ss format
+  function formatRelativeTime(dateString: string): string {
+    try {
+      const date = new Date(dateString);
+      const now = new Date();
+      const diffMs = date.getTime() - now.getTime();
+      const isFuture = diffMs > 0;
+      const absDiffMs = Math.abs(diffMs);
+      const absDiffSec = Math.floor(absDiffMs / 1000);
+      
+      const hours = Math.floor(absDiffSec / 3600);
+      const mins = Math.floor((absDiffSec % 3600) / 60);
+      const secs = absDiffSec % 60;
+      
+      let timeStr: string;
+      if (hours > 0) {
+        timeStr = `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      } else {
+        timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+      }
+      
+      return isFuture ? `in ${timeStr}` : `${timeStr} ago`;
+    } catch {
+      return dateString;
+    }
+  }
+
   // Helper function to build Kalshi event URL from event_ticker
   function buildEventUrl(eventTicker: string): string {
     if (!eventTicker) return '';
@@ -535,7 +562,7 @@ export default function AdminPage() {
                       <span className={`px-1 py-0.5 rounded text-xs ${m.phase === 'phase1' ? 'bg-yellow-100 text-yellow-700' : m.phase === 'phase2' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{m.phase}</span>
                     </td>
                     <td className="px-2 py-1 text-gray-600 text-xs">
-                      {m.start_date ? new Date(m.start_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '-'}
+                      {m.start_date ? formatRelativeTime(m.start_date) : '-'}
                     </td>
                     <td className="px-2 py-1 text-gray-600">{m.last_heartbeat ? formatTimeAgo(m.last_heartbeat) : '-'}</td>
                   </tr>

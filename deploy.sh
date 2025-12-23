@@ -62,9 +62,8 @@ echo ""
 echo "Step 4: Waiting for Amplify build to start..."
 sleep 5
 
-# Get the latest job
-JOB_ID=$(aws amplify list-jobs --app-id $APP_ID --branch-name $BRANCH --max-items 1 \
-    --query 'jobSummaries[0].jobId' --output text)
+# Get the latest job (head -1 to strip NextToken line)
+JOB_ID=$(aws amplify list-jobs --app-id "$APP_ID" --branch-name "$BRANCH" --max-items 1 --query 'jobSummaries[0].jobId' --output text | head -1)
 
 if [ -z "$JOB_ID" ] || [ "$JOB_ID" == "None" ]; then
     echo -e "${YELLOW}Could not find Amplify job. Check manually.${NC}"
@@ -81,11 +80,11 @@ WAITED=0
 POLL_INTERVAL=10
 
 while [ $WAITED -lt $MAX_WAIT ]; do
-    STATUS=$(aws amplify get-job --app-id $APP_ID --branch-name $BRANCH --job-id $JOB_ID \
-        --query 'job.summary.status' --output text 2>/dev/null)
+    # head -1 strips the NextToken line from output
+    STATUS=$(aws amplify list-jobs --app-id "$APP_ID" --branch-name "$BRANCH" --max-items 1 --query 'jobSummaries[0].status' --output text 2>/dev/null | head -1 || echo "UNKNOWN")
     
     case "$STATUS" in
-        "SUCCEED")
+        SUCCEED)
             echo ""
             echo -e "${GREEN}=========================================${NC}"
             echo -e "${GREEN}✅ Deployment successful!${NC}"
@@ -93,7 +92,7 @@ while [ $WAITED -lt $MAX_WAIT ]; do
             echo "URL: https://main.d1uumqiqpqm7bm.amplifyapp.com"
             exit 0
             ;;
-        "FAILED")
+        FAILED)
             echo ""
             echo -e "${RED}=========================================${NC}"
             echo -e "${RED}❌ Amplify build failed!${NC}"
@@ -103,7 +102,7 @@ while [ $WAITED -lt $MAX_WAIT ]; do
             echo "  aws amplify get-job --app-id $APP_ID --branch-name $BRANCH --job-id $JOB_ID"
             exit 1
             ;;
-        "CANCELLED")
+        CANCELLED)
             echo ""
             echo -e "${YELLOW}Build was cancelled${NC}"
             exit 1

@@ -87,7 +87,7 @@ export default function DashboardLayout({
                     href="/dashboard/admin"
                     className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50"
                   >
-                    Admin
+                    Control
                   </Link>
                 )}
               </div>
@@ -96,7 +96,6 @@ export default function DashboardLayout({
             <div className="flex items-center space-x-2 md:space-x-4">
               <div className="text-xs md:text-sm text-gray-600">
                 <span className="hidden sm:inline">{user}</span>
-                {isAdminUser && <span className="ml-1 md:ml-2 px-1.5 md:px-2 py-0.5 md:py-1 bg-blue-100 text-blue-800 rounded text-xs font-semibold">ADMIN</span>}
               </div>
               <button
                 onClick={handleSignOut}

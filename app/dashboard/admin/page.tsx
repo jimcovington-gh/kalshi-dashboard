@@ -503,91 +503,6 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Mention Monitors Section */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            📡 Mention Monitors
-            {mentionMonitorsLoading && (
-              <span className="text-sm font-normal text-gray-500">Loading...</span>
-            )}
-          </h2>
-          <button
-            onClick={loadMentionMonitors}
-            disabled={mentionMonitorsLoading}
-            className="px-3 py-1 text-sm font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md disabled:opacity-50"
-          >
-            🔄 Refresh
-          </button>
-        </div>
-
-        {/* Summary Cards */}
-        {mentionMonitors && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div className="bg-cyan-50 p-4 rounded-lg">
-              <div className="text-sm text-gray-600">Running Fargate Tasks</div>
-              <div className="text-3xl font-bold text-cyan-600">{mentionMonitors.total_running_fargate}</div>
-            </div>
-            <div className="bg-indigo-50 p-4 rounded-lg">
-              <div className="text-sm text-gray-600">Active Events</div>
-              <div className="text-3xl font-bold text-indigo-600">{mentionMonitors.total_active_events}</div>
-            </div>
-            <div className="bg-amber-50 p-4 rounded-lg">
-              <div className="text-sm text-gray-600">Users with Monitors</div>
-              <div className="text-3xl font-bold text-amber-600">{Object.keys(mentionMonitors.users).length}</div>
-            </div>
-          </div>
-        )}
-
-        {/* User Summary Cards with Clear Buttons */}
-        {mentionMonitors && Object.keys(mentionMonitors.users).length > 0 && (
-          <div className="mb-6">
-            <h3 className="text-sm font-semibold text-gray-700 uppercase mb-3">Users</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {Object.entries(mentionMonitors.users).map(([userName, summary]) => (
-                <div key={userName} className="border rounded-lg p-4 flex justify-between items-center bg-gray-50">
-                  <div>
-                    <div className="font-semibold text-gray-900">{userName}</div>
-                    <div className="text-sm text-gray-600">
-                      {summary.active_events} active, {summary.pending_events} pending
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      Fargate: <span className={`font-medium ${
-                        summary.fargate_state === 'running' ? 'text-green-600' : 
-                        summary.fargate_state === 'none' ? 'text-gray-400' : 'text-orange-500'
-                      }`}>
-                        {summary.fargate_state}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setShowClearConfirm(userName)}
-                    disabled={clearingUser !== null || (!summary.has_fargate && summary.active_events === 0)}
-                    className="px-3 py-1 text-sm font-medium text-orange-600 hover:text-orange-800 hover:bg-orange-50 rounded-md disabled:opacity-50 disabled:cursor-not-allowed border border-orange-200"
-                  >
-                    {clearingUser === userName ? '...' : 'Clear'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Monitors Table - REMOVED as per user request */}
-
-        {mentionMonitors && mentionMonitors.monitors.length === 0 && (
-          <div className="text-center py-8 text-gray-500">
-            No active mention monitors
-          </div>
-        )}
-
-        {mentionMonitors?.error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-            Error loading monitors: {mentionMonitors.error}
-          </div>
-        )}
-      </div>
-
       {/* Side-by-side: Active Monitors Table + Upcoming Mentions (desktop) / Stacked (mobile) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Active Monitors Compact Table */}
@@ -599,6 +514,7 @@ export default function AdminPage() {
                 <tr>
                   <th className="px-2 py-1 text-left font-medium text-gray-500">Event</th>
                   <th className="px-2 py-1 text-left font-medium text-gray-500">User</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">State</th>
                   <th className="px-2 py-1 text-center font-medium text-gray-500">Phase</th>
                   <th className="px-2 py-1 text-left font-medium text-gray-500">Start Time</th>
                   <th className="px-2 py-1 text-left font-medium text-gray-500">Heartbeat</th>
@@ -612,6 +528,9 @@ export default function AdminPage() {
                         className="text-blue-600 hover:underline font-mono text-xs">{m.event_ticker}</a>
                     </td>
                     <td className="px-2 py-1">{m.user_name}</td>
+                    <td className="px-2 py-1 text-center">
+                      <span className={`px-1 py-0.5 rounded text-xs ${m.fargate_state === 'active' ? 'bg-green-100 text-green-700' : m.fargate_state === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>{m.fargate_state}</span>
+                    </td>
                     <td className="px-2 py-1 text-center">
                       <span className={`px-1 py-0.5 rounded text-xs ${m.phase === 'phase1' ? 'bg-yellow-100 text-yellow-700' : m.phase === 'phase2' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{m.phase}</span>
                     </td>
@@ -708,7 +627,7 @@ export default function AdminPage() {
                   <th className="px-2 py-1 text-center font-medium text-gray-500">Side</th>
                   <th className="px-2 py-1 text-right font-medium text-gray-500">Qty</th>
                   <th className="px-2 py-1 text-right font-medium text-gray-500">Price</th>
-                  <th className="px-2 py-1 text-center font-medium text-gray-500">Status</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Idea</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -730,11 +649,8 @@ export default function AdminPage() {
                     </td>
                     <td className="px-2 py-1 text-right font-mono">{order.quantity}</td>
                     <td className="px-2 py-1 text-right font-mono">${order.limit_price.toFixed(2)}</td>
-                    <td className="px-2 py-1 text-center">
-                      <span className={`px-1.5 py-0.5 rounded text-xs ${
-                        order.order_status === 'executed' ? 'bg-green-100 text-green-700' :
-                        order.order_status === 'resting' ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-gray-100 text-gray-600'}`}>{order.order_status}</span>
+                    <td className="px-2 py-1 text-left text-gray-600 truncate max-w-[120px]" title={order.idea || ''}>
+                      {order.idea || '—'}
                     </td>
                   </tr>
                 ))}

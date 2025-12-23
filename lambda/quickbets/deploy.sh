@@ -60,8 +60,12 @@ if ! grep -A 10 "QuickBetsLaunchFunction:" template.yaml | grep -q "Layers:"; th
 fi
 
 # Step 3: Build SAM application
+# NOTE: Removed --use-container flag on 2023-12-23 to speed up builds.
+# The cryptography layer already contains pre-compiled manylinux2014_x86_64 binaries,
+# so container builds are unnecessary. If you see "invalid ELF header" or similar
+# architecture errors after deployment, revert to: sam build --use-container
 log_step "Building SAM application..."
-sam build --use-container
+sam build --parallel --cached
 
 if [[ $? -ne 0 ]]; then
     log_error "SAM build failed"

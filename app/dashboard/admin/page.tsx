@@ -649,8 +649,8 @@ export default function AdminPage() {
                     </td>
                     <td className="px-2 py-1 text-right font-mono">{order.quantity}</td>
                     <td className="px-2 py-1 text-right font-mono">${order.limit_price.toFixed(2)}</td>
-                    <td className="px-2 py-1 text-left text-gray-600 truncate max-w-[120px]" title={order.idea || ''}>
-                      {order.idea || '—'}
+                    <td className="px-2 py-1 text-left text-gray-600 truncate max-w-[120px]" title={order.idea_name || ''}>
+                      {order.idea_name || '—'}
                     </td>
                   </tr>
                 ))}

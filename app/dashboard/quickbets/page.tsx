@@ -162,6 +162,35 @@ export default function QuickBetsPage() {
     }
   }, [logs]);
 
+  // Handle visibility change (mobile app switching, screen off)
+  // Auto-reconnect when page becomes visible again
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Page became visible - check if we need to reconnect
+        if (pageState === 'trading' && currentWsUrl.current && authToken) {
+          // Check if WebSocket is disconnected or in a bad state
+          if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+            addLog('Reconnecting after visibility change...', 'info');
+            // Clear any pending retry
+            if (wsRetryTimeout.current) {
+              clearTimeout(wsRetryTimeout.current);
+              wsRetryTimeout.current = null;
+            }
+            wsRetryCount.current = 0;
+            // Reconnect with existing URL and token
+            connectWebSocket(currentWsUrl.current, authToken, eventTicker, true);
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [pageState, authToken, eventTicker, addLog, connectWebSocket]);
+
   // Fetch events on page load (Lambda-based lobby)
   useEffect(() => {
     async function loadLobby() {
@@ -243,6 +272,7 @@ export default function QuickBetsPage() {
         setPageState('trading');
         isLaunching.current = false;
         isReconnecting.current = null;  // Clear reconnection tracking on success
+        wsRetryCount.current = 0;  // Reset retry count on successful connection
         addLog(`Authenticated as ${data.user}`, 'success');
         break;
       
@@ -515,6 +545,15 @@ export default function QuickBetsPage() {
             setUserSessions(prev => prev.filter(s => s.event_ticker !== staleTicker));
             isReconnecting.current = null;
             setPageState('lobby');
+          } else if (event.code === 1006 && wsRetryCount.current < 5) {
+            // 1006 = Abnormal closure (mobile app switch, network hiccup)
+            // Auto-retry a few times before giving up
+            wsRetryCount.current++;
+            const delay = 1000 * wsRetryCount.current; // Exponential backoff: 1s, 2s, 3s, 4s, 5s
+            addLog(`Connection lost, reconnecting (${wsRetryCount.current}/5)...`, 'info');
+            wsRetryTimeout.current = setTimeout(() => {
+              connectWebSocket(currentWsUrl.current, token, targetEvent, true);
+            }, delay);
           } else {
             addLog(`Disconnected (code: ${event.code})`, 'error');
           }

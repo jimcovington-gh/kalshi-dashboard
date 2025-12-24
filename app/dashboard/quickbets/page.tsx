@@ -406,7 +406,14 @@ export default function QuickBetsPage() {
 
       case 'buy_result':
         if (data.success) {
-          addLog(`✅ BUY SUCCESS: ${data.team} @ ${data.avg_price}¢ x${data.filled_count}`, 'success');
+          // Show fill price without fees, then fees separately (always 1 decimal place)
+          const buyFillPrice = (data.fill_price ?? data.avg_price).toFixed(1);
+          const buyFees = (data.fees ?? 0).toFixed(1);
+          if (data.fees > 0) {
+            addLog(`✅ BUY SUCCESS: ${data.team} @ ${buyFillPrice}¢ + ${buyFees}¢ fee x${data.filled_count}`, 'success');
+          } else {
+            addLog(`✅ BUY SUCCESS: ${data.team} @ ${buyFillPrice}¢ x${data.filled_count}`, 'success');
+          }
         } else {
           addLog(`❌ BUY FAILED: ${data.error}`, 'error');
         }
@@ -414,7 +421,14 @@ export default function QuickBetsPage() {
 
       case 'sell_result':
         const pnl = data.net_pnl >= 0 ? `+${data.net_pnl}` : data.net_pnl;
-        addLog(`💰 SELL: ${data.team} @ ${data.avg_price}¢, P&L: ${pnl}¢`, 'success');
+        // Show fill price without fees, then fees separately (always 1 decimal place)
+        const sellFillPrice = (data.fill_price ?? data.avg_price).toFixed(1);
+        const sellFees = (data.fees ?? 0).toFixed(1);
+        if (data.fees > 0) {
+          addLog(`💰 SELL: ${data.team} @ ${sellFillPrice}¢ - ${sellFees}¢ fee, P&L: ${pnl}¢`, 'success');
+        } else {
+          addLog(`💰 SELL: ${data.team} @ ${sellFillPrice}¢, P&L: ${pnl}¢`, 'success');
+        }
         break;
 
       case 'pong':

@@ -111,11 +111,15 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
   })));
 
   // Separate positions by market status
-  // Active = markets still trading OR not yet open (active, open, unknown, inactive)
+  // Active = markets still trading (active, open, unknown)
+  // Inactive = markets paused/suspended (inactive)
   // Determined = markets closed but not yet settled (closed, determined)
   // We exclude settled positions as they've already paid out
   const activePositions = portfolio.positions.filter(p => 
-    !p.market_status || p.market_status === 'active' || p.market_status === 'open' || p.market_status === 'unknown' || p.market_status === 'inactive'
+    !p.market_status || p.market_status === 'active' || p.market_status === 'open' || p.market_status === 'unknown'
+  );
+  const inactivePositions = portfolio.positions.filter(p => 
+    p.market_status === 'inactive'
   );
   const determinedPositions = portfolio.positions.filter(p => 
     p.market_status && (p.market_status === 'closed' || p.market_status === 'determined')
@@ -131,10 +135,12 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
   };
 
   const sortedActivePositions = sortByFillTime(activePositions);
+  const sortedInactivePositions = sortByFillTime(inactivePositions);
   const sortedDeterminedPositions = sortByFillTime(determinedPositions);
 
   // DEBUG: Log filter results
   console.log('Active positions count:', activePositions.length);
+  console.log('Inactive positions count:', inactivePositions.length);
   console.log('Determined positions count:', determinedPositions.length);
   console.log('Determined positions:', determinedPositions.map(p => p.ticker));
 
@@ -178,6 +184,16 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
         />
       )}
 
+      {/* Inactive Positions (paused/suspended) */}
+      {inactivePositions.length > 0 && (
+        <PositionsTable 
+          positions={sortedInactivePositions} 
+          title="Inactive (Paused)" 
+          userName={portfolio.user_name}
+          badgeColor="yellow"
+        />
+      )}
+
       {/* Determined/Closed Positions (awaiting settlement) */}
       {determinedPositions.length > 0 && (
         <PositionsTable 
@@ -189,7 +205,7 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
       )}
 
       {/* Show message if no positions */}
-      {activePositions.length === 0 && determinedPositions.length === 0 && (
+      {activePositions.length === 0 && inactivePositions.length === 0 && determinedPositions.length === 0 && (
         <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
           No positions found
         </div>
@@ -202,11 +218,11 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
   positions: Position[]; 
   title: string; 
   userName: string;
-  badgeColor: 'green' | 'gray';
+  badgeColor: 'green' | 'yellow' | 'gray';
 }) {
-  const bgColor = badgeColor === 'green' ? 'bg-green-50' : 'bg-gray-50';
-  const borderColor = badgeColor === 'green' ? 'border-green-200' : 'border-gray-300';
-  const headerBg = badgeColor === 'green' ? 'bg-green-100' : 'bg-gray-200';
+  const bgColor = badgeColor === 'green' ? 'bg-green-50' : badgeColor === 'yellow' ? 'bg-yellow-50' : 'bg-gray-50';
+  const borderColor = badgeColor === 'green' ? 'border-green-200' : badgeColor === 'yellow' ? 'border-yellow-300' : 'border-gray-300';
+  const headerBg = badgeColor === 'green' ? 'bg-green-100' : badgeColor === 'yellow' ? 'bg-yellow-100' : 'bg-gray-200';
   
   return (
     <>

@@ -111,11 +111,11 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
   })));
 
   // Separate positions by market status
-  // Active = markets still trading (active, open, unknown)
+  // Active = markets still trading OR not yet open (active, open, unknown, inactive)
   // Determined = markets closed but not yet settled (closed, determined)
   // We exclude settled positions as they've already paid out
   const activePositions = portfolio.positions.filter(p => 
-    !p.market_status || p.market_status === 'active' || p.market_status === 'open' || p.market_status === 'unknown'
+    !p.market_status || p.market_status === 'active' || p.market_status === 'open' || p.market_status === 'unknown' || p.market_status === 'inactive'
   );
   const determinedPositions = portfolio.positions.filter(p => 
     p.market_status && (p.market_status === 'closed' || p.market_status === 'determined')

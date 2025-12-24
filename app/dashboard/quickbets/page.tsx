@@ -122,7 +122,7 @@ export default function QuickBetsPage() {
   const [prices, setPrices] = useState<TeamPrices>({});
   const [previousPrices, setPreviousPrices] = useState<TeamPrices>({});  // Track previous prices for change detection
   const [gameState, setGameState] = useState<GameState>({});
-  const [betAmount, setBetAmount] = useState<string>('$10');  // Bet amount selector
+  const [betAmount, setBetAmount] = useState<string>('$1');  // Bet amount selector
   const [sellDelay, setSellDelay] = useState<number>(8);  // Sell delay in seconds
   const [teamsSwapped, setTeamsSwapped] = useState(false);  // Swap left/right teams
   const [teamColors, setTeamColors] = useState<{[team: string]: string}>({});  // Per-team colors
@@ -1081,7 +1081,7 @@ export default function QuickBetsPage() {
                   onChange={(e) => setBetAmount(e.target.value)}
                   className="bg-gray-700 text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-cyan-500 focus:outline-none"
                 >
-                  <option value="$10">10</option>
+                  <option value="$1">1</option>
                   <option value="10%">10%</option>
                   <option value="20%">20%</option>
                   <option value="50%">50%</option>

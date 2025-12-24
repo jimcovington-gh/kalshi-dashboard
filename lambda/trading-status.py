@@ -23,11 +23,12 @@ SHUTDOWN_TABLE = 'production-kalshi-trading-shutdown-signals'
 CONFIG_BUCKET = 'production-kalshi-trading-config'
 
 # Hardcoded list of trading ideas - new ideas can be added here
+# Note: Phase-specific toggles (mention-market-phase3/4) were removed in Dec 2024.
+# The Trading Lambda now uses phase-qualified idea_ids (mention-market:phase3) but
+# checks the base 'mention-market' toggle for all phases.
 TRADING_IDEAS = [
     {'idea_id': 'high-confidence', 'display_name': 'High Confidence', 'description': 'Automated high-confidence trades'},
-    {'idea_id': 'mention-market', 'display_name': 'Mention Markets', 'description': 'Social mention-based trading'},
-    {'idea_id': 'mention-market-phase3', 'display_name': 'Mention P3', 'description': 'Phase 3: Live event trading'},
-    {'idea_id': 'mention-market-phase4', 'display_name': 'Mention P4', 'description': 'Phase 4: Scrap collection'},
+    {'idea_id': 'mention-market', 'display_name': 'Mention Markets', 'description': 'All mention market phases (1-4)'},
     {'idea_id': 'quickbets', 'display_name': 'QuickBets', 'description': 'Manual quick betting interface'},
 ]
 

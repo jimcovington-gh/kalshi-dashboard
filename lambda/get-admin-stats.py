@@ -142,27 +142,29 @@ def get_market_capture_runs():
 def get_recent_orders(limit=20):
     """
     Get the most recent orders from the orders table.
-    Uses full scan with pagination to ensure we get enough items.
+    Uses GSI with user_name partition key and placed_at sort key for efficient queries.
     """
     try:
         table = dynamodb.Table(ORDERS_TABLE)
         
-        # Scan with pagination to get enough orders
+        # Query each user using GSI, sorted by placed_at descending
+        # Only 2 users: jimc and andrews
+        users = ['jimc', 'andrews']
         all_orders = []
-        scan_kwargs = {
-            'ProjectionExpression': 'order_id, market_ticker, event_ticker, series_ticker, user_name, side, #a, quantity, limit_price, order_status, placed_at, idea_name',
-            'ExpressionAttributeNames': {'#a': 'action'}
-        }
         
-        while len(all_orders) < 500:  # Get enough to find recent ones
-            response = table.scan(**scan_kwargs)
+        for user in users:
+            response = table.query(
+                IndexName='user_name-placed_at-index',
+                KeyConditionExpression='user_name = :u',
+                ExpressionAttributeValues={':u': user},
+                ProjectionExpression='order_id, market_ticker, event_ticker, series_ticker, user_name, side, #a, quantity, limit_price, order_status, placed_at, idea_name',
+                ExpressionAttributeNames={'#a': 'action'},
+                ScanIndexForward=False,  # Descending by placed_at
+                Limit=limit  # Only need top N per user
+            )
             all_orders.extend(response.get('Items', []))
-            
-            if 'LastEvaluatedKey' not in response:
-                break
-            scan_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
         
-        logger.info(f"Scanned {len(all_orders)} orders total")
+        logger.info(f"Queried {len(all_orders)} orders from {len(users)} users")
         
         # Sort by placed_at descending (timestamp in seconds)
         all_orders.sort(key=lambda x: int(x.get('placed_at', 0)), reverse=True)
@@ -200,27 +202,29 @@ def get_recent_orders(limit=20):
 def get_recent_trades(limit=20):
     """
     Get the most recent trades (filled orders) from the trades-v2 table.
-    Uses full scan with pagination to ensure we get enough items.
+    Uses GSI with user_name partition key and placed_at sort key for efficient queries.
     """
     try:
         table = dynamodb.Table(TRADES_TABLE)
         
-        # Scan with pagination
+        # Query each user using GSI, sorted by placed_at descending
+        # Only 2 users: jimc and andrews
+        users = ['jimc', 'andrews']
         all_trades = []
-        scan_kwargs = {
-            'ProjectionExpression': 'order_id, market_ticker, event_ticker, series_ticker, user_name, side, #a, filled_count, avg_fill_price, order_status, placed_at, completed_at, idea_name, idea_version',
-            'ExpressionAttributeNames': {'#a': 'action'}
-        }
         
-        while len(all_trades) < 500:
-            response = table.scan(**scan_kwargs)
+        for user in users:
+            response = table.query(
+                IndexName='user_name-placed_at-index',
+                KeyConditionExpression='user_name = :u',
+                ExpressionAttributeValues={':u': user},
+                ProjectionExpression='order_id, market_ticker, event_ticker, series_ticker, user_name, side, #a, filled_count, avg_fill_price, order_status, placed_at, completed_at, idea_name, idea_version',
+                ExpressionAttributeNames={'#a': 'action'},
+                ScanIndexForward=False,  # Descending by placed_at
+                Limit=limit  # Only need top N per user
+            )
             all_trades.extend(response.get('Items', []))
-            
-            if 'LastEvaluatedKey' not in response:
-                break
-            scan_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
         
-        logger.info(f"Scanned {len(all_trades)} trades total")
+        logger.info(f"Queried {len(all_trades)} trades from {len(users)} users")
         
         # Sort by completed_at or placed_at descending
         def get_sort_key(x):

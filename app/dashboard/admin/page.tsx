@@ -423,6 +423,9 @@ export default function AdminPage() {
                       <div title={idea.description}>{idea.display_name}</div>
                     </th>
                   ))}
+                  <th className="px-2 py-2 text-center font-semibold text-gray-700 whitespace-nowrap border-l-2 border-orange-200">
+                    <div title="Stop Fargate task and clear all monitors for user">Monitors</div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -465,6 +468,16 @@ export default function AdminPage() {
                         </td>
                       );
                     })}
+                    <td className="px-2 py-2 text-center border-l-2 border-orange-200">
+                      <button
+                        onClick={() => setShowClearConfirm(user.user_name)}
+                        disabled={clearingUser !== null}
+                        className="px-2 py-1 rounded text-xs font-bold text-orange-700 bg-orange-100 hover:bg-orange-200 border border-orange-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Stop Fargate task and clear all monitors for this user"
+                      >
+                        {clearingUser === user.user_name ? '...' : 'Clear'}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -484,6 +497,10 @@ export default function AdminPage() {
             <div className="flex items-center gap-1">
               <span className="px-2 py-0.5 rounded bg-gray-300 text-gray-500 text-xs font-bold">OFF</span>
               <span>Blocked by master</span>
+            </div>
+            <div className="flex items-center gap-1 border-l pl-4 border-orange-200">
+              <span className="px-2 py-0.5 rounded bg-orange-100 text-orange-700 text-xs font-bold border border-orange-300">Clear</span>
+              <span>Stop monitors &amp; Fargate task</span>
             </div>
           </div>
         </div>

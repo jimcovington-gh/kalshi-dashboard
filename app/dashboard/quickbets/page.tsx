@@ -162,35 +162,6 @@ export default function QuickBetsPage() {
     }
   }, [logs]);
 
-  // Handle visibility change (mobile app switching, screen off)
-  // Auto-reconnect when page becomes visible again
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        // Page became visible - check if we need to reconnect
-        if (pageState === 'trading' && currentWsUrl.current && authToken) {
-          // Check if WebSocket is disconnected or in a bad state
-          if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-            addLog('Reconnecting after visibility change...', 'info');
-            // Clear any pending retry
-            if (wsRetryTimeout.current) {
-              clearTimeout(wsRetryTimeout.current);
-              wsRetryTimeout.current = null;
-            }
-            wsRetryCount.current = 0;
-            // Reconnect with existing URL and token
-            connectWebSocket(currentWsUrl.current, authToken, eventTicker, true);
-          }
-        }
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [pageState, authToken, eventTicker, addLog, connectWebSocket]);
-
   // Fetch events on page load (Lambda-based lobby)
   useEffect(() => {
     async function loadLobby() {
@@ -583,6 +554,35 @@ export default function QuickBetsPage() {
       setPageState('lobby');
     }
   }, [addLog, handleWebSocketMessage]);
+
+  // Handle visibility change (mobile app switching, screen off)
+  // Auto-reconnect when page becomes visible again
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Page became visible - check if we need to reconnect
+        if (pageState === 'trading' && currentWsUrl.current && authToken) {
+          // Check if WebSocket is disconnected or in a bad state
+          if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+            addLog('Reconnecting after visibility change...', 'info');
+            // Clear any pending retry
+            if (wsRetryTimeout.current) {
+              clearTimeout(wsRetryTimeout.current);
+              wsRetryTimeout.current = null;
+            }
+            wsRetryCount.current = 0;
+            // Reconnect with existing URL and token
+            connectWebSocket(currentWsUrl.current, authToken, eventTicker, true);
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [pageState, authToken, eventTicker, addLog, connectWebSocket]);
 
   // Launch Fargate for selected event
   const launchEvent = useCallback(async (selectedEvent: string, title?: string) => {

@@ -659,25 +659,25 @@ export default function AdminPage() {
             <table className="min-w-full text-xs">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500">Time</th>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500">User</th>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500">Market</th>
-                  <th className="px-2 py-1 text-center font-medium text-gray-500">Side</th>
-                  <th className="px-2 py-1 text-right font-medium text-gray-500">Qty</th>
-                  <th className="px-2 py-1 text-right font-medium text-gray-500">Price</th>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500">Idea</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '12%'}}>Time</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '10%'}}>User</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '30%'}}>Market</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500" style={{width: '8%'}}>Side</th>
+                  <th className="px-2 py-1 text-right font-medium text-gray-500" style={{width: '8%'}}>Qty</th>
+                  <th className="px-2 py-1 text-right font-medium text-gray-500" style={{width: '10%'}}>Price</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '22%'}}>Idea</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {adminStats.recent_orders.map((order) => (
                   <tr key={order.order_id} className="hover:bg-gray-50">
-                    <td className="px-2 py-1 text-gray-600 whitespace-nowrap">{formatTimestamp(order.placed_at)}</td>
-                    <td className="px-2 py-1 font-medium">{order.user_name}</td>
-                    <td className="px-2 py-1">
+                    <td className="px-2 py-1 text-gray-600 whitespace-nowrap" style={{width: '12%'}}>{formatTimestamp(order.placed_at)}</td>
+                    <td className="px-2 py-1 font-medium" style={{width: '10%'}}>{order.user_name}</td>
+                    <td className="px-2 py-1 whitespace-nowrap" style={{width: '30%'}}>
                       <a href={buildMarketUrlFromTicker(order.market_ticker)}
                         target="_blank" rel="noopener noreferrer"
                         className="text-blue-600 hover:underline font-mono">
-                        {order.market_ticker.length > 28 ? order.market_ticker.substring(0, 28) + '…' : order.market_ticker}
+                        {order.market_ticker}
                       </a>
                     </td>
                     <td className="px-2 py-1 text-center">
@@ -709,25 +709,25 @@ export default function AdminPage() {
             <table className="min-w-full text-xs">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500">Time</th>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500">User</th>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500">Market</th>
-                  <th className="px-2 py-1 text-center font-medium text-gray-500">Side</th>
-                  <th className="px-2 py-1 text-right font-medium text-gray-500">Filled</th>
-                  <th className="px-2 py-1 text-right font-medium text-gray-500">Price</th>
-                  <th className="px-2 py-1 text-right font-medium text-gray-500">Total</th>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500">Idea</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '12%'}}>Time</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '10%'}}>User</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '28%'}}>Market</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500" style={{width: '8%'}}>Side</th>
+                  <th className="px-2 py-1 text-right font-medium text-gray-500" style={{width: '8%'}}>Filled</th>
+                  <th className="px-2 py-1 text-right font-medium text-gray-500" style={{width: '8%'}}>Price</th>
+                  <th className="px-2 py-1 text-right font-medium text-gray-500" style={{width: '10%'}}>Total</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '16%'}}>Idea</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {adminStats.recent_trades.map((trade) => (
                   <tr key={trade.order_id} className="hover:bg-gray-50">
-                    <td className="px-2 py-1 text-gray-600 whitespace-nowrap">{formatTimestamp(trade.completed_at || trade.placed_at)}</td>
-                    <td className="px-2 py-1 font-medium">{trade.user_name}</td>
-                    <td className="px-2 py-1">
+                    <td className="px-2 py-1 text-gray-600 whitespace-nowrap" style={{width: '12%'}}>{formatTimestamp(trade.completed_at || trade.placed_at)}</td>
+                    <td className="px-2 py-1 font-medium" style={{width: '10%'}}>{trade.user_name}</td>
+                    <td className="px-2 py-1 whitespace-nowrap" style={{width: '28%'}}>
                       <a href={`/dashboard/trades?ticker=${trade.market_ticker}&user_name=${trade.user_name}`}
                         className="text-blue-600 hover:underline font-mono">
-                        {trade.market_ticker.length > 28 ? trade.market_ticker.substring(0, 28) + '…' : trade.market_ticker}
+                        {trade.market_ticker}
                       </a>
                     </td>
                     <td className="px-2 py-1 text-center">

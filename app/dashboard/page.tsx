@@ -312,7 +312,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
             <table className="min-w-full divide-y divide-gray-200">
               <thead className={bgColor}>
                 <tr>
-                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '32%'}}>
+                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '35%'}}>
                     Time
                   </th>
                   <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '20%'}}>
@@ -321,10 +321,10 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                   <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Market
                   </th>
-                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '3.75%'}}>
+                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '2.5%'}}>
                     Side
                   </th>
-                  <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '3.75%'}}>
+                  <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '2.5%'}}>
                     QTY
                   </th>
                 <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -349,12 +349,12 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
 
                   return (
                     <tr key={idx} className="hover:bg-gray-50">
-                      <td className="px-3 py-0.5 whitespace-nowrap" style={{width: '32%'}}>
+                      <td className="px-3 py-0.5 whitespace-nowrap" style={{width: '35%'}}>
                         <a href={tradeUrl} className="text-xs text-blue-600 hover:underline">
                           {fillDateTime}
                         </a>
                       </td>
-                      <td className="px-3 py-0.5 whitespace-nowrap text-xs text-gray-600" style={{width: '20%'}}>
+                      <td className="px-3 py-0.5 whitespace-nowrap text-xs text-gray-600" style={{width: '17%'}}>
                       {position.idea_name || '-'}
                     </td>
                     <td className="px-3 py-0.5 whitespace-nowrap">

@@ -309,10 +309,10 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
         </div>
         {isExpanded && (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className="min-w-full divide-y divide-gray-200" style={{tableLayout: 'fixed'}}>
               <thead className={bgColor}>
                 <tr>
-                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '35%'}}>
+                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '27.5%'}}>
                     Time
                   </th>
                   <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '20%'}}>
@@ -321,10 +321,10 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                   <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Market
                   </th>
-                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '6%'}}>
+                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '7.5%'}}>
                     Side
                   </th>
-                  <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '2%'}}>
+                  <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '7.5%'}}>
                     QTY
                   </th>
                 <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -349,7 +349,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
 
                   return (
                     <tr key={idx} className="hover:bg-gray-50">
-                      <td className="px-3 py-0.5 whitespace-nowrap" style={{width: '35%'}}>
+                      <td className="px-3 py-0.5 whitespace-nowrap" style={{width: '27.5%'}}>
                         <a href={tradeUrl} className="text-xs text-blue-600 hover:underline">
                           {fillDateTime}
                         </a>
@@ -366,7 +366,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                         <div className="text-xs text-gray-500 truncate max-w-md">{position.market_title}</div>
                       )}
                     </td>
-                    <td className="px-3 py-0.5 whitespace-nowrap" style={{width: '6%'}}>
+                    <td className="px-3 py-0.5 whitespace-nowrap" style={{width: '7.5%'}}>
                       <span
                         className={`px-2 py-0.5 inline-flex text-xs leading-4 font-semibold rounded-full ${
                           position.side === 'yes'
@@ -377,7 +377,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                         {position.side.toUpperCase()}
                       </span>
                     </td>
-                    <td className="px-3 py-0.5 whitespace-nowrap text-right text-xs text-gray-900" style={{width: '2%'}}>
+                    <td className="px-3 py-0.5 whitespace-nowrap text-right text-xs text-gray-900" style={{width: '7.5%'}}>
                       {Math.abs(position.contracts)}
                     </td>
                     <td className="px-3 py-0.5 whitespace-nowrap text-right text-xs text-gray-600">

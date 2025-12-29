@@ -19,6 +19,7 @@ export default function AnalyticsPage() {
   const [period, setPeriod] = useState<string>('24h');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -30,19 +31,29 @@ export default function AnalyticsPage() {
       // 1. Fetch Portfolio History - don't pass selectedUser to get all portfolios for admins
       const portfolioData = await getPortfolio(undefined, true, period);
       
+      console.log('Portfolio API Response:', { 
+        is_admin_view: portfolioData.is_admin_view,
+        portfolios_count: portfolioData.portfolios?.length,
+        portfolio_count: portfolioData.portfolio ? 1 : 0,
+        portfolio_usernames: portfolioData.portfolios?.map(p => p.user_name)
+      });
+      
       let loadedPortfolios: Portfolio[] = [];
-      if (portfolioData.is_admin_view && portfolioData.portfolios) {
+      const adminView = portfolioData.is_admin_view;
+      setIsAdmin(adminView);
+      
+      if (adminView && portfolioData.portfolios) {
         loadedPortfolios = portfolioData.portfolios;
       } else if (portfolioData.portfolio) {
         loadedPortfolios = [portfolioData.portfolio];
       }
+      
+      console.log('Setting portfolios state:', loadedPortfolios.map(p => p.user_name));
       setPortfolios(loadedPortfolios);
       
-      // Auto-select user if needed or if current selection is not in loaded portfolios
-      if (loadedPortfolios.length > 0) {
-        if (!selectedUser || !loadedPortfolios.find(p => p.user_name === selectedUser)) {
-          setSelectedUser(loadedPortfolios[0].user_name);
-        }
+      // Only set initial user if we don't have one selected yet
+      if (!selectedUser && loadedPortfolios.length > 0) {
+        setSelectedUser(loadedPortfolios[0].user_name);
       }
       
     } catch (err: any) {
@@ -87,7 +98,7 @@ export default function AnalyticsPage() {
         
         <div className="flex flex-wrap gap-2">
           {/* User Selector (show only for admins with multiple users) */}
-          {portfolios.length > 1 && (
+          {isAdmin && portfolios.length > 1 && (
             <select
               value={selectedUser}
               onChange={(e) => setSelectedUser(e.target.value)}

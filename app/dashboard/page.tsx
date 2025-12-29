@@ -102,8 +102,14 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex gap-6 text-sm">
                     <div>
-                      <span className="text-blue-200">Contracts:</span>
-                      <span className="ml-2 font-semibold">{totalContracts}</span>
+                      <div>
+                        <span className="text-blue-200">Positions:</span>
+                        <span className="ml-2 font-semibold">{userPortfolio.position_count}</span>
+                      </div>
+                      <div className="mt-1">
+                        <span className="text-blue-200">Contracts:</span>
+                        <span className="ml-2 font-semibold">{totalContracts}</span>
+                      </div>
                     </div>
                     <div>
                       <div>

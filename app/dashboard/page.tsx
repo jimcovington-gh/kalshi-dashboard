@@ -324,7 +324,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                   <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '2.5%'}}>
                     Side
                   </th>
-                  <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '2.5%'}}>
+                  <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '2%'}}>
                     QTY
                   </th>
                 <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">

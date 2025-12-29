@@ -1,25 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getPortfolio, getAnalytics, Portfolio, AnalyticsResponse } from '@/lib/api';
+import { getPortfolio, Portfolio } from '@/lib/api';
 import {
   AreaChart,
   Area,
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-  Cell
+  ResponsiveContainer
 } from 'recharts';
 import { format } from 'date-fns';
 
 export default function AnalyticsPage() {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
-  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [selectedUser, setSelectedUser] = useState<string>('');
   const [period, setPeriod] = useState<string>('24h');
   const [isLoading, setIsLoading] = useState(true);
@@ -50,14 +45,6 @@ export default function AnalyticsPage() {
           targetUser = loadedPortfolios[0].user_name;
           setSelectedUser(targetUser);
         }
-      }
-
-      // 2. Fetch Category Analytics (only if we have a user)
-      if (targetUser) {
-        // Map period to analytics period (24h -> 7d minimum for meaningful stats)
-        const analyticsPeriod = period === '24h' ? '7d' : period;
-        const analyticsData = await getAnalytics(targetUser, analyticsPeriod);
-        setAnalytics(analyticsData);
       }
       
     } catch (err: any) {
@@ -210,35 +197,6 @@ export default function AnalyticsPage() {
               </ResponsiveContainer>
             </div>
           </div>
-
-          {/* Profitability by Category */}
-          {analytics && analytics.categories.length > 0 && (
-            <div className="bg-white rounded-lg shadow p-4 md:p-6">
-              <h2 className="text-lg font-medium text-gray-900 mb-4">PnL by Category</h2>
-              <div className="h-[300px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={analytics.categories}
-                    layout="vertical"
-                    margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                    <XAxis type="number" tickFormatter={(val) => `$${val}`} />
-                    <YAxis dataKey="name" type="category" width={100} />
-                    <Tooltip 
-                      formatter={(value: number) => [formatCurrency(value), 'PnL']}
-                      cursor={{fill: 'transparent'}}
-                    />
-                    <Bar dataKey="pnl" radius={[0, 4, 4, 0]}>
-                      {analytics.categories.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.pnl >= 0 ? '#16a34a' : '#dc2626'} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>

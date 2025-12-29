@@ -213,63 +213,29 @@ export default function AnalyticsPage() {
 
           {/* Profitability by Category */}
           {analytics && analytics.categories.length > 0 && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white rounded-lg shadow p-4 md:p-6">
-                <h2 className="text-lg font-medium text-gray-900 mb-4">PnL by Category</h2>
-                <div className="h-[300px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={analytics.categories}
-                      layout="vertical"
-                      margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                      <XAxis type="number" tickFormatter={(val) => `$${val}`} />
-                      <YAxis dataKey="name" type="category" width={100} />
-                      <Tooltip 
-                        formatter={(value: number) => [formatCurrency(value), 'PnL']}
-                        cursor={{fill: 'transparent'}}
-                      />
-                      <Bar dataKey="pnl" radius={[0, 4, 4, 0]}>
-                        {analytics.categories.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.pnl >= 0 ? '#16a34a' : '#dc2626'} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-lg shadow p-4 md:p-6">
-                <h2 className="text-lg font-medium text-gray-900 mb-4">Category Performance</h2>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead>
-                      <tr>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">PnL</th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Volume</th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Win Rate</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {analytics.categories.map((cat) => (
-                        <tr key={cat.name}>
-                          <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{cat.name}</td>
-                          <td className={`px-3 py-2 whitespace-nowrap text-sm text-right font-medium ${cat.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {formatCurrency(cat.pnl)}
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap text-sm text-right text-gray-500">
-                            {formatCurrency(cat.volume)}
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap text-sm text-right text-gray-500">
-                            {cat.win_rate}%
-                          </td>
-                        </tr>
+            <div className="bg-white rounded-lg shadow p-4 md:p-6">
+              <h2 className="text-lg font-medium text-gray-900 mb-4">PnL by Category</h2>
+              <div className="h-[300px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={analytics.categories}
+                    layout="vertical"
+                    margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" tickFormatter={(val) => `$${val}`} />
+                    <YAxis dataKey="name" type="category" width={100} />
+                    <Tooltip 
+                      formatter={(value: number) => [formatCurrency(value), 'PnL']}
+                      cursor={{fill: 'transparent'}}
+                    />
+                    <Bar dataKey="pnl" radius={[0, 4, 4, 0]}>
+                      {analytics.categories.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.pnl >= 0 ? '#16a34a' : '#dc2626'} />
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
           )}

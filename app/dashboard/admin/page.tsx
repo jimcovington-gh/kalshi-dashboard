@@ -672,7 +672,7 @@ export default function AdminPage() {
                 {adminStats.recent_orders.map((order) => (
                   <tr key={order.order_id} className="hover:bg-gray-50">
                     <td className="px-2 py-1 text-gray-600 whitespace-nowrap" style={{width: '12%'}}>{formatTimestamp(order.placed_at)}</td>
-                    <td className="px-2 py-1 font-medium" style={{width: '10%'}}>{order.user_name}</td>
+                    <td className="px-2 py-1 font-medium text-gray-900" style={{width: '10%'}}>{order.user_name}</td>
                     <td className="px-2 py-1 whitespace-nowrap" style={{width: '35%'}}>
                       <a href={buildMarketUrlFromTicker(order.market_ticker)}
                         target="_blank" rel="noopener noreferrer"
@@ -685,8 +685,8 @@ export default function AdminPage() {
                         {order.side.toUpperCase()}
                       </span>
                     </td>
-                    <td className="px-2 py-1 text-right font-mono">{order.quantity}</td>
-                    <td className="px-2 py-1 text-right font-mono">${order.limit_price.toFixed(2)}</td>
+                    <td className="px-2 py-1 text-right font-mono text-gray-900">{order.quantity}</td>
+                    <td className="px-2 py-1 text-right font-mono text-gray-900">${order.limit_price.toFixed(2)}</td>
                     <td className="px-2 py-1 text-left text-gray-600 truncate max-w-[120px]" title={order.idea_name || ''}>
                       {order.idea_name || '—'}
                     </td>
@@ -723,7 +723,7 @@ export default function AdminPage() {
                 {adminStats.recent_trades.map((trade) => (
                   <tr key={trade.order_id} className="hover:bg-gray-50">
                     <td className="px-2 py-1 text-gray-600 whitespace-nowrap" style={{width: '12%'}}>{formatTimestamp(trade.completed_at || trade.placed_at)}</td>
-                    <td className="px-2 py-1 font-medium" style={{width: '10%'}}>{trade.user_name}</td>
+                    <td className="px-2 py-1 font-medium text-gray-900" style={{width: '10%'}}>{trade.user_name}</td>
                     <td className="px-2 py-1 whitespace-nowrap" style={{width: '35%'}}>
                       <a href={`/dashboard/trades?ticker=${trade.market_ticker}&user_name=${trade.user_name}`}
                         className="text-blue-600 hover:underline font-mono">
@@ -735,8 +735,8 @@ export default function AdminPage() {
                         {trade.side.toUpperCase()}
                       </span>
                     </td>
-                    <td className="px-2 py-1 text-right font-mono">{trade.filled_count}</td>
-                    <td className="px-2 py-1 text-right font-mono">${trade.avg_fill_price.toFixed(2)}</td>
+                    <td className="px-2 py-1 text-right font-mono text-gray-900">{trade.filled_count}</td>
+                    <td className="px-2 py-1 text-right font-mono text-gray-900">${trade.avg_fill_price.toFixed(2)}</td>
                     <td className="px-2 py-1 text-right font-mono font-semibold text-green-600">${trade.total_cost.toFixed(2)}</td>
                     <td className="px-2 py-1 text-gray-600">{trade.idea_name || '-'}</td>
                   </tr>

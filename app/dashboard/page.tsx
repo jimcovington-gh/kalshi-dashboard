@@ -321,7 +321,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                   <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Market
                   </th>
-                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '2.5%'}}>
+                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '6%'}}>
                     Side
                   </th>
                   <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '2%'}}>
@@ -354,7 +354,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                           {fillDateTime}
                         </a>
                       </td>
-                      <td className="px-3 py-0.5 whitespace-nowrap text-xs text-gray-600" style={{width: '17%'}}>
+                      <td className="px-3 py-0.5 whitespace-nowrap text-xs text-gray-600" style={{width: '20%'}}>
                       {position.idea_name || '-'}
                     </td>
                     <td className="px-3 py-0.5 whitespace-nowrap">
@@ -366,7 +366,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                         <div className="text-xs text-gray-500 truncate max-w-md">{position.market_title}</div>
                       )}
                     </td>
-                    <td className="px-3 py-0.5 whitespace-nowrap">
+                    <td className="px-3 py-0.5 whitespace-nowrap" style={{width: '6%'}}>
                       <span
                         className={`px-2 py-0.5 inline-flex text-xs leading-4 font-semibold rounded-full ${
                           position.side === 'yes'
@@ -377,7 +377,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                         {position.side.toUpperCase()}
                       </span>
                     </td>
-                    <td className="px-3 py-0.5 whitespace-nowrap text-right text-xs text-gray-900">
+                    <td className="px-3 py-0.5 whitespace-nowrap text-right text-xs text-gray-900" style={{width: '2%'}}>
                       {Math.abs(position.contracts)}
                     </td>
                     <td className="px-3 py-0.5 whitespace-nowrap text-right text-xs text-gray-600">

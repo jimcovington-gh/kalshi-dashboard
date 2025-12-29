@@ -105,6 +105,14 @@ export default function DashboardPage() {
                       <span className="text-blue-200">Total Contracts:</span>
                       <span className="ml-2 font-semibold">{totalContracts}</span>
                     </div>
+                    <div>
+                      <span className="text-blue-200">Cash:</span>
+                      <span className="ml-2 font-semibold">${(userPortfolio.cash_balance || 0).toFixed(2)}</span>
+                    </div>
+                    <div>
+                      <span className="text-blue-200">Total:</span>
+                      <span className="ml-2 font-semibold">${((userPortfolio.cash_balance || 0) + (userPortfolio.total_position_value || 0)).toFixed(2)}</span>
+                    </div>
                   </div>
                 </div>
               </div>

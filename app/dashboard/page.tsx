@@ -11,6 +11,8 @@ export default function DashboardPage() {
   const [isAdminView, setIsAdminView] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [expandedUsers, setExpandedUsers] = useState<Set<string>>(new Set());
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const router = useRouter();
 
   useEffect(() => {
@@ -73,48 +75,86 @@ export default function DashboardPage() {
   if (isAdminView) {
     return (
       <div className="space-y-8">
-        {portfolios.map((userPortfolio, userIdx) => (
-          <div key={userIdx} className="border-2 border-blue-200 rounded-lg p-4 bg-blue-50/30">
-            {/* User Header */}
-            <div className="bg-blue-600 text-white px-4 py-3 rounded-t-lg -mx-4 -mt-4 mb-4">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold">{userPortfolio.user_name}</h2>
-                <div className="flex gap-6 text-sm">
-                  <div>
-                    <span className="text-blue-200">Cash:</span>
-                    <span className="ml-2 font-semibold">${(userPortfolio.cash_balance || 0).toFixed(2)}</span>
+        {portfolios.map((userPortfolio, userIdx) => {
+          const totalContracts = userPortfolio.positions.reduce((sum, p) => sum + Math.abs(p.contracts), 0);
+          const userKey = userPortfolio.user_name;
+          const isExpanded = expandedUsers.has(userKey);
+          
+          return (
+            <div key={userIdx} className="border-2 border-blue-200 rounded-lg p-4 bg-blue-50/30">
+              {/* User Header - Clickable */}
+              <div 
+                className="bg-blue-600 text-white px-4 py-3 rounded-t-lg -mx-4 -mt-4 mb-4 cursor-pointer hover:bg-blue-700 transition-colors"
+                onClick={() => {
+                  const newExpanded = new Set(expandedUsers);
+                  if (isExpanded) {
+                    newExpanded.delete(userKey);
+                  } else {
+                    newExpanded.add(userKey);
+                  }
+                  setExpandedUsers(newExpanded);
+                }}
+              >
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{isExpanded ? '▼' : '▶'}</span>
+                    <h2 className="text-xl font-bold">{userPortfolio.user_name}</h2>
                   </div>
-                  <div>
-                    <span className="text-blue-200">Total:</span>
-                    <span className="ml-2 font-semibold">${((userPortfolio.cash_balance || 0) + (userPortfolio.total_position_value || 0)).toFixed(2)}</span>
+                  <div className="flex gap-6 text-sm">
+                    <div>
+                      <span className="text-blue-200">Total Contracts:</span>
+                      <span className="ml-2 font-semibold">{totalContracts}</span>
+                    </div>
                   </div>
                 </div>
               </div>
+              
+              {isExpanded && (
+                <PortfolioContent 
+                  portfolio={userPortfolio} 
+                  expandedGroups={expandedGroups}
+                  setExpandedGroups={setExpandedGroups}
+                  userKey={userKey}
+                />
+              )}
             </div>
-            
-            <PortfolioContent portfolio={userPortfolio} />
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   }
 
-  // Regular user view
-  return <PortfolioContent portfolio={portfolio!} />;
+  // Regular user view - always expanded
+  useEffect(() => {
+    if (portfolio) {
+      // For regular users, expand all groups by default
+      const userKey = portfolio.user_name;
+      const allGroups = new Set([
+        `${userKey}-active`,
+        `${userKey}-inactive`,
+        `${userKey}-determined`
+      ]);
+      setExpandedGroups(allGroups);
+    }
+  }, [portfolio]);
+  
+  return (
+    <PortfolioContent 
+      portfolio={portfolio!} 
+      expandedGroups={expandedGroups}
+      setExpandedGroups={setExpandedGroups}
+      userKey={portfolio!.user_name}
+    />
+  );
 }
 
-function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
-  // DEBUG: Log what we receive
-  console.log('PortfolioContent positions:', portfolio.positions.map(p => ({
-    ticker: p.ticker,
-    market_status: p.market_status
-  })));
-
+function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKey }: { 
+  portfolio: Portfolio;
+  expandedGroups: Set<string>;
+  setExpandedGroups: (groups: Set<string>) => void;
+  userKey: string;
+}) {
   // Separate positions by market status
-  // Active = markets still trading (active, open, unknown)
-  // Inactive = markets paused/suspended (inactive)
-  // Determined = markets closed but not yet settled (closed, determined)
-  // We exclude settled positions as they've already paid out
   const activePositions = portfolio.positions.filter(p => 
     !p.market_status || p.market_status === 'active' || p.market_status === 'open' || p.market_status === 'unknown'
   );
@@ -130,7 +170,7 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
     return [...positions].sort((a, b) => {
       const timeA = a.fill_time ? new Date(a.fill_time).getTime() : 0;
       const timeB = b.fill_time ? new Date(b.fill_time).getTime() : 0;
-      return timeB - timeA; // Descending order (newest first)
+      return timeB - timeA;
     });
   };
 
@@ -138,41 +178,22 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
   const sortedInactivePositions = sortByFillTime(inactivePositions);
   const sortedDeterminedPositions = sortByFillTime(determinedPositions);
 
-  // DEBUG: Log filter results
-  console.log('Active positions count:', activePositions.length);
-  console.log('Inactive positions count:', inactivePositions.length);
-  console.log('Determined positions count:', determinedPositions.length);
-  console.log('Determined positions:', determinedPositions.map(p => p.ticker));
+  // Calculate group stats
+  const activeStats = {
+    contracts: activePositions.reduce((sum, p) => sum + Math.abs(p.contracts), 0),
+    value: activePositions.reduce((sum, p) => sum + p.market_value, 0)
+  };
+  const inactiveStats = {
+    contracts: inactivePositions.reduce((sum, p) => sum + Math.abs(p.contracts), 0),
+    value: inactivePositions.reduce((sum, p) => sum + p.market_value, 0)
+  };
+  const determinedStats = {
+    contracts: determinedPositions.reduce((sum, p) => sum + Math.abs(p.contracts), 0),
+    value: determinedPositions.reduce((sum, p) => sum + p.market_value, 0)
+  };
 
   return (
     <div className="space-y-3 md:space-y-4">
-      {/* Portfolio Summary */}
-      <div className="bg-white rounded-lg shadow p-3 md:p-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
-          <div className="bg-blue-50 p-2 md:p-3 rounded-lg">
-            <div className="text-xs md:text-sm text-gray-600">Total Positions</div>
-            <div className="text-2xl md:text-3xl font-bold text-blue-600">{portfolio.position_count}</div>
-          </div>
-          <div className="bg-green-50 p-2 md:p-3 rounded-lg">
-            <div className="text-xs md:text-sm text-gray-600">Position Value</div>
-            <div className="text-2xl md:text-3xl font-bold text-green-600">
-              ${portfolio.total_position_value.toFixed(2)}
-            </div>
-          </div>
-          <div className="bg-yellow-50 p-2 md:p-3 rounded-lg">
-            <div className="text-xs md:text-sm text-gray-600">Cash Balance</div>
-            <div className="text-2xl md:text-3xl font-bold text-yellow-600">
-              ${(portfolio.cash_balance || 0).toFixed(2)}
-            </div>
-          </div>
-          <div className="bg-purple-50 p-2 md:p-3 rounded-lg">
-            <div className="text-xs md:text-sm text-gray-600">Total Value</div>
-            <div className="text-2xl md:text-3xl font-bold text-purple-600">
-              ${((portfolio.cash_balance || 0) + portfolio.total_position_value).toFixed(2)}
-            </div>
-          </div>
-        </div>
-      </div>
 
       {/* Active Positions */}
       {activePositions.length > 0 && (
@@ -181,6 +202,11 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
           title="Active Positions" 
           userName={portfolio.user_name}
           badgeColor="green"
+          groupKey={`${userKey}-active`}
+          expandedGroups={expandedGroups}
+          setExpandedGroups={setExpandedGroups}
+          totalContracts={activeStats.contracts}
+          totalValue={activeStats.value}
         />
       )}
 
@@ -191,6 +217,11 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
           title="Inactive (Paused)" 
           userName={portfolio.user_name}
           badgeColor="yellow"
+          groupKey={`${userKey}-inactive`}
+          expandedGroups={expandedGroups}
+          setExpandedGroups={setExpandedGroups}
+          totalContracts={inactiveStats.contracts}
+          totalValue={inactiveStats.value}
         />
       )}
 
@@ -201,6 +232,11 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
           title="Awaiting Settlement" 
           userName={portfolio.user_name}
           badgeColor="gray"
+          groupKey={`${userKey}-determined`}
+          expandedGroups={expandedGroups}
+          setExpandedGroups={setExpandedGroups}
+          totalContracts={determinedStats.contracts}
+          totalValue={determinedStats.value}
         />
       )}
 
@@ -214,42 +250,75 @@ function PortfolioContent({ portfolio }: { portfolio: Portfolio }) {
   );
 }
 
-function PositionsTable({ positions, title, userName, badgeColor }: { 
+function PositionsTable({ positions, title, userName, badgeColor, groupKey, expandedGroups, setExpandedGroups, totalContracts, totalValue }: { 
   positions: Position[]; 
   title: string; 
   userName: string;
   badgeColor: 'green' | 'yellow' | 'gray';
+  groupKey: string;
+  expandedGroups: Set<string>;
+  setExpandedGroups: (groups: Set<string>) => void;
+  totalContracts: number;
+  totalValue: number;
 }) {
+  const isExpanded = expandedGroups.has(groupKey);
   const bgColor = badgeColor === 'green' ? 'bg-green-50' : badgeColor === 'yellow' ? 'bg-yellow-50' : 'bg-gray-50';
   const borderColor = badgeColor === 'green' ? 'border-green-200' : badgeColor === 'yellow' ? 'border-yellow-300' : 'border-gray-300';
   const headerBg = badgeColor === 'green' ? 'bg-green-100' : badgeColor === 'yellow' ? 'bg-yellow-100' : 'bg-gray-200';
+  
+  const toggleExpanded = () => {
+    const newExpanded = new Set(expandedGroups);
+    if (isExpanded) {
+      newExpanded.delete(groupKey);
+    } else {
+      newExpanded.add(groupKey);
+    }
+    setExpandedGroups(newExpanded);
+  };
   
   return (
     <>
       {/* Desktop Table */}
       <div className={`hidden md:block bg-white rounded-lg shadow overflow-hidden border ${borderColor}`}>
-        <div className={`px-4 py-2 ${headerBg} border-b ${borderColor}`}>
-          <h3 className="text-lg font-semibold text-gray-900">{title} ({positions.length})</h3>
+        <div 
+          className={`px-4 py-2 ${headerBg} border-b ${borderColor} cursor-pointer hover:opacity-80 transition-opacity`}
+          onClick={toggleExpanded}
+        >
+          <div className="flex justify-between items-center">
+            <h3 className="text-lg font-semibold text-gray-900">
+              <span className="mr-2">{isExpanded ? '▼' : '▶'}</span>
+              {title} ({positions.length})
+            </h3>
+            <div className="flex gap-4 text-sm text-gray-700">
+              <div>
+                <span className="font-medium">Contracts:</span> {totalContracts}
+              </div>
+              <div>
+                <span className="font-medium">Value:</span> ${totalValue.toFixed(2)}
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className={bgColor}>
-              <tr>
-                <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">
-                  Time
-                </th>
-                <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">
-                  Idea
-                </th>
-                <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Market
-                </th>
-                <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Side
-                </th>
-                <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  QTY
-                </th>
+        {isExpanded && (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className={bgColor}>
+                <tr>
+                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '27.5%'}}>
+                    Time
+                  </th>
+                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '20%'}}>
+                    Idea
+                  </th>
+                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Market
+                  </th>
+                  <th className="px-3 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '7.5%'}}>
+                    Side
+                  </th>
+                  <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '7.5%'}}>
+                    QTY
+                  </th>
                 <th className="px-3 py-1.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Fill Price
                 </th>
@@ -258,26 +327,26 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                 </th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {positions.map((position, idx) => {
-                const marketUrl = buildMarketUrl(
-                  position.series_ticker || '',
-                  position.market_title || '',
-                  position.event_ticker || ''
-                );
-                
-                // Format fill time
-                const fillDateTime = position.fill_time ? formatDateTime(position.fill_time) : '-';
-                const tradeUrl = `/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`;
+              <tbody className="bg-white divide-y divide-gray-200">
+                {positions.map((position, idx) => {
+                  const marketUrl = buildMarketUrl(
+                    position.series_ticker || '',
+                    position.market_title || '',
+                    position.event_ticker || ''
+                  );
+                  
+                  // Format fill time
+                  const fillDateTime = position.fill_time ? formatDateTime(position.fill_time) : '-';
+                  const tradeUrl = `/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`;
 
-                return (
-                  <tr key={idx} className="hover:bg-gray-50">
-                    <td className="px-3 py-0.5 whitespace-nowrap w-1/4">
-                      <a href={tradeUrl} className="text-xs text-blue-600 hover:underline">
-                        {fillDateTime}
-                      </a>
-                    </td>
-                    <td className="px-3 py-0.5 whitespace-nowrap w-1/4 text-xs text-gray-600">
+                  return (
+                    <tr key={idx} className="hover:bg-gray-50">
+                      <td className="px-3 py-0.5 whitespace-nowrap" style={{width: '27.5%'}}>
+                        <a href={tradeUrl} className="text-xs text-blue-600 hover:underline">
+                          {fillDateTime}
+                        </a>
+                      </td>
+                      <td className="px-3 py-0.5 whitespace-nowrap text-xs text-gray-600" style={{width: '20%'}}>
                       {position.idea_name || '-'}
                     </td>
                     <td className="px-3 py-0.5 whitespace-nowrap">
@@ -317,20 +386,35 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
                         ${position.current_price.toFixed(2)}
                       </span>
                     </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Mobile Cards */}
       <div className="md:hidden space-y-2">
-        <div className={`px-3 py-2 rounded-lg shadow ${headerBg}`}>
-          <h3 className="text-base font-semibold text-gray-900">{title} ({positions.length})</h3>
+        <div 
+          className={`px-3 py-2 rounded-lg shadow ${headerBg} cursor-pointer active:opacity-80`}
+          onClick={toggleExpanded}
+        >
+          <div className="flex justify-between items-center">
+            <h3 className="text-base font-semibold text-gray-900">
+              <span className="mr-2">{isExpanded ? '▼' : '▶'}</span>
+              {title} ({positions.length})
+            </h3>
+            <div className="text-xs text-gray-700">
+              <div>{totalContracts} contracts</div>
+              <div>${totalValue.toFixed(2)}</div>
+            </div>
+          </div>
         </div>
-        {positions.map((position, idx) => {
+        {isExpanded && (
+          <div className="space-y-2">
+            {positions.map((position, idx) => {
           const marketUrl = buildMarketUrl(
             position.series_ticker || '',
             position.market_title || '',
@@ -398,6 +482,8 @@ function PositionsTable({ positions, title, userName, badgeColor }: {
             </div>
           );
         })}
+          </div>
+        )}
       </div>
     </>
   );

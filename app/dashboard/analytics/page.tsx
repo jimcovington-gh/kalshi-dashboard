@@ -22,13 +22,13 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     loadData();
-  }, [period, selectedUser]);
+  }, [period]); // Only reload when period changes, not when user selection changes
 
   async function loadData() {
     setIsLoading(true);
     try {
-      // 1. Fetch Portfolio History
-      const portfolioData = await getPortfolio(selectedUser || undefined, true, period);
+      // 1. Fetch Portfolio History - don't pass selectedUser to get all portfolios for admins
+      const portfolioData = await getPortfolio(undefined, true, period);
       
       let loadedPortfolios: Portfolio[] = [];
       if (portfolioData.is_admin_view && portfolioData.portfolios) {
@@ -38,12 +38,10 @@ export default function AnalyticsPage() {
       }
       setPortfolios(loadedPortfolios);
       
-      // Auto-select user if needed
-      let targetUser = selectedUser;
+      // Auto-select user if needed or if current selection is not in loaded portfolios
       if (loadedPortfolios.length > 0) {
-        if (!targetUser || !loadedPortfolios.find(p => p.user_name === targetUser)) {
-          targetUser = loadedPortfolios[0].user_name;
-          setSelectedUser(targetUser);
+        if (!selectedUser || !loadedPortfolios.find(p => p.user_name === selectedUser)) {
+          setSelectedUser(loadedPortfolios[0].user_name);
         }
       }
       
@@ -88,8 +86,8 @@ export default function AnalyticsPage() {
         <h1 className="text-2xl font-bold text-gray-900">Portfolio Analytics</h1>
         
         <div className="flex flex-wrap gap-2">
-          {/* User Selector (show always if portfolios available) */}
-          {portfolios.length > 0 && (
+          {/* User Selector (show only for admins with multiple users) */}
+          {portfolios.length > 1 && (
             <select
               value={selectedUser}
               onChange={(e) => setSelectedUser(e.target.value)}

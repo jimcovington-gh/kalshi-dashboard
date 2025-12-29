@@ -442,21 +442,21 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                 <div className="text-sm font-medium text-gray-900 mb-1.5">{position.market_title}</div>
               )}
               
-              {/* Stats Grid - 6 columns with Time and Idea first (25% each) */}
-              <div className="grid grid-cols-8 gap-1 text-xs">
-                <div className="col-span-2">
+              {/* Stats Grid - 40 columns for precise widths */}
+              <div className="grid grid-cols-40 gap-1 text-xs">
+                <div className="col-span-12">
                   <div className="text-gray-500 mb-0.5">Time</div>
-                  <a href={tradeUrl} className="text-blue-600 hover:underline text-xs">
+                  <a href={tradeUrl} className="text-blue-600 hover:underline text-xs whitespace-nowrap">
                     {fillDateTime}
                   </a>
                 </div>
-                <div className="col-span-2">
+                <div className="col-span-10">
                   <div className="text-gray-500 mb-0.5">Idea</div>
                   <div className="text-gray-600 truncate">{position.idea_name || '-'}</div>
                 </div>
-                <div className="col-span-1">
+                <div className="col-span-4">
                   <div className="text-gray-500 mb-0.5">Side</div>
-                  <span className={`px-1.5 py-0.5 inline-flex text-xs leading-4 font-semibold rounded-full ${
+                  <span className={`px-1 py-0.5 inline-flex text-xs leading-4 font-semibold rounded-full ${
                     position.side === 'yes'
                       ? 'bg-green-100 text-green-800'
                       : 'bg-blue-100 text-blue-800'
@@ -464,17 +464,17 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                     {position.side.toUpperCase()}
                   </span>
                 </div>
-                <div className="col-span-1">
+                <div className="col-span-4">
                   <div className="text-gray-500 mb-0.5">QTY</div>
                   <div className="font-semibold text-gray-900">{Math.abs(position.contracts)}</div>
                 </div>
-                <div className="col-span-1">
+                <div className="col-span-5">
                   <div className="text-gray-500 mb-0.5">Fill</div>
                   <div className="font-medium text-gray-600">
                     {position.fill_price ? `$${position.fill_price.toFixed(2)}` : '-'}
                   </div>
                 </div>
-                <div className="col-span-1">
+                <div className="col-span-5">
                   <div className="text-gray-500 mb-0.5">Price</div>
                   <div className={`font-semibold ${
                     position.current_price >= 0.95

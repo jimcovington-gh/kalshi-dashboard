@@ -37,11 +37,16 @@ export default function DashboardPage() {
         console.log(`Admin view: ${data.portfolios.length} portfolios`);
         setPortfolios(data.portfolios);
         setIsAdminView(true);
+        // Auto-expand all users for admin
+        const allUsers = new Set(data.portfolios.map(p => p.user_name));
+        setExpandedUsers(allUsers);
       } else if (data.portfolio) {
         // Regular user view
         console.log(`User view: ${data.portfolio.user_name}`);
         setPortfolio(data.portfolio);
         setIsAdminView(false);
+        // Auto-expand the user banner
+        setExpandedUsers(new Set([data.portfolio.user_name]));
       }
     } catch (err: any) {
       console.error('Error fetching portfolio:', err);
@@ -140,20 +145,7 @@ export default function DashboardPage() {
     );
   }
 
-  // Regular user view - always expanded
-  useEffect(() => {
-    if (portfolio) {
-      // For regular users, expand all groups by default
-      const userKey = portfolio.user_name;
-      const allGroups = new Set([
-        `${userKey}-active`,
-        `${userKey}-inactive`,
-        `${userKey}-determined`
-      ]);
-      setExpandedGroups(allGroups);
-    }
-  }, [portfolio]);
-  
+  // Regular user view
   return (
     <PortfolioContent 
       portfolio={portfolio!} 

@@ -287,15 +287,18 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
 
 def get_positions_from_live_table(user_name: str) -> Dict[str, Any]:
     """
-    PHASE 4.6: Read positions from DynamoDB positions-live table as PRIMARY source
+    PHASE 4.7: Read positions from DynamoDB positions-live table as PRIMARY source
     
-    Architecture:
+    Architecture (Updated - NO API CALLS):
     1. Query positions-live table for user's positions and cash balance (1 DynamoDB call)
-    2. Batch fetch current prices from Kalshi API (1 API call with comma-separated tickers)
+    2. Fetch market metadata from DynamoDB market-metadata table (N DynamoDB calls, fast)
     3. Calculate market_value = abs(position) * current_price
     
+    NOTE: positions-live is now self-cleaning via market_lifecycle_v2 WebSocket.
+    All positions in the table are valid active positions.
+    
     Returns:
-        - None if table is unavailable, empty, or Kalshi API fails
+        - None if table is unavailable or empty
         - Dict with balance_dollars, positions, total_portfolio_value, fetched_at if available
     """
     try:
@@ -330,7 +333,7 @@ def get_positions_from_live_table(user_name: str) -> Dict[str, Any]:
             # Track freshest update for logging
             if updated_at:
                 try:
-                    update_dt = datetime.fromisoformat(updated_at)
+                    update_dt = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
                     if freshest_update is None or update_dt > freshest_update:
                         freshest_update = update_dt
                 except:
@@ -345,7 +348,7 @@ def get_positions_from_live_table(user_name: str) -> Dict[str, Any]:
                 if position_count != 0:  # Only include non-zero positions
                     raw_positions[market_ticker] = position_count
         
-        # Log data age for monitoring (but don't reject based on it)
+        # Log data age for monitoring
         if freshest_update:
             now_dt = datetime.now(timezone.utc)
             staleness_minutes = (now_dt - freshest_update).total_seconds() / 60
@@ -359,58 +362,93 @@ def get_positions_from_live_table(user_name: str) -> Dict[str, Any]:
                 'total_portfolio_value': cash_balance,
                 'fetched_at': freshest_update.isoformat() if freshest_update else None,
                 'data_source': 'positions_live',
-                'has_metadata': True  # Signal that positions include metadata
+                'has_metadata': True
             }
         
-        # STEP 2: Batch fetch current prices AND metadata from Kalshi API
-        market_data = fetch_market_data_batch(user_name, list(raw_positions.keys()))
-        
-        if market_data is None:
-            logger.warning(f"Failed to fetch market data for {user_name}, falling back to API")
-            return None
-        
-        # STEP 3: Calculate market values and include metadata
+        # STEP 2: Fetch market metadata from DynamoDB market-metadata table (NO API CALLS)
+        # positions-live is now self-cleaning, so all positions are valid active positions
         positions = {}
         total_position_value = 0.0
         
         for ticker, position_count in raw_positions.items():
-            data = market_data.get(ticker)
-            
-            if data is None:
-                # Market not found or no price - skip it (likely settled)
-                logger.debug(f"No data for {ticker}, skipping")
-                continue
-            
-            last_price = data['price']
-            
-            # Calculate current_price based on position side
-            if position_count > 0:
-                # Long = YES contracts, use YES price
-                current_price = last_price
-            else:
-                # Short = NO contracts, NO price = 1 - YES price
-                current_price = 1.0 - last_price
-            
-            market_value = abs(position_count) * current_price
-            
-            # Include market metadata from API response
-            # Extract series_ticker from market ticker (prefix before first dash)
-            series = ticker.split('-')[0] if ticker else ''
-            positions[ticker] = {
-                'position': position_count,
-                'current_price': current_price,
-                'market_value': market_value,
-                # Metadata from Kalshi API
-                'market_title': data.get('title', ticker),
-                'market_status': data.get('status', 'unknown'),
-                'close_time': data.get('close_time', ''),
-                'event_ticker': data.get('event_ticker', ''),
-                'series_ticker': series
-            }
-            
-            total_position_value += market_value
+            try:
+                # Get metadata from DynamoDB
+                metadata_response = market_metadata_table.get_item(Key={'market_ticker': ticker})
+                
+                if 'Item' not in metadata_response:
+                    # Position exists but metadata not found - include with estimate
+                    logger.warning(f"Market {ticker} not found in metadata table - position exists in positions-live")
+                    series = ticker.split('-')[0] if ticker else ''
+                    positions[ticker] = {
+                        'position': position_count,
+                        'current_price': 0.5,  # Estimate
+                        'market_value': abs(position_count) * 0.5,
+                        'market_title': ticker,
+                        'market_status': 'unknown',
+                        'close_time': '',
+                        'event_ticker': '',
+                        'series_ticker': series,
+                        'price_source': 'estimate'
+                    }
+                    total_position_value += abs(position_count) * 0.5
+                    continue
+                
+                market_item = metadata_response['Item']
+                
+                # Get price from metadata
+                last_price = market_item.get('last_price_dollars')
+                
+                # Use price if available, otherwise estimate
+                if last_price and float(last_price) > 0:
+                    last_price = float(last_price)
+                else:
+                    # Price not available - shouldn't happen for active positions
+                    # Use midpoint estimate
+                    last_price = 0.5
+                    logger.info(f"No price for {ticker} - using estimate")
+                
+                # Calculate current_price based on position side
+                if position_count > 0:
+                    current_price = last_price
+                else:
+                    current_price = 1.0 - last_price
+                
+                market_value = abs(position_count) * current_price
+                
+                # Extract series_ticker from market ticker
+                series = ticker.split('-')[0] if ticker else ''
+                
+                positions[ticker] = {
+                    'position': position_count,
+                    'current_price': current_price,
+                    'market_value': market_value,
+                    # Metadata from DynamoDB
+                    'market_title': market_item.get('title', ticker),
+                    'market_status': market_item.get('status', 'unknown'),
+                    'close_time': market_item.get('close_time', ''),
+                    'event_ticker': market_item.get('event_ticker', ''),
+                    'series_ticker': series
+                }
+                
+                total_position_value += market_value
+                
+            except Exception as e:
+                logger.warning(f"Error getting metadata for {ticker}: {e}")
+                series = ticker.split('-')[0] if ticker else ''
+                positions[ticker] = {
+                    'position': position_count,
+                    'current_price': 0.5,
+                    'market_value': abs(position_count) * 0.5,
+                    'market_title': ticker,
+                    'market_status': 'unknown',
+                    'close_time': '',
+                    'event_ticker': '',
+                    'series_ticker': series,
+                    'price_source': 'error'
+                }
+                total_position_value += abs(position_count) * 0.5
         
-        logger.info(f"✓ positions-live complete for {user_name}: {len(positions)} positions, ${total_position_value:.2f} position value")
+        logger.info(f"✓ positions-live complete for {user_name}: {len(positions)} positions, ${total_position_value:.2f} position value (NO API CALLS)")
         
         return {
             'balance_dollars': cash_balance,
@@ -418,7 +456,7 @@ def get_positions_from_live_table(user_name: str) -> Dict[str, Any]:
             'total_portfolio_value': cash_balance + total_position_value,
             'fetched_at': freshest_update.isoformat() if freshest_update else None,
             'data_source': 'positions_live',
-            'has_metadata': True  # Signal that positions include metadata
+            'has_metadata': True
         }
         
     except Exception as e:
@@ -426,7 +464,7 @@ def get_positions_from_live_table(user_name: str) -> Dict[str, Any]:
         return None
 
 
-def fetch_market_data_batch(user_name: str, tickers: List[str]) -> Optional[Dict[str, dict]]:
+def fetch_market_data_batch_DEPRECATED(user_name: str, tickers: List[str]) -> Optional[Dict[str, dict]]:
     """
     Fetch current prices AND metadata for multiple markets in a single Kalshi API call.
     

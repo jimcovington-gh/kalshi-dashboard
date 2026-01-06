@@ -504,23 +504,14 @@ export interface AdminStatsResponse {
   error?: string;
 }
 
-export interface VolatileWatchlistEntry {
-  user_name: string;
-  state: 'watching' | 'recovery' | 'filled';
-  filled_at?: string;
-  fill_price_dollars?: number;
-}
-
 export interface VolatileWatchlistMarket {
   market_ticker: string;
   trade_side: 'YES' | 'NO';
   initial_price_dollars: number;
   highest_price_seen_dollars: number;
   lowest_price_seen_dollars: number;
+  current_price_dollars: number;
   added_at: string;
-  state: string;
-  entries: VolatileWatchlistEntry[];
-  user_count: number;
   action_trigger_price?: number;
 }
 
@@ -528,6 +519,7 @@ export interface VolatileWatchlistResponse {
   watchlist: VolatileWatchlistMarket[];
   count: number;
   timestamp: string;
+  cleaned_up?: number;
 }
 
 export async function getAdminStats(): Promise<AdminStatsResponse> {

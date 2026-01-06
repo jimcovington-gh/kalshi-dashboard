@@ -4,11 +4,14 @@ Lambda function to get volatile watchlist entries with current status.
 Returns all active (watching, recovery) and recently-filled (< 120 min ago) entries
 from the production-kalshi-volatile-watchlist DynamoDB table.
 
+Also cleans up entries for inactive markets when users request the watchlist.
+
 Admin only endpoint.
 """
 
 import json
 import boto3
+from boto3.dynamodb.conditions import Key
 from decimal import Decimal
 from datetime import datetime, timezone, timedelta
 import os
@@ -21,6 +24,7 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 
 WATCHLIST_TABLE = os.environ.get('WATCHLIST_TABLE', 'production-kalshi-volatile-watchlist')
+MARKET_METADATA_TABLE = os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata')
 
 class DecimalEncoder(json.JSONEncoder):
     """Convert Decimal to float for JSON serialization"""
@@ -63,23 +67,97 @@ def cors_response(status_code, body):
     }
 
 
+def get_market_metadata(market_tickers: list) -> dict:
+    """
+    Get market metadata for given tickers using batch_get_item.
+    Returns dict mapping market_ticker -> metadata dict.
+    """
+    if not market_tickers:
+        return {}
+    
+    metadata_table = dynamodb.Table(MARKET_METADATA_TABLE)
+    result = {}
+    
+    # BatchGetItem can handle up to 100 keys at once
+    for i in range(0, len(market_tickers), 100):
+        batch = market_tickers[i:i+100]
+        keys = [{'market_ticker': ticker} for ticker in batch]
+        
+        try:
+            response = dynamodb.batch_get_item(
+                RequestItems={
+                    MARKET_METADATA_TABLE: {'Keys': keys}
+                }
+            )
+            items = response.get('Responses', {}).get(MARKET_METADATA_TABLE, [])
+            for item in items:
+                result[item['market_ticker']] = item
+        except Exception as e:
+            logger.warning(f"Failed to batch get market metadata: {e}")
+    
+    return result
+
+
+def cleanup_inactive_markets(watchlist_entries: list, market_metadata: dict) -> tuple:
+    """
+    Delete watchlist entries for markets that are no longer active.
+    
+    Args:
+        watchlist_entries: List of watchlist items from DynamoDB
+        market_metadata: Dict mapping ticker -> metadata
+        
+    Returns:
+        Tuple of (active_entries, deleted_count)
+    """
+    watchlist_table = dynamodb.Table(WATCHLIST_TABLE)
+    active_entries = []
+    deleted_count = 0
+    
+    for entry in watchlist_entries:
+        ticker = entry.get('market_ticker', '')
+        metadata = market_metadata.get(ticker, {})
+        status = metadata.get('status', 'unknown')
+        
+        # Keep entries for active markets, delete others
+        if status == 'active':
+            active_entries.append(entry)
+        else:
+            # Delete inactive market entry
+            try:
+                watchlist_table.delete_item(
+                    Key={
+                        'market_ticker': ticker,
+                        'user_name': entry.get('user_name', '')
+                    }
+                )
+                deleted_count += 1
+                logger.info(f"Cleaned up watchlist entry for inactive market: {ticker} (status={status})")
+            except Exception as e:
+                logger.warning(f"Failed to delete watchlist entry {ticker}: {e}")
+                # Keep entry if delete fails
+                active_entries.append(entry)
+    
+    return active_entries, deleted_count
+
+
 def get_volatile_watchlist_entries():
     """
     Scan all entries from volatile watchlist table.
-    Returns watching, recovery, and recently-filled entries (< 120 min old).
-    Groups entries by market_ticker.
+    Returns watching entries only (recovery and filled are transient states).
+    Cleans up entries for inactive markets.
+    Enriches with current market prices.
     
     Returns:
-        Dict with markets as keys, each containing:
+        Tuple of (entries_list, cleanup_count)
+        Each entry contains:
         - market_ticker: str
         - trade_side: str (YES or NO)
         - initial_price_dollars: float
         - highest_price_seen_dollars: float
-        - lowest_price_seen_dollars: float
-        - current_price_dollars: float (last tracked)
-        - action_trigger_price: float (from volatility_metrics if available)
+        - lowest_price_seen_dollars: float  
+        - current_price_dollars: float (current bid for the trade side)
+        - action_trigger_price: float (price at which we'll buy)
         - added_at: str (ISO timestamp)
-        - entries: List of per-user entries with shares
     """
     try:
         table = dynamodb.Table(WATCHLIST_TABLE)
@@ -93,31 +171,25 @@ def get_volatile_watchlist_entries():
             response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
             items.extend(response.get('Items', []))
         
-        # Filter and organize by market_ticker
-        now = datetime.now(timezone.utc)
-        filled_cutoff = now - timedelta(minutes=120)
+        # Get unique market tickers for metadata lookup
+        all_tickers = list(set(item.get('market_ticker', '') for item in items if item.get('market_ticker')))
         
+        # Fetch market metadata for status check and current prices
+        market_metadata = get_market_metadata(all_tickers)
+        
+        # Cleanup inactive markets
+        items, cleanup_count = cleanup_inactive_markets(items, market_metadata)
+        
+        # Filter to only watching state and organize by market_ticker
+        now = datetime.now(timezone.utc)
         markets_dict = {}
         
         for item in items:
             state = item.get('state', '')
             
-            # Include watching, recovery, and recently-filled entries
-            if state not in ['watching', 'recovery', 'filled']:
+            # Only include watching state entries
+            if state != 'watching':
                 continue
-            
-            # If filled, check if within 120 minute window
-            if state == 'filled':
-                filled_at_str = item.get('filled_at')
-                if filled_at_str:
-                    try:
-                        filled_at = datetime.fromisoformat(filled_at_str.replace('Z', '+00:00'))
-                        if filled_at < filled_cutoff:
-                            continue  # Skip old filled entries
-                    except:
-                        continue
-                else:
-                    continue
             
             market_ticker = item.get('market_ticker', '')
             user_name = item.get('user_name', '')
@@ -131,48 +203,44 @@ def get_volatile_watchlist_entries():
                     return float(val)
                 return float(val) if val is not None else 0.0
             
+            trade_side = item.get('trade_side', 'YES')
             initial_price = to_float(item.get('initial_price_dollars', 0))
             highest_price = to_float(item.get('highest_price_seen_dollars', 0))
             lowest_price = to_float(item.get('lowest_price_seen_dollars', 0))
             
-            # Create market entry if not exists
-            if market_ticker not in markets_dict:
-                markets_dict[market_ticker] = {
-                    'market_ticker': market_ticker,
-                    'trade_side': item.get('trade_side', ''),
-                    'initial_price_dollars': initial_price,
-                    'highest_price_seen_dollars': highest_price,
-                    'lowest_price_seen_dollars': lowest_price,
-                    'added_at': item.get('added_at', ''),
-                    'state': state,
-                    'entries': [],  # Per-user entries
-                    'user_count': 0
-                }
+            # Get current price from market metadata based on trade side
+            metadata = market_metadata.get(market_ticker, {})
+            if trade_side == 'YES':
+                current_price = to_float(metadata.get('yes_bid_dollars', 0))
+            else:
+                current_price = to_float(metadata.get('no_bid_dollars', 0))
             
-            # Extract action trigger price from volatility metrics if available
+            # Extract action trigger price from volatility metrics
+            # This is: highest_price - recovery_threshold (buy when price recovers to this level)
             volatility_metrics = item.get('volatility_metrics', {})
             if isinstance(volatility_metrics, Decimal):
                 volatility_metrics = {}
             
             action_price = None
             if volatility_metrics:
-                # Get the dip amount from metrics
-                dip_amount = volatility_metrics.get('max_dip_dollars')
-                if dip_amount:
-                    dip_amount = to_float(dip_amount)
-                    if dip_amount > 0:
-                        action_price = initial_price - dip_amount
+                recovery_threshold = volatility_metrics.get('min_recovery_dollars')
+                if recovery_threshold:
+                    recovery_threshold = to_float(recovery_threshold)
+                    if recovery_threshold > 0 and highest_price > 0:
+                        # Action triggers when current price >= highest - recovery_threshold
+                        action_price = highest_price - recovery_threshold
             
-            # Add per-user entry
-            entry = {
-                'user_name': user_name,
-                'state': state,
-                'filled_at': item.get('filled_at'),
-                'fill_price_dollars': to_float(item.get('fill_price_dollars')) if item.get('fill_price_dollars') else None,
-            }
-            
-            markets_dict[market_ticker]['entries'].append(entry)
-            markets_dict[market_ticker]['user_count'] = len(set([e['user_name'] for e in markets_dict[market_ticker]['entries']]))
+            # Create market entry if not exists
+            if market_ticker not in markets_dict:
+                markets_dict[market_ticker] = {
+                    'market_ticker': market_ticker,
+                    'trade_side': trade_side,
+                    'initial_price_dollars': initial_price,
+                    'highest_price_seen_dollars': highest_price,
+                    'lowest_price_seen_dollars': lowest_price,
+                    'current_price_dollars': current_price,
+                    'added_at': item.get('added_at', ''),
+                }
             
             # Store action trigger price if available
             if action_price is not None:
@@ -182,7 +250,7 @@ def get_volatile_watchlist_entries():
         result = list(markets_dict.values())
         result.sort(key=lambda x: x.get('added_at', ''), reverse=True)
         
-        return result
+        return result, cleanup_count
     
     except Exception as e:
         logger.error(f"Error scanning watchlist: {str(e)}")
@@ -197,13 +265,19 @@ def lambda_handler(event, context):
         return cors_response(403, {'error': 'Access denied'})
     
     try:
-        entries = get_volatile_watchlist_entries()
+        entries, cleanup_count = get_volatile_watchlist_entries()
         
-        return cors_response(200, {
+        response_data = {
             'watchlist': entries,
             'count': len(entries),
             'timestamp': datetime.now(timezone.utc).isoformat()
-        })
+        }
+        
+        if cleanup_count > 0:
+            response_data['cleaned_up'] = cleanup_count
+            logger.info(f"Cleaned up {cleanup_count} entries for inactive markets")
+        
+        return cors_response(200, response_data)
     
     except Exception as e:
         logger.error(f"Error in lambda_handler: {str(e)}", exc_info=True)

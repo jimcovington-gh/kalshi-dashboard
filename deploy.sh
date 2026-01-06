@@ -49,6 +49,23 @@ fi
 echo -e "${GREEN}✅ Local build passed${NC}"
 echo ""
 
+# Step 2.5: Check Python syntax before SAM deploy
+echo "Step 2.5: Checking Python syntax..."
+SYNTAX_ERROR=0
+for pyfile in "$SCRIPT_DIR/lambda"/*.py; do
+    if ! python3 -m py_compile "$pyfile" 2>/tmp/syntax-error.log; then
+        echo -e "${RED}❌ Syntax error in $(basename $pyfile):${NC}"
+        cat /tmp/syntax-error.log
+        SYNTAX_ERROR=1
+    fi
+done
+if [ $SYNTAX_ERROR -eq 1 ]; then
+    echo -e "${RED}Fix Python syntax errors before deploying${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ Python syntax OK${NC}"
+echo ""
+
 # Step 3: Deploy Lambda functions (SAM)
 echo "Step 3: Deploying Lambda API functions..."
 cd "$SCRIPT_DIR/lambda"

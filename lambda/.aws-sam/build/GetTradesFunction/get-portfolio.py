@@ -23,11 +23,15 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+dynamodb_client = boto3.client('dynamodb', region_name='us-east-1')
 secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
 positions_table = dynamodb.Table(os.environ.get('POSITIONS_TABLE', 'production-kalshi-market-positions'))
 portfolio_table = dynamodb.Table(os.environ.get('PORTFOLIO_TABLE', 'production-kalshi-portfolio-snapshots'))
 market_metadata_table = dynamodb.Table(os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'))
 trades_table = dynamodb.Table(os.environ.get('TRADES_TABLE', 'production-kalshi-trades-v2'))
+
+# Table name for batch operations (needs string, not Table object)
+MARKET_METADATA_TABLE_NAME = os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata')
 
 class DecimalEncoder(json.JSONEncoder):
     """Convert Decimal to float for JSON serialization"""
@@ -35,6 +39,97 @@ class DecimalEncoder(json.JSONEncoder):
         if isinstance(obj, Decimal):
             return float(obj)
         return super(DecimalEncoder, self).default(obj)
+
+
+def batch_get_market_metadata(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Batch fetch market metadata from DynamoDB for multiple tickers.
+    
+    Uses batch_get_item for efficiency (100 items per request max).
+    Handles pagination for portfolios with 100+ positions.
+    
+    Args:
+        tickers: List of market tickers to fetch metadata for
+        
+    Returns:
+        Dict mapping ticker -> {market_title, event_ticker, series_ticker, market_status, close_time}
+    """
+    if not tickers:
+        return {}
+    
+    result = {}
+    BATCH_SIZE = 100  # DynamoDB limit
+    
+    # Process in batches of 100
+    for i in range(0, len(tickers), BATCH_SIZE):
+        batch_tickers = tickers[i:i + BATCH_SIZE]
+        keys = [{'market_ticker': {'S': ticker}} for ticker in batch_tickers]
+        
+        try:
+            response = dynamodb_client.batch_get_item(
+                RequestItems={
+                    MARKET_METADATA_TABLE_NAME: {
+                        'Keys': keys,
+                        'ProjectionExpression': 'market_ticker, market_title, event_ticker, series_ticker, market_status, close_time'
+                    }
+                }
+            )
+            
+            # Process returned items
+            items = response.get('Responses', {}).get(MARKET_METADATA_TABLE_NAME, [])
+            for item in items:
+                ticker = item.get('market_ticker', {}).get('S', '')
+                if ticker:
+                    result[ticker] = {
+                        'market_title': item.get('market_title', {}).get('S', ticker),
+                        'event_ticker': item.get('event_ticker', {}).get('S', ''),
+                        'series_ticker': item.get('series_ticker', {}).get('S', ''),
+                        'market_status': item.get('market_status', {}).get('S', 'unknown'),
+                        'close_time': item.get('close_time', {}).get('S', '')
+                    }
+            
+            # Handle unprocessed keys (throttling) with retry
+            unprocessed = response.get('UnprocessedKeys', {}).get(MARKET_METADATA_TABLE_NAME, {}).get('Keys', [])
+            retry_count = 0
+            while unprocessed and retry_count < 3:
+                retry_count += 1
+                logger.warning(f"Retrying {len(unprocessed)} unprocessed keys (attempt {retry_count})")
+                import time
+                time.sleep(0.1 * retry_count)  # Exponential backoff
+                
+                retry_response = dynamodb_client.batch_get_item(
+                    RequestItems={
+                        MARKET_METADATA_TABLE_NAME: {
+                            'Keys': unprocessed,
+                            'ProjectionExpression': 'market_ticker, market_title, event_ticker, series_ticker, market_status, close_time'
+                        }
+                    }
+                )
+                
+                retry_items = retry_response.get('Responses', {}).get(MARKET_METADATA_TABLE_NAME, [])
+                for item in retry_items:
+                    ticker = item.get('market_ticker', {}).get('S', '')
+                    if ticker:
+                        result[ticker] = {
+                            'market_title': item.get('market_title', {}).get('S', ticker),
+                            'event_ticker': item.get('event_ticker', {}).get('S', ''),
+                            'series_ticker': item.get('series_ticker', {}).get('S', ''),
+                            'market_status': item.get('market_status', {}).get('S', 'unknown'),
+                            'close_time': item.get('close_time', {}).get('S', '')
+                        }
+                
+                unprocessed = retry_response.get('UnprocessedKeys', {}).get(MARKET_METADATA_TABLE_NAME, {}).get('Keys', [])
+            
+            if unprocessed:
+                logger.error(f"Failed to fetch {len(unprocessed)} keys after retries")
+                
+        except Exception as e:
+            logger.error(f"batch_get_item failed for batch starting at index {i}: {e}")
+            # Continue with next batch rather than failing entirely
+            continue
+    
+    return result
+
 
 def get_api_key_id(user_name: str) -> str:
     """Helper to get api_key_id for a user (used for portfolio history queries)"""
@@ -154,7 +249,18 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
             logger.warning(f"Failed to fetch fill prices in parallel for {user_name}: {e}")
             fill_prices = {}
     
-    # STEP 3: Enrich positions with fill prices (metadata already included from layer)
+    # STEP 2.5: Batch fetch market metadata from DynamoDB (portfolio layer doesn't include metadata)
+    # Use batch_get_item for efficiency - handles up to 100 items per batch
+    market_metadata = {}
+    if tickers_to_query:
+        try:
+            market_metadata = batch_get_market_metadata(tickers_to_query)
+            logger.info(f"Batch fetched metadata for {len(market_metadata)}/{len(tickers_to_query)} tickers")
+        except Exception as e:
+            logger.warning(f"Failed to batch fetch market metadata: {e}")
+            market_metadata = {}
+    
+    # STEP 3: Enrich positions with fill prices and market metadata
     position_details = []
     
     for ticker, position_data in api_positions.items():
@@ -162,9 +268,9 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
         market_value = position_data['market_value']
         current_price = position_data['current_price']
         
-        # Portfolio layer returns positions with metadata already included
-        # Extract series_ticker if not present
-        series = position_data.get('series_ticker') or (ticker.split('-')[0] if ticker else '')
+        # Get metadata from batch lookup (fallback to ticker-derived values if missing)
+        metadata = market_metadata.get(ticker, {})
+        series = metadata.get('series_ticker') or (ticker.split('-')[0] if ticker else '')
         
         position_details.append({
             'ticker': ticker,
@@ -175,12 +281,13 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
             'idea_name': idea_names.get(ticker),
             'current_price': float(current_price),
             'market_value': float(market_value),
-            'market_title': position_data.get('market_title', ticker),
-            'close_time': position_data.get('close_time', ''),
-            'event_ticker': position_data.get('event_ticker', ''),
+            'market_title': metadata.get('market_title', ticker),
+            'close_time': metadata.get('close_time', ''),
+            'event_ticker': metadata.get('event_ticker', ''),
             'series_ticker': series,
-            'market_status': position_data.get('market_status', 'unknown')
+            'market_status': metadata.get('market_status', 'unknown')
         })
+
     
     logger.info(f"🔍 POSITION COUNT - After enrichment loop: {len(position_details)} positions")
     logger.info(f"🔍 ENRICHED TICKERS: {sorted([p['ticker'] for p in position_details])}")

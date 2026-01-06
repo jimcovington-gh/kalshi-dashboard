@@ -1,0 +1,10 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "kalshi-dashboard-api"
+region = "us-east-1"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-4rdxmnrlyr8x"
+s3_prefix = "kalshi-dashboard-api"
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset = false
+disable_rollback = false

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Dashboard Deploy Script
-# Builds locally to catch TypeScript errors, then pushes to trigger Amplify deployment
+# Deploys both Lambda API functions and Next.js frontend
 #
 # Usage: ./deploy.sh "commit message"
 
@@ -49,8 +49,36 @@ fi
 echo -e "${GREEN}✅ Local build passed${NC}"
 echo ""
 
-# Step 3: Commit and push
-echo "Step 3: Committing and pushing..."
+# Step 3: Deploy Lambda functions (SAM)
+echo "Step 3: Deploying Lambda API functions..."
+cd "$SCRIPT_DIR/lambda"
+
+# Check if there are Lambda changes
+LAMBDA_CHANGES=$(git diff --name-only HEAD~1 2>/dev/null | grep -E '^lambda/' || true)
+if [ -n "$LAMBDA_CHANGES" ] || [ ! -d ".aws-sam/build" ]; then
+    echo "Building Lambda functions..."
+    if ! sam build > /tmp/sam-build.log 2>&1; then
+        echo -e "${RED}❌ SAM build failed!${NC}"
+        cat /tmp/sam-build.log | tail -20
+        exit 1
+    fi
+    echo -e "${GREEN}✅ SAM build passed${NC}"
+    
+    echo "Deploying Lambda functions..."
+    if ! sam deploy > /tmp/sam-deploy.log 2>&1; then
+        echo -e "${RED}❌ SAM deploy failed!${NC}"
+        cat /tmp/sam-deploy.log | tail -30
+        exit 1
+    fi
+    echo -e "${GREEN}✅ Lambda functions deployed${NC}"
+else
+    echo -e "${YELLOW}No Lambda changes detected, skipping SAM deploy${NC}"
+fi
+cd "$SCRIPT_DIR"
+echo ""
+
+# Step 4: Commit and push (triggers Amplify for frontend)
+echo "Step 4: Committing and pushing..."
 git add -A
 git commit -m "$COMMIT_MSG"
 git push origin main
@@ -58,8 +86,8 @@ COMMIT_HASH=$(git rev-parse HEAD)
 echo -e "${GREEN}✅ Pushed commit: ${COMMIT_HASH:0:7}${NC}"
 echo ""
 
-# Step 4: Wait for Amplify to pick up the build
-echo "Step 4: Waiting for Amplify build to start..."
+# Step 5: Wait for Amplify to pick up the build
+echo "Step 5: Waiting for Amplify build to start..."
 sleep 5
 
 # Get the latest job (head -1 to strip NextToken line)
@@ -73,8 +101,8 @@ fi
 echo "Amplify Job ID: $JOB_ID"
 echo ""
 
-# Step 5: Poll for completion
-echo "Step 5: Waiting for Amplify build to complete..."
+# Step 6: Poll for completion
+echo "Step 6: Waiting for Amplify build to complete..."
 MAX_WAIT=300  # 5 minutes
 WAITED=0
 POLL_INTERVAL=10
@@ -89,7 +117,8 @@ while [ $WAITED -lt $MAX_WAIT ]; do
             echo -e "${GREEN}=========================================${NC}"
             echo -e "${GREEN}✅ Deployment successful!${NC}"
             echo -e "${GREEN}=========================================${NC}"
-            echo "URL: https://main.d1uumqiqpqm7bm.amplifyapp.com"
+            echo "Frontend: https://main.d1uumqiqpqm7bm.amplifyapp.com"
+            echo "API: https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod"
             exit 0
             ;;
         FAILED)

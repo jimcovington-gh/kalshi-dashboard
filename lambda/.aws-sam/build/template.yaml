@@ -237,6 +237,34 @@ Resources:
             Method: GET
     Metadata:
       SamResourceId: AdminStatsFunction
+  VolatileWatchlistFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-volatile-watchlist
+      CodeUri: VolatileWatchlistFunction
+      Handler: get-volatile-watchlist.lambda_handler
+      Description: Get volatile watchlist entries (admin only)
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Layers:
+      - Ref: SharedCodeLayer
+      Environment:
+        Variables:
+          WATCHLIST_TABLE: production-kalshi-volatile-watchlist
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-volatile-watchlist
+      Events:
+        GetVolatileWatchlist:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /volatile-watchlist
+            Method: GET
+    Metadata:
+      SamResourceId: VolatileWatchlistFunction
   MentionMonitorsFunction:
     Type: AWS::Serverless::Function
     Properties:

@@ -504,6 +504,32 @@ export interface AdminStatsResponse {
   error?: string;
 }
 
+export interface VolatileWatchlistEntry {
+  user_name: string;
+  state: 'watching' | 'recovery' | 'filled';
+  filled_at?: string;
+  fill_price_dollars?: number;
+}
+
+export interface VolatileWatchlistMarket {
+  market_ticker: string;
+  trade_side: 'YES' | 'NO';
+  initial_price_dollars: number;
+  highest_price_seen_dollars: number;
+  lowest_price_seen_dollars: number;
+  added_at: string;
+  state: string;
+  entries: VolatileWatchlistEntry[];
+  user_count: number;
+  action_trigger_price?: number;
+}
+
+export interface VolatileWatchlistResponse {
+  watchlist: VolatileWatchlistMarket[];
+  count: number;
+  timestamp: string;
+}
+
 export async function getAdminStats(): Promise<AdminStatsResponse> {
   try {
     const session = await fetchAuthSession();
@@ -525,6 +551,31 @@ export async function getAdminStats(): Promise<AdminStatsResponse> {
     return data as unknown as AdminStatsResponse;
   } catch (error) {
     console.error('Error fetching admin stats:', error);
+    throw error;
+  }
+}
+
+export async function getVolatileWatchlist(): Promise<VolatileWatchlistResponse> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: '/volatile-watchlist',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as unknown as VolatileWatchlistResponse;
+  } catch (error) {
+    console.error('Error fetching volatile watchlist:', error);
     throw error;
   }
 }

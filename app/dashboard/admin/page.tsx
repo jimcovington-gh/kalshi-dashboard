@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { isAdmin, getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent } from '@/lib/api';
+import { isAdmin, getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent, getVolatileWatchlist, VolatileWatchlistResponse } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
@@ -21,6 +21,10 @@ export default function AdminPage() {
   // Admin stats state
   const [adminStats, setAdminStats] = useState<AdminStatsResponse | null>(null);
   const [adminStatsLoading, setAdminStatsLoading] = useState(false);
+  
+  // Volatile watchlist state
+  const [volatileWatchlist, setVolatileWatchlist] = useState<VolatileWatchlistResponse | null>(null);
+  const [volatileWatchlistLoading, setVolatileWatchlistLoading] = useState(false);
   
   // Per-user/per-idea toggle state
   const [toggleLoading, setToggleLoading] = useState<string | null>(null); // Format: "user_name#idea_id"
@@ -42,7 +46,8 @@ export default function AdminPage() {
       await Promise.all([
         loadTradingStatus(),
         loadMentionMonitors(),
-        loadAdminStats()
+        loadAdminStats(),
+        loadVolatileWatchlist()
       ]);
     } catch (err: any) {
       setError('Access denied');
@@ -59,6 +64,18 @@ export default function AdminPage() {
       console.error('Failed to load admin stats:', err);
     } finally {
       setAdminStatsLoading(false);
+    }
+  }
+
+  async function loadVolatileWatchlist() {
+    setVolatileWatchlistLoading(true);
+    try {
+      const data = await getVolatileWatchlist();
+      setVolatileWatchlist(data);
+    } catch (err: any) {
+      console.error('Failed to load volatile watchlist:', err);
+    } finally {
+      setVolatileWatchlistLoading(false);
     }
   }
 
@@ -747,6 +764,108 @@ export default function AdminPage() {
         )}
         {adminStats && adminStats.recent_trades.length === 0 && (
           <div className="text-center py-4 text-gray-500 text-sm">No recent trades</div>
+        )}
+      </div>
+
+      {/* Volatile Watchlist Section - High-Confidence Volatility Tracking */}
+      <div className="bg-white rounded-lg shadow p-4">
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            📈 High-Confidence Volatility Watchlist
+          </h2>
+          <button onClick={loadVolatileWatchlist} disabled={volatileWatchlistLoading}
+            className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50">🔄</button>
+        </div>
+
+        {volatileWatchlist && volatileWatchlist.watchlist.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-1.5 py-1 text-left font-medium text-gray-500 whitespace-nowrap" style={{width: '11%'}}>Market</th>
+                  <th className="px-1.5 py-1 text-center font-medium text-gray-500 whitespace-nowrap" style={{width: '6%'}}>Side</th>
+                  <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap" style={{width: '8%'}}>Age</th>
+                  <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap" style={{width: '8%'}}>Initial</th>
+                  <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap" style={{width: '8%'}}>Current</th>
+                  <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap" style={{width: '9%'}}>Dip</th>
+                  <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap" style={{width: '8%'}}>Action</th>
+                  <th className="px-1.5 py-1 text-center font-medium text-gray-500 whitespace-nowrap" style={{width: '10%'}}>Shares/User</th>
+                  <th className="px-1.5 py-1 text-center font-medium text-gray-500 whitespace-nowrap" style={{width: '7%'}}>Users</th>
+                  <th className="px-1.5 py-1 text-center font-medium text-gray-500 whitespace-nowrap" style={{width: '9%'}}>State</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {volatileWatchlist.watchlist.map((market) => {
+                  const addedDate = new Date(market.added_at);
+                  const now = new Date();
+                  const diffMs = now.getTime() - addedDate.getTime();
+                  const diffSec = Math.floor(diffMs / 1000);
+                  const diffMin = Math.floor(diffSec / 60);
+                  const ageStr = diffMin < 60 ? `${diffMin}m ${diffSec % 60}s` : `${Math.floor(diffMin / 60)}h ${diffMin % 60}m`;
+                  
+                  const dip = market.highest_price_seen_dollars - market.lowest_price_seen_dollars;
+                  const dipPercent = market.initial_price_dollars > 0 ? ((dip / market.initial_price_dollars) * 100).toFixed(0) : '0';
+                  
+                  // Count filled vs watching shares
+                  const filledCount = market.entries.filter(e => e.state === 'filled').length;
+                  const watchingCount = market.entries.length - filledCount;
+                  const sharesStr = watchingCount > 0 ? `${watchingCount}/${market.entries.length}` : `${filledCount}/${market.entries.length}`;
+                  
+                  const stateColors: {[key: string]: string} = {
+                    'watching': 'bg-yellow-100 text-yellow-700',
+                    'recovery': 'bg-blue-100 text-blue-700',
+                    'filled': 'bg-green-100 text-green-700'
+                  };
+                  const stateColor = stateColors[market.state] || 'bg-gray-100 text-gray-700';
+                  
+                  const sideColor = market.trade_side === 'YES' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700';
+                  
+                  return (
+                    <tr key={market.market_ticker} className={market.state === 'filled' ? 'bg-green-50' : ''}>
+                      <td className="px-1.5 py-1 whitespace-nowrap font-mono text-xs">
+                        <a href={buildMarketUrlFromTicker(market.market_ticker)}
+                          target="_blank" rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline">
+                          {market.market_ticker}
+                        </a>
+                      </td>
+                      <td className="px-1.5 py-1 text-center">
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${sideColor}`}>
+                          {market.trade_side}
+                        </span>
+                      </td>
+                      <td className="px-1.5 py-1 text-right text-gray-700 font-mono">{ageStr}</td>
+                      <td className="px-1.5 py-1 text-right text-gray-900 font-mono font-semibold">${market.initial_price_dollars.toFixed(2)}</td>
+                      <td className="px-1.5 py-1 text-right text-gray-900 font-mono font-semibold">${market.lowest_price_seen_dollars.toFixed(2)}</td>
+                      <td className="px-1.5 py-1 text-right font-mono">
+                        <span className="text-red-600 font-semibold">↓${dip.toFixed(2)}</span>
+                        <div className="text-gray-500 text-xs">({dipPercent}%)</div>
+                      </td>
+                      <td className="px-1.5 py-1 text-right font-mono text-gray-700">
+                        {market.action_trigger_price !== undefined ? `$${market.action_trigger_price.toFixed(2)}` : '—'}
+                      </td>
+                      <td className="px-1.5 py-1 text-center font-mono text-gray-700">
+                        <div className="font-semibold">{sharesStr}</div>
+                        <div className="text-gray-500 text-xs">
+                          {filledCount > 0 && `${filledCount} filled`}
+                        </div>
+                      </td>
+                      <td className="px-1.5 py-1 text-center font-semibold text-gray-900">{market.user_count}</td>
+                      <td className="px-1.5 py-1 text-center">
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-semibold whitespace-nowrap ${stateColor}`}>
+                          {market.state}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : volatileWatchlist ? (
+          <div className="text-center py-4 text-gray-500 text-sm">No active watchlist entries</div>
+        ) : (
+          <div className="text-center py-4 text-gray-400 text-sm">Loading...</div>
         )}
       </div>
 

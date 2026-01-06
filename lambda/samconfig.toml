@@ -8,3 +8,4 @@ s3_prefix = "kalshi-dashboard-api"
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
 confirm_changeset = false
 disable_rollback = false
+parameter_overrides = "PortfolioFetcherLayerArn=arn:aws:lambda:us-east-1:355149669325:layer:production-kalshi-portfolio-fetcher:33"

@@ -41,6 +41,32 @@ class DecimalEncoder(json.JSONEncoder):
         return super(DecimalEncoder, self).default(obj)
 
 
+def _extract_metadata_from_item(item: Dict, ticker: str) -> Dict[str, Any]:
+    """Extract metadata fields from a DynamoDB item, handling field name variations and types."""
+    # close_time can be Number (epoch) or String (ISO)
+    close_time_val = ''
+    if 'close_time' in item:
+        if 'N' in item['close_time']:
+            # Convert epoch to ISO string
+            try:
+                epoch = int(item['close_time']['N'])
+                close_time_val = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
+            except (ValueError, TypeError):
+                close_time_val = ''
+        elif 'S' in item['close_time']:
+            close_time_val = item['close_time']['S']
+    
+    return {
+        # Field is 'title' in table, we return as 'market_title'
+        'market_title': item.get('title', {}).get('S', ticker),
+        'event_ticker': item.get('event_ticker', {}).get('S', ''),
+        'series_ticker': item.get('series_ticker', {}).get('S', ''),
+        # Field is 'status' in table, we return as 'market_status'
+        'market_status': item.get('status', {}).get('S', 'unknown'),
+        'close_time': close_time_val
+    }
+
+
 def batch_get_market_metadata(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
     """
     Batch fetch market metadata from DynamoDB for multiple tickers.
@@ -70,7 +96,9 @@ def batch_get_market_metadata(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
                 RequestItems={
                     MARKET_METADATA_TABLE_NAME: {
                         'Keys': keys,
-                        'ProjectionExpression': 'market_ticker, market_title, event_ticker, series_ticker, market_status, close_time'
+                        # Use actual field names from table: title, status (not market_title, market_status)
+                        'ProjectionExpression': 'market_ticker, title, event_ticker, series_ticker, #s, close_time',
+                        'ExpressionAttributeNames': {'#s': 'status'}  # 'status' is reserved word
                     }
                 }
             )
@@ -80,13 +108,7 @@ def batch_get_market_metadata(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
             for item in items:
                 ticker = item.get('market_ticker', {}).get('S', '')
                 if ticker:
-                    result[ticker] = {
-                        'market_title': item.get('market_title', {}).get('S', ticker),
-                        'event_ticker': item.get('event_ticker', {}).get('S', ''),
-                        'series_ticker': item.get('series_ticker', {}).get('S', ''),
-                        'market_status': item.get('market_status', {}).get('S', 'unknown'),
-                        'close_time': item.get('close_time', {}).get('S', '')
-                    }
+                    result[ticker] = _extract_metadata_from_item(item, ticker)
             
             # Handle unprocessed keys (throttling) with retry
             unprocessed = response.get('UnprocessedKeys', {}).get(MARKET_METADATA_TABLE_NAME, {}).get('Keys', [])
@@ -101,7 +123,8 @@ def batch_get_market_metadata(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
                     RequestItems={
                         MARKET_METADATA_TABLE_NAME: {
                             'Keys': unprocessed,
-                            'ProjectionExpression': 'market_ticker, market_title, event_ticker, series_ticker, market_status, close_time'
+                            'ProjectionExpression': 'market_ticker, title, event_ticker, series_ticker, #s, close_time',
+                            'ExpressionAttributeNames': {'#s': 'status'}
                         }
                     }
                 )
@@ -110,13 +133,7 @@ def batch_get_market_metadata(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
                 for item in retry_items:
                     ticker = item.get('market_ticker', {}).get('S', '')
                     if ticker:
-                        result[ticker] = {
-                            'market_title': item.get('market_title', {}).get('S', ticker),
-                            'event_ticker': item.get('event_ticker', {}).get('S', ''),
-                            'series_ticker': item.get('series_ticker', {}).get('S', ''),
-                            'market_status': item.get('market_status', {}).get('S', 'unknown'),
-                            'close_time': item.get('close_time', {}).get('S', '')
-                        }
+                        result[ticker] = _extract_metadata_from_item(item, ticker)
                 
                 unprocessed = retry_response.get('UnprocessedKeys', {}).get(MARKET_METADATA_TABLE_NAME, {}).get('Keys', [])
             

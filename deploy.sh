@@ -53,27 +53,22 @@ echo ""
 echo "Step 3: Deploying Lambda API functions..."
 cd "$SCRIPT_DIR/lambda"
 
-# Check if there are Lambda changes
-LAMBDA_CHANGES=$(git diff --name-only HEAD~1 2>/dev/null | grep -E '^lambda/' || true)
-if [ -n "$LAMBDA_CHANGES" ] || [ ! -d ".aws-sam/build" ]; then
-    echo "Building Lambda functions..."
-    if ! sam build > /tmp/sam-build.log 2>&1; then
-        echo -e "${RED}❌ SAM build failed!${NC}"
-        cat /tmp/sam-build.log | tail -20
-        exit 1
-    fi
-    echo -e "${GREEN}✅ SAM build passed${NC}"
-    
-    echo "Deploying Lambda functions..."
-    if ! sam deploy > /tmp/sam-deploy.log 2>&1; then
-        echo -e "${RED}❌ SAM deploy failed!${NC}"
-        cat /tmp/sam-deploy.log | tail -30
-        exit 1
-    fi
-    echo -e "${GREEN}✅ Lambda functions deployed${NC}"
-else
-    echo -e "${YELLOW}No Lambda changes detected, skipping SAM deploy${NC}"
+echo "Building Lambda functions..."
+if ! sam build > /tmp/sam-build.log 2>&1; then
+    echo -e "${RED}❌ SAM build failed!${NC}"
+    cat /tmp/sam-build.log | tail -20
+    exit 1
 fi
+echo -e "${GREEN}✅ SAM build passed${NC}"
+
+echo "Deploying Lambda functions..."
+if ! sam deploy > /tmp/sam-deploy.log 2>&1; then
+    echo -e "${RED}❌ SAM deploy failed!${NC}"
+    cat /tmp/sam-deploy.log | tail -30
+    exit 1
+fi
+echo -e "${GREEN}✅ Lambda functions deployed${NC}"
+
 cd "$SCRIPT_DIR"
 echo ""
 

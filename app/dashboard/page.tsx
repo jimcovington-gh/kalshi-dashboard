@@ -162,16 +162,33 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
   setExpandedGroups: (groups: Set<string>) => void;
   userKey: string;
 }) {
+  // Known status mappings
+  const ACTIVE_STATUSES = ['active', 'open', 'unknown', 'initialized'];
+  const INACTIVE_STATUSES = ['inactive'];
+  const DETERMINED_STATUSES = ['closed', 'determined', 'finalized'];
+  const ALL_KNOWN_STATUSES = [...ACTIVE_STATUSES, ...INACTIVE_STATUSES, ...DETERMINED_STATUSES];
+
   // Separate positions by market status
   const activePositions = portfolio.positions.filter(p => 
-    !p.market_status || p.market_status === 'active' || p.market_status === 'open' || p.market_status === 'unknown'
+    !p.market_status || ACTIVE_STATUSES.includes(p.market_status)
   );
   const inactivePositions = portfolio.positions.filter(p => 
-    p.market_status === 'inactive'
+    p.market_status && INACTIVE_STATUSES.includes(p.market_status)
   );
   const determinedPositions = portfolio.positions.filter(p => 
-    p.market_status && (p.market_status === 'closed' || p.market_status === 'determined')
+    p.market_status && DETERMINED_STATUSES.includes(p.market_status)
   );
+  
+  // Collect positions with unrecognized statuses (group by status)
+  const unrecognizedByStatus: Record<string, Position[]> = {};
+  portfolio.positions.forEach(p => {
+    if (p.market_status && !ALL_KNOWN_STATUSES.includes(p.market_status)) {
+      if (!unrecognizedByStatus[p.market_status]) {
+        unrecognizedByStatus[p.market_status] = [];
+      }
+      unrecognizedByStatus[p.market_status].push(p);
+    }
+  });
 
   // Sort each group by fill_time descending (newest first)
   const sortByFillTime = (positions: Position[]) => {
@@ -199,6 +216,9 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
     contracts: determinedPositions.reduce((sum, p) => sum + Math.abs(p.contracts), 0),
     value: determinedPositions.reduce((sum, p) => sum + p.market_value, 0)
   };
+  
+  // Calculate total positions shown (for "no positions" check)
+  const totalUnrecognized = Object.values(unrecognizedByStatus).reduce((sum, arr) => sum + arr.length, 0);
 
   return (
     <div className="space-y-3 md:space-y-4">
@@ -248,8 +268,31 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
         />
       )}
 
+      {/* Unrecognized status groups - display each as its own section */}
+      {Object.entries(unrecognizedByStatus).map(([status, positions]) => {
+        const sortedPositions = sortByFillTime(positions);
+        const stats = {
+          contracts: positions.reduce((sum, p) => sum + Math.abs(p.contracts), 0),
+          value: positions.reduce((sum, p) => sum + p.market_value, 0)
+        };
+        return (
+          <PositionsTable 
+            key={status}
+            positions={sortedPositions} 
+            title={`${status.charAt(0).toUpperCase() + status.slice(1)} (Kalshi Status)`}
+            userName={portfolio.user_name}
+            badgeColor="yellow"
+            groupKey={`${userKey}-${status}`}
+            expandedGroups={expandedGroups}
+            setExpandedGroups={setExpandedGroups}
+            totalContracts={stats.contracts}
+            totalValue={stats.value}
+          />
+        );
+      })}
+
       {/* Show message if no positions */}
-      {activePositions.length === 0 && inactivePositions.length === 0 && determinedPositions.length === 0 && (
+      {activePositions.length === 0 && inactivePositions.length === 0 && determinedPositions.length === 0 && totalUnrecognized === 0 && (
         <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
           No positions found
         </div>

@@ -313,6 +313,94 @@ Resources:
             Method: POST
     Metadata:
       SamResourceId: MentionMonitorsFunction
+  VoiceTraderRouterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-voice-trader-router
+      CodeUri: VoiceTraderRouterFunction
+      Handler: voice-trader-router.lambda_handler
+      Description: Launch and manage voice trading containers for mention markets
+      Timeout: 60
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          ECS_CLUSTER: production-kalshi-fargate-cluster
+          TASK_FAMILY: production-voice-mention-trader
+          VOICE_TRADER_STATE_TABLE: production-kalshi-voice-trader-state
+          MENTION_EVENTS_TABLE: production-kalshi-mention-events
+          MARKET_METADATA_TABLE: production-kalshi-market-metadata
+          SUBNETS: subnet-0eb3e6e2f3d50a7b4
+          SECURITY_GROUPS: sg-06a2b1efcb25aa570
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: production-kalshi-voice-trader-state
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-mention-events
+      - Statement:
+        - Effect: Allow
+          Action:
+          - ecs:RunTask
+          - ecs:StopTask
+          - ecs:DescribeTasks
+          - ecs:ListTasks
+          Resource: '*'
+          Condition:
+            ArnLike:
+              ecs:cluster:
+                Fn::Sub: arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/production-kalshi-fargate-cluster
+      - Statement:
+        - Effect: Allow
+          Action:
+          - iam:PassRole
+          Resource:
+          - Fn::Sub: arn:aws:iam::${AWS::AccountId}:role/production-fargate-task-execution-role
+          - Fn::Sub: arn:aws:iam::${AWS::AccountId}:role/production-voice-mention-trader-task-role
+      - Statement:
+        - Effect: Allow
+          Action:
+          - secretsmanager:GetSecretValue
+          Resource:
+          - arn:aws:secretsmanager:us-east-1:355149669325:secret:production/kalshi/users/*
+      Events:
+        GetEvents:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voice-trader/events
+            Method: GET
+        LaunchSession:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voice-trader/launch
+            Method: POST
+        GetStatus:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voice-trader/status/{session_id}
+            Method: GET
+        StopSession:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voice-trader/stop/{session_id}
+            Method: POST
+        RedialSession:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voice-trader/redial/{session_id}
+            Method: POST
+    Metadata:
+      SamResourceId: VoiceTraderRouterFunction
   SharedCodeLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:

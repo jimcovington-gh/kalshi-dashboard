@@ -256,14 +256,12 @@ def get_volatile_watchlist_entries():
             if isinstance(volatility_metrics, Decimal):
                 volatility_metrics = {}
             
+            # Buy At = lowest_price_seen + buy_on_recovery_threshold (currently $0.01)
+            # This is the price at which we trigger a buy after the price starts recovering
+            BUY_ON_RECOVERY_THRESHOLD = 0.01  # From high-confidence.yaml
             action_price = None
-            if volatility_metrics:
-                recovery_threshold = volatility_metrics.get('min_recovery_dollars')
-                if recovery_threshold:
-                    recovery_threshold = to_float(recovery_threshold)
-                    if recovery_threshold > 0 and highest_price > 0:
-                        # Action triggers when current price >= highest - recovery_threshold
-                        action_price = highest_price - recovery_threshold
+            if lowest_price > 0:
+                action_price = lowest_price + BUY_ON_RECOVERY_THRESHOLD
             
             # Create market entry if not exists
             if market_ticker not in markets_dict:

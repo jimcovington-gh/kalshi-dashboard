@@ -787,7 +787,7 @@ export default function AdminPage() {
                   <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap">Age</th>
                   <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap">Initial</th>
                   <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap">Current</th>
-                  <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap">Dip</th>
+                  <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap">Lowest</th>
                   <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap">Buy At</th>
                 </tr>
               </thead>
@@ -801,10 +801,11 @@ export default function AdminPage() {
                   const mins = diffMin % 60;
                   const ageStr = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
                   
-                  // Dip = how far current price has dropped from highest seen
-                  const dip = market.highest_price_seen_dollars - market.current_price_dollars;
-                  const dipPercent = market.highest_price_seen_dollars > 0 
-                    ? ((dip / market.highest_price_seen_dollars) * 100).toFixed(0) 
+                  // Lowest price seen
+                  const lowestPrice = market.lowest_price_seen_dollars || 0;
+                  const dropFromHighest = market.highest_price_seen_dollars - lowestPrice;
+                  const dropPercent = market.highest_price_seen_dollars > 0 
+                    ? ((dropFromHighest / market.highest_price_seen_dollars) * 100).toFixed(0) 
                     : '0';
                   
                   const sideColor = market.trade_side === 'YES' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700';
@@ -827,10 +828,12 @@ export default function AdminPage() {
                       <td className="px-1.5 py-1 text-right text-gray-900 font-mono font-semibold">${market.initial_price_dollars.toFixed(2)}</td>
                       <td className="px-1.5 py-1 text-right text-gray-900 font-mono font-semibold">${market.current_price_dollars.toFixed(2)}</td>
                       <td className="px-1.5 py-1 text-right font-mono">
-                        {dip > 0 ? (
+                        {lowestPrice > 0 ? (
                           <>
-                            <span className="text-red-600 font-semibold">↓${dip.toFixed(2)}</span>
-                            <span className="text-gray-500 text-xs ml-1">({dipPercent}%)</span>
+                            <span className="text-blue-600 font-semibold">${lowestPrice.toFixed(2)}</span>
+                            {dropFromHighest > 0 && (
+                              <span className="text-gray-500 text-xs ml-1">(↓{dropPercent}%)</span>
+                            )}
                           </>
                         ) : (
                           <span className="text-gray-400">—</span>

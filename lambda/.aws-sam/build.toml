@@ -7,7 +7,7 @@ architecture = "x86_64"
 handler = "get-trades.lambda_handler"
 manifest_hash = ""
 packagetype = "Zip"
-functions = ["GetTradesFunction", "GetPortfolioFunction", "GetAnalyticsFunction", "TradingStatusFunction", "AdminStatsFunction", "VolatileWatchlistFunction", "MentionMonitorsFunction"]
+functions = ["GetTradesFunction", "GetPortfolioFunction", "GetAnalyticsFunction", "TradingStatusFunction", "AdminStatsFunction", "VolatileWatchlistFunction", "MentionMonitorsFunction", "VoiceTraderRouterFunction"]
 
 [layer_build_definitions.f741906e-69c0-4c16-a4b8-ada45b9dac88]
 layer_name = "SharedCodeLayer"

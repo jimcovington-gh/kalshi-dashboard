@@ -252,9 +252,12 @@ Resources:
       Environment:
         Variables:
           WATCHLIST_TABLE: production-kalshi-volatile-watchlist
+          MARKET_METADATA_TABLE: production-kalshi-market-metadata
       Policies:
-      - DynamoDBReadPolicy:
+      - DynamoDBCrudPolicy:
           TableName: production-kalshi-volatile-watchlist
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-market-metadata
       Events:
         GetVolatileWatchlist:
           Type: Api

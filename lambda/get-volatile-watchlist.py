@@ -67,6 +67,12 @@ def cors_response(status_code, body):
     }
 
 
+import urllib.request
+import urllib.error
+
+KALSHI_API_BASE = 'https://api.elections.kalshi.com/trade-api/v2'
+
+
 def get_market_metadata(market_tickers: list) -> dict:
     """
     Get market metadata for given tickers using batch_get_item.
@@ -98,13 +104,39 @@ def get_market_metadata(market_tickers: list) -> dict:
     return result
 
 
-def cleanup_inactive_markets(watchlist_entries: list, market_metadata: dict) -> tuple:
+def get_live_market_status(market_tickers: list) -> dict:
+    """
+    Fetch live market status from Kalshi API.
+    Returns dict mapping market_ticker -> status string.
+    """
+    if not market_tickers:
+        return {}
+    
+    result = {}
+    for ticker in market_tickers:
+        try:
+            url = f"{KALSHI_API_BASE}/markets/{ticker}"
+            req = urllib.request.Request(url, headers={'User-Agent': 'kalshi-dashboard/1.0'})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode('utf-8'))
+                    result[ticker] = data.get('market', {}).get('status', 'unknown')
+                else:
+                    result[ticker] = 'unknown'
+        except Exception as e:
+            logger.warning(f"Failed to get live status for {ticker}: {e}")
+            result[ticker] = 'unknown'
+    
+    return result
+
+
+def cleanup_inactive_markets(watchlist_entries: list, live_status: dict) -> tuple:
     """
     Delete watchlist entries for markets that are no longer active.
     
     Args:
         watchlist_entries: List of watchlist items from DynamoDB
-        market_metadata: Dict mapping ticker -> metadata
+        live_status: Dict mapping ticker -> live status from Kalshi API
         
     Returns:
         Tuple of (active_entries, deleted_count)
@@ -115,14 +147,13 @@ def cleanup_inactive_markets(watchlist_entries: list, market_metadata: dict) -> 
     
     for entry in watchlist_entries:
         ticker = entry.get('market_ticker', '')
-        metadata = market_metadata.get(ticker, {})
-        status = metadata.get('status', 'unknown')
+        status = live_status.get(ticker, 'unknown')
         
-        # Keep entries for active markets, delete others
+        # Keep entries for active markets only
         if status == 'active':
             active_entries.append(entry)
         else:
-            # Delete inactive market entry
+            # Delete inactive/finalized/settled market entry
             try:
                 watchlist_table.delete_item(
                     Key={
@@ -144,8 +175,8 @@ def get_volatile_watchlist_entries():
     """
     Scan all entries from volatile watchlist table.
     Returns watching entries only (recovery and filled are transient states).
-    Cleans up entries for inactive markets.
-    Enriches with current market prices.
+    Cleans up entries for inactive markets (checks live Kalshi API status).
+    Enriches with current market prices from our metadata.
     
     Returns:
         Tuple of (entries_list, cleanup_count)
@@ -171,14 +202,18 @@ def get_volatile_watchlist_entries():
             response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
             items.extend(response.get('Items', []))
         
-        # Get unique market tickers for metadata lookup
+        # Get unique market tickers
         all_tickers = list(set(item.get('market_ticker', '') for item in items if item.get('market_ticker')))
         
-        # Fetch market metadata for status check and current prices
-        market_metadata = get_market_metadata(all_tickers)
+        # Fetch LIVE status from Kalshi API for cleanup check
+        live_status = get_live_market_status(all_tickers)
         
-        # Cleanup inactive markets
-        items, cleanup_count = cleanup_inactive_markets(items, market_metadata)
+        # Cleanup inactive markets based on live status
+        items, cleanup_count = cleanup_inactive_markets(items, live_status)
+        
+        # Fetch market metadata for current prices (only for remaining active markets)
+        remaining_tickers = list(set(item.get('market_ticker', '') for item in items if item.get('market_ticker')))
+        market_metadata = get_market_metadata(remaining_tickers)
         
         # Filter to only watching state and organize by market_ticker
         now = datetime.now(timezone.utc)

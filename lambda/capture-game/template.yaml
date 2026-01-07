@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Capture Game API - Queue games for trading data capture
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.12
+    MemorySize: 256
+
+Parameters:
+  CognitoUserPoolArn:
+    Type: String
+    Description: ARN of the Cognito User Pool for authentication
+    Default: 'arn:aws:cognito-idp:us-east-1:355149669325:userpool/us-east-1_WEozUeojc'
+
+Resources:
+  # API Gateway
+  CaptureGameApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: capture-game-api
+      StageName: prod
+      Cors:
+        AllowMethods: "'GET,POST,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+        MaxAge: "'600'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !Ref CognitoUserPoolArn
+            Identity:
+              Header: Authorization
+        AddDefaultAuthorizerToCorsPreflight: false
+
+  # Lambda Layer for cryptography
+  CryptoLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: capture-game-crypto-layer
+      Description: Cryptography library for Kalshi API signing
+      ContentUri: layer/
+      CompatibleRuntimes:
+        - python3.12
+    Metadata:
+      BuildMethod: python3.12
+
+  # Lambda: Capture Game API
+  CaptureGameApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: capture-game-api
+      CodeUri: ./
+      Handler: capture-game-api.lambda_handler
+      Timeout: 30
+      Description: API for managing game capture queue
+      Layers:
+        - !Ref CryptoLayer
+      Environment:
+        Variables:
+          CAPTURE_TABLE: production-sports-feeder-state
+          EVENT_METADATA_TABLE: production-kalshi-event-metadata
+          SERIES_METADATA_TABLE: production-kalshi-series-metadata
+          KALSHI_API_BASE_URL: https://api.elections.kalshi.com
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: production-sports-feeder-state
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource:
+                - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-event-metadata
+            - Effect: Allow
+              Action:
+                - dynamodb:BatchGetItem
+              Resource:
+                - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-series-metadata
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:us-east-1:355149669325:secret:production-kalshi-api-key-id*
+                - arn:aws:secretsmanager:us-east-1:355149669325:secret:production-kalshi-private-key*
+      Events:
+        GetGames:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CaptureGameApi
+            Path: /capture/games
+            Method: GET
+        GetGamesOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CaptureGameApi
+            Path: /capture/games
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+        GetQueue:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CaptureGameApi
+            Path: /capture/queue
+            Method: GET
+        QueueOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CaptureGameApi
+            Path: /capture/queue
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+        AddToQueue:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CaptureGameApi
+            Path: /capture/queue
+            Method: POST
+        RemoveFromQueue:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CaptureGameApi
+            Path: /capture/queue/{event_ticker}
+            Method: DELETE
+        RemoveFromQueueOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CaptureGameApi
+            Path: /capture/queue/{event_ticker}
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+
+  # EventBridge Rule: Check capture queue every 5 minutes
+  CaptureQueueCheckerRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: capture-queue-checker
+      Description: Check for captures starting soon and launch sportsfeeder if needed
+      ScheduleExpression: 'rate(5 minutes)'
+      State: ENABLED
+      Targets:
+        - Id: CaptureQueueChecker
+          Arn: !GetAtt CaptureQueueCheckerFunction.Arn
+
+  # Lambda: Capture Queue Checker (EventBridge triggered)
+  CaptureQueueCheckerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: capture-queue-checker
+      CodeUri: ./
+      Handler: capture-queue-checker.lambda_handler
+      Timeout: 60
+      Description: Check capture queue and launch sportsfeeder if captures are due
+      Environment:
+        Variables:
+          CAPTURE_TABLE: production-sports-feeder-state
+          SPORTSFEEDER_LAUNCH_LAMBDA: production-sportsfeeder-launch
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: production-sports-feeder-state
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource:
+                - arn:aws:lambda:us-east-1:355149669325:function:production-sportsfeeder-launch
+
+  # Permission for EventBridge to invoke the Lambda
+  CaptureQueueCheckerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CaptureQueueCheckerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CaptureQueueCheckerRule.Arn
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${CaptureGameApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+  
+  CaptureGameApiFunctionArn:
+    Description: Capture Game API Lambda ARN
+    Value: !GetAtt CaptureGameApiFunction.Arn

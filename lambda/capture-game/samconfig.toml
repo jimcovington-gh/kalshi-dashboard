@@ -1,0 +1,15 @@
+# samconfig.toml - SAM deployment configuration for capture-game
+
+version = 0.1
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+stack_name = "capture-game-api"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-4rdxmnrlyr8x"
+s3_prefix = "capture-game-api"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset = false

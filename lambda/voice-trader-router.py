@@ -222,8 +222,9 @@ def launch_container(event):
         return response(400, {'error': 'event_ticker required'})
     
     if audio_source == 'phone':
-        if not phone_number or not passcode:
-            return response(400, {'error': 'phone_number and passcode required for phone audio'})
+        if not phone_number:
+            return response(400, {'error': 'phone_number required for phone audio'})
+        # passcode is optional - some calls don't need it
     elif audio_source == 'web':
         if not web_url:
             return response(400, {'error': 'web_url required for web audio'})
@@ -247,10 +248,9 @@ def launch_container(event):
     ]
     
     if audio_source == 'phone':
-        env_vars.extend([
-            {'name': 'PHONE_NUMBER', 'value': phone_number},
-            {'name': 'PASSCODE', 'value': passcode},
-        ])
+        env_vars.append({'name': 'PHONE_NUMBER', 'value': phone_number})
+        if passcode:
+            env_vars.append({'name': 'PASSCODE', 'value': passcode})
     else:
         env_vars.append({'name': 'WEB_URL', 'value': web_url})
     

@@ -331,8 +331,8 @@ Resources:
           VOICE_TRADER_STATE_TABLE: production-kalshi-voice-trader-state
           MENTION_EVENTS_TABLE: production-kalshi-mention-events
           MARKET_METADATA_TABLE: production-kalshi-market-metadata
-          SUBNETS: subnet-0eb3e6e2f3d50a7b4
-          SECURITY_GROUPS: sg-06a2b1efcb25aa570
+          SUBNETS: subnet-0ba02a0291289ed61
+          SECURITY_GROUPS: sg-056792d76ef21c4c5
       Policies:
         - DynamoDBCrudPolicy:
             TableName: production-kalshi-voice-trader-state

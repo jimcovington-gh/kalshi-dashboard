@@ -263,8 +263,8 @@ export default function VoiceTraderPage() {
     if (!selectedEvent || !authToken) return;
     
     // Validation
-    if (audioSource === 'phone' && (!phoneNumber || !passcode)) {
-      setError('Phone number and passcode are required');
+    if (audioSource === 'phone' && !phoneNumber) {
+      setError('Phone number is required');
       return;
     }
     if (audioSource === 'web' && !webUrl) {
@@ -281,7 +281,9 @@ export default function VoiceTraderPage() {
       
       if (audioSource === 'phone') {
         body.phone_number = phoneNumber;
-        body.passcode = passcode;
+        if (passcode) {
+          body.passcode = passcode;
+        }
       } else {
         body.web_url = webUrl;
       }
@@ -514,15 +516,15 @@ export default function VoiceTraderPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Passcode</label>
+                <label className="block text-sm text-gray-400 mb-1">Passcode (optional)</label>
                 <input
                   type="text"
                   value={passcode}
                   onChange={e => setPasscode(e.target.value)}
-                  placeholder="123456#"
+                  placeholder="123456# (if required)"
                   className="w-full bg-gray-700 rounded px-3 py-2 text-white"
                 />
-                <p className="text-xs text-gray-500 mt-1">Include # or * if required</p>
+                <p className="text-xs text-gray-500 mt-1">Leave blank if no passcode needed. Include # or * if required</p>
               </div>
             </div>
           )}

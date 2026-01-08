@@ -89,6 +89,7 @@ export default function VoiceTraderPage() {
   const [pnl, setPnl] = useState<PnLSummary | null>(null);
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
   const [wsUrl, setWsUrl] = useState<string | null>(null);
+  const [certAcceptUrl, setCertAcceptUrl] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   
   // Audio playback state
@@ -276,9 +277,14 @@ export default function VoiceTraderPage() {
           }
         }
         
-        // Check if container stopped
+        // Check if container stopped or call disconnected
         if (data.ecs_status === 'STOPPED' || data.status === 'stopped') {
           setError('Container stopped');
+        }
+        
+        // Set error for disconnected call (enables Redial button)
+        if (data.call_state === 'disconnected') {
+          setError('Call disconnected. Click Redial to reconnect.');
         }
         
       } catch (err) {
@@ -550,6 +556,9 @@ export default function VoiceTraderPage() {
         if (data.websocket_url) {
           setLaunchStatus('Connected!');
           setWsUrl(data.websocket_url);
+          if (data.cert_accept_url) {
+            setCertAcceptUrl(data.cert_accept_url);
+          }
           setPageState('monitoring');
           setLaunching(false);
           return;
@@ -878,6 +887,30 @@ export default function VoiceTraderPage() {
           </div>
         )}
         
+        {/* Certificate acceptance message - show when WebSocket not connected but we have a cert URL */}
+        {!wsConnected && certAcceptUrl && (
+          <div className="bg-yellow-900 border border-yellow-600 text-yellow-200 px-4 py-3 rounded mb-4">
+            <div className="font-semibold mb-1">🔐 Microphone requires certificate acceptance</div>
+            <div className="text-sm">
+              To enable the microphone for talking to the operator, you must accept the self-signed certificate:
+              <ol className="list-decimal ml-5 mt-2">
+                <li>
+                  <a 
+                    href={certAcceptUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-yellow-400 underline hover:text-yellow-300"
+                  >
+                    Click here to open {certAcceptUrl}
+                  </a>
+                </li>
+                <li>Click &quot;Advanced&quot; → &quot;Proceed to {certAcceptUrl?.replace('https://', '').split(':')[0]} (unsafe)&quot;</li>
+                <li>Return to this tab - the mic button will become active</li>
+              </ol>
+            </div>
+          </div>
+        )}
+        
         {/* Audio Controls */}
         <div className="bg-gray-800 rounded-lg p-3 mb-4 flex items-center gap-3 flex-wrap">
           {/* Call status indicator */}
@@ -928,12 +961,17 @@ export default function VoiceTraderPage() {
           {/* Microphone control (outgoing user audio) */}
           <button
             onClick={toggleMicrophone}
+            disabled={!wsConnected}
             className={`px-3 py-1.5 rounded text-sm flex items-center gap-1.5 transition-all duration-100 active:scale-95 active:brightness-75 ${
-              micActive 
-                ? 'bg-green-600 hover:bg-green-700' 
-                : 'bg-gray-700 hover:bg-gray-600'
+              !wsConnected
+                ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                : micActive 
+                  ? 'bg-green-600 hover:bg-green-700' 
+                  : 'bg-gray-700 hover:bg-gray-600'
             }`}
-            title="Toggle your microphone to speak to the call"
+            title={!wsConnected 
+              ? "Microphone requires WebSocket (blocked by browser security on HTTPS)" 
+              : "Toggle your microphone to speak to the call"}
           >
             {micActive ? (
               <>
@@ -941,7 +979,7 @@ export default function VoiceTraderPage() {
                 🎤 Mic On
               </>
             ) : (
-              '🎤 Mic Off'
+              '🎤 Mic Muted'
             )}
           </button>
           

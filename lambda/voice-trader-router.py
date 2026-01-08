@@ -364,7 +364,10 @@ def get_status(session_id: str):
                 
                 item['ecs_status'] = ecs_status
                 item['public_ip'] = public_ip
-                item['websocket_url'] = f'ws://{public_ip}:8765' if public_ip else None
+                # Use wss:// for TLS - container now serves self-signed cert
+                item['websocket_url'] = f'wss://{public_ip}:8765' if public_ip else None
+                # URL for user to accept the self-signed certificate
+                item['cert_accept_url'] = f'https://{public_ip}:8765' if public_ip else None
                 
         except Exception as e:
             item['ecs_error'] = str(e)
@@ -432,6 +435,7 @@ def request_redial(session_id: str):
     return response(200, {
         'success': True,
         'websocket_url': item.get('websocket_url'),
+        'cert_accept_url': item.get('cert_accept_url'),
         'message': 'Send redial message to WebSocket'
     })
 

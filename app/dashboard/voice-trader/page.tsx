@@ -780,14 +780,14 @@ export default function VoiceTraderPage() {
             {error && (
               <button
                 onClick={handleReconnect}
-                className="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded"
+                className="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75"
               >
                 📞 Redial
               </button>
             )}
             <button
               onClick={handleStop}
-              className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded"
+              className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75"
             >
               Stop
             </button>
@@ -802,11 +802,11 @@ export default function VoiceTraderPage() {
         
         {/* Audio Controls */}
         <div className="bg-gray-800 rounded-lg p-3 mb-4 flex items-center gap-4 flex-wrap">
-          {/* Call audio status */}
+          {/* Call audio status - use audioActive as primary indicator of connection */}
           <div className="flex items-center gap-2">
             <span className={`w-3 h-3 rounded-full ${audioActive ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`} />
-            <span className="text-sm text-gray-400">
-              {audioActive ? 'Call Audio Active' : 'No Audio'}
+            <span className={`text-sm ${audioActive ? 'text-green-400' : 'text-gray-400'}`}>
+              {audioActive ? '📞 Connected' : 'Waiting for audio...'}
             </span>
           </div>
           
@@ -819,9 +819,9 @@ export default function VoiceTraderPage() {
                 audioContextRef.current.resume();
               }
             }}
-            className={`px-3 py-1 rounded text-sm ${audioMuted ? 'bg-red-600' : 'bg-gray-700'}`}
+            className={`px-3 py-1 rounded text-sm transition-all duration-100 active:scale-95 active:brightness-75 ${audioMuted ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-700 hover:bg-gray-600'}`}
           >
-            {audioMuted ? '🔇 Hear Call' : '🔊 Muted'}
+            {audioMuted ? '🔇 Unmute' : '🔊 Mute'}
           </button>
           
           <div className="flex items-center gap-2 max-w-[150px]">
@@ -844,23 +844,23 @@ export default function VoiceTraderPage() {
           {/* Speak to call (microphone) */}
           <button
             onClick={toggleMicrophone}
-            className={`px-3 py-1 rounded text-sm flex items-center gap-2 ${
+            className={`px-3 py-1 rounded text-sm flex items-center gap-2 transition-all duration-100 active:scale-95 active:brightness-75 ${
               micActive 
-                ? 'bg-green-600 hover:bg-green-700' 
+                ? 'bg-red-600 hover:bg-red-700' 
                 : 'bg-blue-600 hover:bg-blue-700'
             }`}
           >
             {micActive ? (
               <>
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                🎤 Speaking...
+                <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                🎤 Stop Speaking
               </>
             ) : (
               '🎤 Speak to Call'
             )}
           </button>
           
-          <div className="text-xs text-gray-500 ml-auto">
+          <div className="text-xs text-gray-500 ml-auto hidden sm:block">
             💡 Click "Speak to Call" to talk to the conference operator
           </div>
         </div>
@@ -929,24 +929,33 @@ export default function VoiceTraderPage() {
                     value={dialpadInput}
                     onChange={(e) => setDialpadInput(e.target.value.replace(/[^0-9*#]/g, ''))}
                     onKeyDown={(e) => e.key === 'Enter' && sendDtmf(dialpadInput)}
-                    placeholder="Enter digits..."
-                    className="flex-1 bg-gray-700 px-2 py-1 rounded text-sm font-mono"
+                    placeholder="Digits..."
+                    className="flex-1 min-w-0 bg-gray-700 px-2 py-1 rounded text-sm font-mono"
                     maxLength={20}
                   />
                   <button
                     onClick={() => sendDtmf(dialpadInput)}
                     disabled={!dialpadInput}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 px-3 py-1 rounded text-sm"
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 px-2 py-1 rounded text-sm transition-all duration-100 active:scale-95 active:brightness-75 shrink-0"
                   >
-                    Send
+                    ➤
                   </button>
                 </div>
+                {/* Send PIN button - sends passcode in one burst */}
+                {passcode && (
+                  <button
+                    onClick={() => sendDtmf(passcode)}
+                    className="w-full bg-green-600 hover:bg-green-700 py-2 rounded text-sm font-medium transition-all duration-100 active:scale-95 active:brightness-75"
+                  >
+                    📞 Send PIN ({passcode})
+                  </button>
+                )}
                 <div className="grid grid-cols-3 gap-1">
                   {['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'].map(d => (
                     <button
                       key={d}
                       onClick={() => sendDtmf(d)}
-                      className="bg-gray-700 hover:bg-gray-600 py-2 rounded text-lg font-mono"
+                      className="bg-gray-700 hover:bg-gray-600 py-2 rounded text-lg font-mono transition-all duration-100 active:scale-95 active:brightness-75"
                     >
                       {d}
                     </button>

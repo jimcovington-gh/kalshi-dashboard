@@ -181,6 +181,11 @@ Resources:
           TableName: production-kalshi-trading-shutdown-signals
       - S3ReadPolicy:
           BucketName: production-kalshi-trading-config
+      - Statement:
+        - Effect: Allow
+          Action:
+          - secretsmanager:ListSecrets
+          Resource: '*'
       Events:
         GetTradingStatus:
           Type: Api

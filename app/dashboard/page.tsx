@@ -145,14 +145,49 @@ export default function DashboardPage() {
     );
   }
 
-  // Regular user view
+  // Regular user view - with summary header like admin sees
+  const totalContracts = portfolio!.positions.reduce((sum, p) => sum + Math.abs(p.contracts), 0);
+  
   return (
-    <PortfolioContent 
-      portfolio={portfolio!} 
-      expandedGroups={expandedGroups}
-      setExpandedGroups={setExpandedGroups}
-      userKey={portfolio!.user_name}
-    />
+    <div className="space-y-4">
+      {/* User Summary Header */}
+      <div className="bg-blue-600 text-white px-4 py-3 rounded-lg">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold">{portfolio!.user_name}</h2>
+          </div>
+          <div className="flex gap-6 text-sm">
+            <div>
+              <div>
+                <span className="text-blue-200">Positions:</span>
+                <span className="ml-2 font-semibold">{portfolio!.position_count}</span>
+              </div>
+              <div className="mt-1">
+                <span className="text-blue-200">Contracts:</span>
+                <span className="ml-2 font-semibold">{totalContracts}</span>
+              </div>
+            </div>
+            <div>
+              <div>
+                <span className="text-blue-200">Cash:</span>
+                <span className="ml-2 font-semibold">${(portfolio!.cash_balance || 0).toFixed(2)}</span>
+              </div>
+              <div className="mt-1">
+                <span className="text-blue-200">Total:</span>
+                <span className="ml-2 font-semibold">${((portfolio!.cash_balance || 0) + (portfolio!.total_position_value || 0)).toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <PortfolioContent 
+        portfolio={portfolio!} 
+        expandedGroups={expandedGroups}
+        setExpandedGroups={setExpandedGroups}
+        userKey={portfolio!.user_name}
+      />
+    </div>
   );
 }
 

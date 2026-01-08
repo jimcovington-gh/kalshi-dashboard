@@ -119,6 +119,11 @@ Resources:
           - secretsmanager:GetSecretValue
           Resource:
           - arn:aws:secretsmanager:us-east-1:355149669325:secret:production/kalshi/users/*
+      - Statement:
+        - Effect: Allow
+          Action:
+          - secretsmanager:ListSecrets
+          Resource: '*'
       Events:
         GetPortfolio:
           Type: Api

@@ -108,6 +108,9 @@ export default function VoiceTraderPage() {
   // Dialpad state
   const [dialpadInput, setDialpadInput] = useState('');
   
+  // WebSocket connection state
+  const [wsConnected, setWsConnected] = useState(false);
+  
   // Auth token
   const [authToken, setAuthToken] = useState<string | null>(null);
 
@@ -156,55 +159,65 @@ export default function VoiceTraderPage() {
     return () => clearInterval(interval);
   }, [pageState, authToken]);
 
-  // WebSocket connection for monitoring
+  // WebSocket connection for monitoring (may fail due to mixed content)
   useEffect(() => {
     if (pageState !== 'monitoring' || !wsUrl) return;
     
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-    ws.binaryType = 'arraybuffer'; // Enable binary data for audio
-    
-    ws.onopen = () => {
-      console.log('Connected to voice trader');
-      // Request audio streaming
-      ws.send(JSON.stringify({ type: 'enable_audio_stream' }));
-    };
-    
-    ws.onmessage = (event) => {
-      // Handle binary audio data
-      if (event.data instanceof ArrayBuffer) {
-        playAudioChunk(event.data);
-        return;
-      }
+    // Try to connect to WebSocket
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+      ws.binaryType = 'arraybuffer'; // Enable binary data for audio
       
-      const data = JSON.parse(event.data);
+      ws.onopen = () => {
+        console.log('Connected to voice trader WebSocket');
+        setWsConnected(true);
+        // Request audio streaming
+        ws?.send(JSON.stringify({ type: 'enable_audio_stream' }));
+      };
       
-      if (data.type === 'full_state') {
-        setContainerState(data.call);
-        setWords(data.words || []);
-        setPnl(data.pnl);
-        setTranscript(data.transcript || []);
-      } else if (data.type === 'word_triggered') {
-        // Flash animation could go here
-        console.log('Word triggered:', data.word);
-      } else if (data.type === 'disconnect_alert') {
-        setError(data.message);
-      } else if (data.type === 'audio_active') {
-        setAudioActive(data.active);
-      }
-    };
-    
-    ws.onerror = (err) => {
-      console.error('WebSocket error:', err);
-    };
-    
-    ws.onclose = () => {
-      console.log('WebSocket closed');
-      setAudioActive(false);
-    };
+      ws.onmessage = (event) => {
+        // Handle binary audio data
+        if (event.data instanceof ArrayBuffer) {
+          playAudioChunk(event.data);
+          return;
+        }
+        
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'full_state') {
+          setContainerState(data.call);
+          setWords(data.words || []);
+          setPnl(data.pnl);
+          setTranscript(data.transcript || []);
+        } else if (data.type === 'word_triggered') {
+          // Flash animation could go here
+          console.log('Word triggered:', data.word);
+        } else if (data.type === 'disconnect_alert') {
+          setError(data.message);
+        } else if (data.type === 'audio_active') {
+          setAudioActive(data.active);
+        }
+      };
+      
+      ws.onerror = (err) => {
+        console.error('WebSocket error (may be blocked by browser):', err);
+        setWsConnected(false);
+      };
+      
+      ws.onclose = () => {
+        console.log('WebSocket closed');
+        setWsConnected(false);
+        setAudioActive(false);
+      };
+    } catch (err) {
+      console.error('Failed to create WebSocket:', err);
+      setWsConnected(false);
+    }
     
     return () => {
-      ws.close();
+      if (ws) ws.close();
       // Cleanup audio context
       if (audioContextRef.current) {
         audioContextRef.current.close();
@@ -214,6 +227,71 @@ export default function VoiceTraderPage() {
       stopMicrophone();
     };
   }, [pageState, wsUrl]);
+
+  // Polling fallback for state updates (when WebSocket blocked by browser)
+  useEffect(() => {
+    if (pageState !== 'monitoring' || !sessionId || !authToken) return;
+    
+    // Always poll for state since WebSocket is often blocked (mixed content)
+    const pollState = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/voice-trader/status/${sessionId}`, {
+          headers: { Authorization: `Bearer ${authToken}` }
+        });
+        
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        
+        // Update state from DynamoDB data (pushed by container)
+        if (data.call_state || data.status_message) {
+          setContainerState(prev => ({
+            ...prev,
+            call_state: data.call_state || prev?.call_state || 'connecting',
+            status_message: data.status_message || prev?.status_message || 'Loading...',
+            qa_started: data.qa_started || false,
+            speakers: prev?.speakers || { valid_count: 0, invalid_count: 0, current: '', details: [] },
+            transcript_segments: prev?.transcript_segments || 0
+          }));
+          
+          // Update audio active from polling
+          if (data.audio_active !== undefined) {
+            setAudioActive(data.audio_active);
+          }
+          
+          // Update transcript preview if available
+          if (data.transcript_preview) {
+            setTranscript(prev => {
+              // Add as a new segment if different from last
+              const lastText = prev[prev.length - 1]?.text;
+              if (lastText !== data.transcript_preview) {
+                return [...prev.slice(-29), {
+                  text: data.transcript_preview,
+                  timestamp: Date.now() / 1000,
+                  is_final: true
+                }];
+              }
+              return prev;
+            });
+          }
+        }
+        
+        // Check if container stopped
+        if (data.ecs_status === 'STOPPED' || data.status === 'stopped') {
+          setError('Container stopped');
+        }
+        
+      } catch (err) {
+        console.error('Error polling status:', err);
+      }
+    };
+    
+    // Poll immediately and every 2 seconds
+    pollState();
+    const interval = setInterval(pollState, 2000);
+    
+    return () => clearInterval(interval);
+  }, [pageState, sessionId, authToken]);
 
   // Stop microphone capture
   const stopMicrophone = useCallback(() => {

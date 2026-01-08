@@ -25,10 +25,10 @@ def load_yaml_from_s3(key: str) -> Dict[str, Any]:
         response = s3_client.get_object(Bucket=CONFIG_BUCKET, Key=key)
         content = response['Body'].read().decode('utf-8')
         data = yaml.safe_load(content)
-        logger.debug("Loaded config from S3", bucket=CONFIG_BUCKET, key=key)
+        logger.debug(f"Loaded config from S3: {CONFIG_BUCKET}/{key}")
         return data
     except Exception as e:
-        logger.error("Failed to load config from S3", bucket=CONFIG_BUCKET, key=key, error=str(e))
+        logger.error(f"Failed to load config from S3: {CONFIG_BUCKET}/{key} - {e}")
         raise
 
 

@@ -76,49 +76,67 @@ def cors_response(status_code, body):
     }
 
 
-# Cache for users loaded from S3 (refreshed on each Lambda invocation)
+# Cache for users loaded from Secrets Manager (refreshed on each Lambda invocation)
 _cached_users = None
 _cached_user_names = None
 
 
-def get_users_from_s3():
-    """Load users from S3 config bucket.
+def _is_uuid(s: str) -> bool:
+    """Check if string looks like a UUID."""
+    import re
+    uuid_pattern = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$', re.IGNORECASE)
+    return bool(uuid_pattern.match(s))
+
+
+def get_users_from_secrets_manager():
+    """Discover users from Secrets Manager based on secret naming pattern.
     
+    Looks for secrets matching 'production/kalshi/users/*/metadata' pattern.
     Returns list of user dicts with user_name and enabled status.
     Caches result for validation purposes.
     """
     global _cached_users, _cached_user_names
     
     try:
-        response = s3_client.get_object(Bucket=CONFIG_BUCKET, Key='user_idea_assignments.yaml')
-        content = response['Body'].read().decode('utf-8')
-        data = yaml.safe_load(content)
-        
+        secrets_client = boto3.client('secretsmanager')
         users = []
-        for user_config in data.get('users', []):
-            if user_config.get('enabled', True):
-                users.append({
-                    'user_name': user_config.get('user_name'),
-                    'enabled': user_config.get('enabled', True)
-                })
+        
+        paginator = secrets_client.get_paginator('list_secrets')
+        for page in paginator.paginate(
+            Filters=[{'Key': 'name', 'Values': ['production/kalshi/users/']}]
+        ):
+            for secret in page.get('SecretList', []):
+                name = secret.get('Name', '')
+                # Parse 'production/kalshi/users/jimc/metadata' -> 'jimc'
+                if name.endswith('/metadata'):
+                    parts = name.split('/')
+                    if len(parts) >= 4:
+                        username = parts[3]
+                        # Skip UUIDs
+                        if not _is_uuid(username):
+                            users.append({
+                                'user_name': username,
+                                'enabled': True
+                            })
         
         # Cache for validation
         _cached_users = users
         _cached_user_names = {u['user_name'] for u in users}
+        print(f"Discovered {len(users)} users from Secrets Manager: {[u['user_name'] for u in users]}")
         return users
     except Exception as e:
-        print(f"Error loading users from S3: {e}")
+        print(f"Error discovering users from Secrets Manager: {e}")
         # Return cached if available, otherwise empty
         return _cached_users if _cached_users else []
 
 
 def is_valid_user(user_name: str) -> bool:
-    """Check if user_name exists in the S3 config."""
+    """Check if user_name exists in Secrets Manager."""
     global _cached_user_names
     
     # If cache is empty, try to load
     if _cached_user_names is None:
-        get_users_from_s3()
+        get_users_from_secrets_manager()
     
     return _cached_user_names and user_name in _cached_user_names
 
@@ -154,8 +172,8 @@ def get_trading_status():
                 'triggered_by': item.get('triggered_by', '')
             }
         
-        # Get users from S3
-        users = get_users_from_s3()
+        # Get users from Secrets Manager
+        users = get_users_from_secrets_manager()
         
         # Get all per-user/per-idea toggles with pagination handling
         user_idea_toggles = {}

@@ -81,8 +81,7 @@ def get_upcoming_events(event):
     Returns events with:
     - event_ticker
     - title
-    - scheduled_start (from milestone API)
-    - close_time
+    - start_date (ISO format)
     - markets (list of words being tracked)
     """
     events_table = dynamodb.Table(MENTION_EVENTS_TABLE)
@@ -94,7 +93,6 @@ def get_upcoming_events(event):
     cutoff = now + timedelta(hours=24)
     
     # Scan for mention events
-    # In production, this should use a GSI on category + close_time
     mention_events = []
     
     # Scan mention events table
@@ -109,16 +107,25 @@ def get_upcoming_events(event):
         result = events_table.scan(**scan_params)
         items.extend(result.get('Items', []))
     
-    # Filter by time and enrich with market data
+    # Filter by start_date and enrich with market data
     for item in items:
-        close_time = item.get('close_time', 0)
-        
-        # Skip past events
-        if close_time < now.timestamp():
+        # Parse start_date (ISO format string like "2026-01-08T15:30:00+00:00")
+        start_date_str = item.get('start_date', '')
+        if not start_date_str:
+            continue
+            
+        try:
+            start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00'))
+        except (ValueError, TypeError):
             continue
         
-        # Skip events more than 24h out (for now - could make configurable)
-        # Actually, include all future events and let UI filter
+        # Skip past events
+        if start_date < now:
+            continue
+        
+        # Skip events more than 24h out
+        if start_date > cutoff:
+            continue
         
         event_ticker = item.get('event_ticker', '')
         
@@ -157,21 +164,25 @@ def get_upcoming_events(event):
         except:
             state_item = {}
         
+        # Calculate hours until start
+        hours_until_start = round((start_date - now).total_seconds() / 3600, 1)
+        
         mention_events.append({
             'event_ticker': event_ticker,
             'title': item.get('title', ''),
+            'sub_title': item.get('sub_title', ''),
             'category': item.get('category', ''),
-            'close_time': close_time,
-            'close_time_iso': datetime.fromtimestamp(close_time, tz=timezone.utc).isoformat() if close_time else None,
-            'scheduled_start': item.get('scheduled_start'),  # From milestone API if populated
+            'start_date': start_date_str,
+            'strike_date': item.get('strike_date', ''),
+            'hours_until_start': hours_until_start,
             'words': words,
             'word_count': len(words),
             'container_status': state_item.get('status', 'not_running'),
             'container_task_arn': state_item.get('task_arn')
         })
     
-    # Sort by close_time
-    mention_events.sort(key=lambda x: x.get('close_time', 0))
+    # Sort by start_date ascending (soonest first)
+    mention_events.sort(key=lambda x: x.get('start_date', ''))
     
     return response(200, {
         'events': mention_events,

@@ -98,6 +98,13 @@ export default function VoiceTraderPage() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   
+  // Microphone state for two-way audio
+  const [micEnabled, setMicEnabled] = useState(false);
+  const [micActive, setMicActive] = useState(false);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioWorkletRef = useRef<AudioWorkletNode | null>(null);
+  const micContextRef = useRef<AudioContext | null>(null);
+  
   // Dialpad state
   const [dialpadInput, setDialpadInput] = useState('');
   
@@ -203,8 +210,121 @@ export default function VoiceTraderPage() {
         audioContextRef.current.close();
         audioContextRef.current = null;
       }
+      // Cleanup microphone
+      stopMicrophone();
     };
   }, [pageState, wsUrl]);
+
+  // Stop microphone capture
+  const stopMicrophone = useCallback(() => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    if (audioWorkletRef.current) {
+      audioWorkletRef.current.disconnect();
+      audioWorkletRef.current = null;
+    }
+    if (micContextRef.current) {
+      micContextRef.current.close();
+      micContextRef.current = null;
+    }
+    setMicActive(false);
+  }, []);
+
+  // Start microphone capture and send audio to WebSocket
+  const startMicrophone = useCallback(async () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.error('WebSocket not connected');
+      return;
+    }
+
+    try {
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: 8000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        }
+      });
+      mediaStreamRef.current = stream;
+
+      // Create audio context for processing
+      const audioContext = new AudioContext({ sampleRate: 8000 });
+      micContextRef.current = audioContext;
+
+      // Create source from microphone
+      const source = audioContext.createMediaStreamSource(stream);
+
+      // Create script processor for capturing audio (using deprecated API as fallback)
+      // In production, use AudioWorklet for better performance
+      const bufferSize = 2048;
+      const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+
+      processor.onaudioprocess = (e) => {
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+        const inputData = e.inputBuffer.getChannelData(0);
+        
+        // Convert Float32 PCM to mu-law
+        const mulawData = new Uint8Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          mulawData[i] = linearToMulaw(inputData[i]);
+        }
+
+        // Send as binary data to WebSocket
+        wsRef.current.send(mulawData.buffer);
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      setMicActive(true);
+      console.log('Microphone capture started');
+    } catch (err) {
+      console.error('Failed to start microphone:', err);
+      setError('Microphone access denied. Please allow microphone access to speak to the call.');
+    }
+  }, []);
+
+  // Toggle microphone
+  const toggleMicrophone = useCallback(async () => {
+    if (micActive) {
+      stopMicrophone();
+    } else {
+      await startMicrophone();
+    }
+  }, [micActive, startMicrophone, stopMicrophone]);
+
+  // Linear PCM to mu-law conversion
+  const linearToMulaw = (sample: number): number => {
+    const MULAW_MAX = 0x1FFF;
+    const MULAW_BIAS = 33;
+    const sign = sample < 0 ? 0x80 : 0;
+    
+    if (sample < 0) sample = -sample;
+    
+    // Clamp and scale to 16-bit range
+    sample = Math.min(sample * 32768, 32767);
+    
+    // Add bias
+    sample += MULAW_BIAS;
+    
+    // Find segment
+    let exponent = 7;
+    for (let expMask = 0x4000; (sample & expMask) === 0 && exponent > 0; expMask >>= 1) {
+      exponent--;
+    }
+    
+    // Calculate mantissa
+    const mantissa = (sample >> (exponent + 3)) & 0x0F;
+    
+    // Combine and complement
+    return ~(sign | (exponent << 4) | mantissa) & 0xFF;
+  };
 
   // Initialize audio context for playback
   const initAudioContext = useCallback(() => {
@@ -681,14 +801,16 @@ export default function VoiceTraderPage() {
         )}
         
         {/* Audio Controls */}
-        <div className="bg-gray-800 rounded-lg p-3 mb-4 flex items-center gap-4">
+        <div className="bg-gray-800 rounded-lg p-3 mb-4 flex items-center gap-4 flex-wrap">
+          {/* Call audio status */}
           <div className="flex items-center gap-2">
             <span className={`w-3 h-3 rounded-full ${audioActive ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`} />
             <span className="text-sm text-gray-400">
-              {audioActive ? 'Audio Active' : 'No Audio'}
+              {audioActive ? 'Call Audio Active' : 'No Audio'}
             </span>
           </div>
           
+          {/* Hear call (speaker) */}
           <button
             onClick={() => {
               setAudioMuted(!audioMuted);
@@ -699,10 +821,10 @@ export default function VoiceTraderPage() {
             }}
             className={`px-3 py-1 rounded text-sm ${audioMuted ? 'bg-red-600' : 'bg-gray-700'}`}
           >
-            {audioMuted ? '🔇 Unmute' : '🔊 Mute'}
+            {audioMuted ? '🔇 Hear Call' : '🔊 Muted'}
           </button>
           
-          <div className="flex items-center gap-2 flex-1 max-w-xs">
+          <div className="flex items-center gap-2 max-w-[150px]">
             <span className="text-sm text-gray-400">Vol:</span>
             <input
               type="range"
@@ -716,8 +838,30 @@ export default function VoiceTraderPage() {
             <span className="text-sm text-gray-400 w-8">{Math.round(audioVolume * 100)}%</span>
           </div>
           
+          {/* Divider */}
+          <div className="h-6 w-px bg-gray-600 mx-2" />
+          
+          {/* Speak to call (microphone) */}
+          <button
+            onClick={toggleMicrophone}
+            className={`px-3 py-1 rounded text-sm flex items-center gap-2 ${
+              micActive 
+                ? 'bg-green-600 hover:bg-green-700' 
+                : 'bg-blue-600 hover:bg-blue-700'
+            }`}
+          >
+            {micActive ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                🎤 Speaking...
+              </>
+            ) : (
+              '🎤 Speak to Call'
+            )}
+          </button>
+          
           <div className="text-xs text-gray-500 ml-auto">
-            💡 Click Unmute to hear the live call audio
+            💡 Click "Speak to Call" to talk to the conference operator
           </div>
         </div>
         

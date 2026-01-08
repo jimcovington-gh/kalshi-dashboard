@@ -34,6 +34,7 @@ interface Speaker {
 
 interface ContainerState {
   call_state: string;
+  status_message: string;
   qa_started: boolean;
   speakers: {
     valid_count: number;
@@ -93,6 +94,9 @@ export default function VoiceTraderPage() {
   const [audioActive, setAudioActive] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+  
+  // Dialpad state
+  const [dialpadInput, setDialpadInput] = useState('');
   
   // Auth token
   const [authToken, setAuthToken] = useState<string | null>(null);
@@ -354,6 +358,13 @@ export default function VoiceTraderPage() {
     }
   };
 
+  const sendDtmf = (digits: string) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && digits) {
+      wsRef.current.send(JSON.stringify({ type: 'send_dtmf', digits }));
+      setDialpadInput('');
+    }
+  };
+
   const handleStop = async () => {
     if (!sessionId || !authToken) return;
     
@@ -609,7 +620,7 @@ export default function VoiceTraderPage() {
           <div>
             <h1 className="text-xl font-bold">{selectedEvent.title}</h1>
             <div className={`text-sm ${getCallStateColor(containerState?.call_state || '')}`}>
-              Status: {containerState?.call_state || 'Unknown'}
+              {containerState?.status_message || containerState?.call_state || 'Connecting...'}
               {containerState?.qa_started && ' • Q&A Active'}
             </div>
           </div>
@@ -730,6 +741,42 @@ export default function VoiceTraderPage() {
                   </div>
                 </div>
               )}
+            </div>
+            
+            {/* Dialpad */}
+            <div className="bg-gray-800 rounded-lg p-4">
+              <h2 className="font-semibold mb-2">Dialpad</h2>
+              <div className="space-y-2">
+                <div className="flex gap-1">
+                  <input
+                    type="text"
+                    value={dialpadInput}
+                    onChange={(e) => setDialpadInput(e.target.value.replace(/[^0-9*#]/g, ''))}
+                    onKeyDown={(e) => e.key === 'Enter' && sendDtmf(dialpadInput)}
+                    placeholder="Enter digits..."
+                    className="flex-1 bg-gray-700 px-2 py-1 rounded text-sm font-mono"
+                    maxLength={20}
+                  />
+                  <button
+                    onClick={() => sendDtmf(dialpadInput)}
+                    disabled={!dialpadInput}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 px-3 py-1 rounded text-sm"
+                  >
+                    Send
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-1">
+                  {['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'].map(d => (
+                    <button
+                      key={d}
+                      onClick={() => sendDtmf(d)}
+                      className="bg-gray-700 hover:bg-gray-600 py-2 rounded text-lg font-mono"
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
             
             {/* Speakers */}

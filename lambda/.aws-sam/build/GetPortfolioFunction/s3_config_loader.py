@@ -100,6 +100,8 @@ def _discover_users_from_secrets() -> List[str]:
                         if not _is_uuid(username):
                             users.append(username)
         
+        # Sort for consistent ordering across invocations (critical for round-robin rotation)
+        users.sort()
         logger.debug(f"Discovered users from Secrets Manager: {users}")
         return users
     except Exception as e:

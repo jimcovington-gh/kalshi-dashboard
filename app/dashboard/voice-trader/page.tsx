@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 interface MentionEvent {
   event_ticker: string;
@@ -65,11 +65,16 @@ const API_BASE = 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod';
 
 export default function VoiceTraderPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [pageState, setPageState] = useState<PageState>('loading');
   const [events, setEvents] = useState<MentionEvent[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<MentionEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  
+  // Track if we need to send dial command after cert acceptance
+  const [pendingDial, setPendingDial] = useState(false);
+  const [certAccepted, setCertAccepted] = useState(false);
   
   // Setup form state
   const [audioSource, setAudioSource] = useState<'phone' | 'web'>('phone');
@@ -115,6 +120,26 @@ export default function VoiceTraderPage() {
   // Auth token
   const [authToken, setAuthToken] = useState<string | null>(null);
 
+  // Check for cert_accepted param on load (redirect back from cert page)
+  useEffect(() => {
+    const certParam = searchParams.get('cert_accepted');
+    const savedSession = searchParams.get('session_id');
+    
+    if (certParam === 'true') {
+      console.log('Certificate accepted, will send dial command');
+      setCertAccepted(true);
+      setPendingDial(true);
+      
+      // Restore session if passed
+      if (savedSession) {
+        setSessionId(savedSession);
+      }
+      
+      // Clean URL params
+      router.replace('/dashboard/voice-trader', { scroll: false });
+    }
+  }, [searchParams, router]);
+
   // Fetch auth token on mount
   useEffect(() => {
     async function getAuth() {
@@ -134,6 +159,33 @@ export default function VoiceTraderPage() {
     }
     getAuth();
   }, [router]);
+
+  // Restore session after cert acceptance redirect
+  useEffect(() => {
+    if (!certAccepted || !authToken) return;
+    
+    const savedData = sessionStorage.getItem('voice_trader_session');
+    if (savedData) {
+      try {
+        const { sessionId: savedSessionId, wsUrl: savedWsUrl, certAcceptUrl: savedCertUrl, event } = JSON.parse(savedData);
+        
+        setSessionId(savedSessionId);
+        setWsUrl(savedWsUrl);
+        setCertAcceptUrl(savedCertUrl);
+        if (event) setSelectedEvent(event);
+        
+        // Go to monitoring page
+        setPageState('monitoring');
+        
+        // Clear saved data
+        sessionStorage.removeItem('voice_trader_session');
+        
+        console.log('Session restored after cert acceptance, will send dial command when WebSocket connects');
+      } catch (err) {
+        console.error('Error restoring session:', err);
+      }
+    }
+  }, [certAccepted, authToken]);
 
   // Fetch events
   useEffect(() => {
@@ -174,6 +226,14 @@ export default function VoiceTraderPage() {
       ws.onopen = () => {
         console.log('Connected to voice trader WebSocket');
         setWsConnected(true);
+        
+        // If we just came back from cert acceptance, send dial command
+        if (pendingDial) {
+          console.log('Sending dial command after cert acceptance');
+          ws?.send(JSON.stringify({ type: 'dial' }));
+          setPendingDial(false);
+        }
+        
         // Request audio streaming
         ws?.send(JSON.stringify({ type: 'enable_audio_stream' }));
       };
@@ -553,14 +613,28 @@ export default function VoiceTraderPage() {
         
         const data = await response.json();
         
-        if (data.websocket_url) {
-          setLaunchStatus('Connected!');
+        if (data.websocket_url && data.cert_accept_url) {
           setWsUrl(data.websocket_url);
-          if (data.cert_accept_url) {
-            setCertAcceptUrl(data.cert_accept_url);
-          }
-          setPageState('monitoring');
-          setLaunching(false);
+          setCertAcceptUrl(data.cert_accept_url);
+          
+          // Redirect to cert acceptance page
+          // The cert page will redirect back with ?cert_accepted=true&session_id=...
+          setLaunchStatus('Redirecting to accept certificate...');
+          
+          // Build return URL with session info
+          const returnUrl = `${window.location.origin}/dashboard/voice-trader?cert_accepted=true&session_id=${sessionId}`;
+          const certUrl = `${data.cert_accept_url}?return_url=${encodeURIComponent(returnUrl)}`;
+          
+          // Store session data before redirect
+          sessionStorage.setItem('voice_trader_session', JSON.stringify({
+            sessionId,
+            wsUrl: data.websocket_url,
+            certAcceptUrl: data.cert_accept_url,
+            event: selectedEvent
+          }));
+          
+          // Redirect to cert page (which will redirect back after acceptance)
+          window.location.href = certUrl;
           return;
         }
         
@@ -887,12 +961,12 @@ export default function VoiceTraderPage() {
           </div>
         )}
         
-        {/* Certificate acceptance message - show when WebSocket not connected but we have a cert URL */}
-        {!wsConnected && certAcceptUrl && (
+        {/* Certificate acceptance message - only show if WebSocket failed to connect after cert redirect */}
+        {!wsConnected && certAcceptUrl && !pendingDial && (
           <div className="bg-yellow-900 border border-yellow-600 text-yellow-200 px-4 py-3 rounded mb-4">
-            <div className="font-semibold mb-1">🔐 Microphone requires certificate acceptance</div>
+            <div className="font-semibold mb-1">🔐 WebSocket Connection Failed</div>
             <div className="text-sm">
-              To enable the microphone for talking to the operator, you must accept the self-signed certificate:
+              If the microphone is not working, you may need to manually accept the certificate:
               <ol className="list-decimal ml-5 mt-2">
                 <li>
                   <a 
@@ -905,7 +979,7 @@ export default function VoiceTraderPage() {
                   </a>
                 </li>
                 <li>Click &quot;Advanced&quot; → &quot;Proceed to {certAcceptUrl?.replace('https://', '').split(':')[0]} (unsafe)&quot;</li>
-                <li>Return to this tab - the mic button will become active</li>
+                <li>Return to this tab and refresh the page</li>
               </ol>
             </div>
           </div>

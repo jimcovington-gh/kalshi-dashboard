@@ -61,7 +61,7 @@ interface TranscriptSegment {
 
 type PageState = 'loading' | 'events' | 'setup' | 'monitoring';
 
-const API_BASE = 'https://5uthw49k2c.execute-api.us-east-1.amazonaws.com/prod';
+const API_BASE = 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod';
 
 export default function VoiceTraderPage() {
   const router = useRouter();

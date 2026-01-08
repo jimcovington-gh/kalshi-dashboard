@@ -801,8 +801,8 @@ export default function VoiceTraderPage() {
         )}
         
         {/* Audio Controls */}
-        <div className="bg-gray-800 rounded-lg p-3 mb-4 flex items-center gap-4 flex-wrap">
-          {/* Call audio status - use audioActive as primary indicator of connection */}
+        <div className="bg-gray-800 rounded-lg p-3 mb-4 flex items-center gap-3 flex-wrap">
+          {/* Call status indicator */}
           <div className="flex items-center gap-2">
             <span className={`w-3 h-3 rounded-full ${audioActive ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`} />
             <span className={`text-sm ${audioActive ? 'text-green-400' : 'text-gray-400'}`}>
@@ -810,22 +810,28 @@ export default function VoiceTraderPage() {
             </span>
           </div>
           
-          {/* Hear call (speaker) */}
-          <button
-            onClick={() => {
-              setAudioMuted(!audioMuted);
-              // Resume audio context on user interaction (required by browsers)
-              if (audioContextRef.current?.state === 'suspended') {
-                audioContextRef.current.resume();
-              }
-            }}
-            className={`px-3 py-1 rounded text-sm transition-all duration-100 active:scale-95 active:brightness-75 ${audioMuted ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-700 hover:bg-gray-600'}`}
-          >
-            {audioMuted ? '🔇 Unmute' : '🔊 Mute'}
-          </button>
+          {/* Divider */}
+          <div className="h-6 w-px bg-gray-600" />
           
-          <div className="flex items-center gap-2 max-w-[150px]">
-            <span className="text-sm text-gray-400">Vol:</span>
+          {/* Speaker control (incoming call audio) */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setAudioMuted(!audioMuted);
+                // Resume audio context on user interaction (required by browsers)
+                if (audioContextRef.current?.state === 'suspended') {
+                  audioContextRef.current.resume();
+                }
+              }}
+              className={`px-3 py-1.5 rounded text-sm transition-all duration-100 active:scale-95 active:brightness-75 flex items-center gap-1.5 ${
+                audioMuted 
+                  ? 'bg-red-600 hover:bg-red-700' 
+                  : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+              title="Mute/unmute incoming call audio"
+            >
+              {audioMuted ? '🔇' : '🔊'} Speaker
+            </button>
             <input
               type="range"
               min="0"
@@ -833,35 +839,36 @@ export default function VoiceTraderPage() {
               step="0.1"
               value={audioVolume}
               onChange={(e) => setAudioVolume(parseFloat(e.target.value))}
-              className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+              className="w-16 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+              title="Speaker volume"
             />
-            <span className="text-sm text-gray-400 w-8">{Math.round(audioVolume * 100)}%</span>
           </div>
           
           {/* Divider */}
-          <div className="h-6 w-px bg-gray-600 mx-2" />
+          <div className="h-6 w-px bg-gray-600" />
           
-          {/* Speak to call (microphone) */}
+          {/* Microphone control (outgoing user audio) */}
           <button
             onClick={toggleMicrophone}
-            className={`px-3 py-1 rounded text-sm flex items-center gap-2 transition-all duration-100 active:scale-95 active:brightness-75 ${
+            className={`px-3 py-1.5 rounded text-sm flex items-center gap-1.5 transition-all duration-100 active:scale-95 active:brightness-75 ${
               micActive 
-                ? 'bg-red-600 hover:bg-red-700' 
-                : 'bg-blue-600 hover:bg-blue-700'
+                ? 'bg-green-600 hover:bg-green-700' 
+                : 'bg-gray-700 hover:bg-gray-600'
             }`}
+            title="Toggle your microphone to speak to the call"
           >
             {micActive ? (
               <>
                 <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                🎤 Stop Speaking
+                🎤 Mic On
               </>
             ) : (
-              '🎤 Speak to Call'
+              '🎤 Mic Off'
             )}
           </button>
           
-          <div className="text-xs text-gray-500 ml-auto hidden sm:block">
-            💡 Click "Speak to Call" to talk to the conference operator
+          <div className="text-xs text-gray-500 ml-auto hidden lg:block">
+            🔊 = hear call &nbsp;|&nbsp; 🎤 = talk to operator
           </div>
         </div>
         

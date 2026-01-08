@@ -73,13 +73,67 @@ def get_latest_idea_version(idea_id: str) -> Dict[str, Any]:
     raise ValueError(f"Latest version {latest_version} not found in versions list for {idea_id}")
 
 
-def load_user_assignments() -> Dict[str, Any]:
-    """Load user idea assignments from S3.
+def _discover_users_from_secrets() -> List[str]:
+    """Discover users from Secrets Manager based on secret naming pattern.
+    
+    Looks for secrets matching 'production/kalshi/users/*/metadata' pattern.
     
     Returns:
-        Dict with user assignments configuration
+        List of usernames discovered from Secrets Manager
     """
-    return load_yaml_from_s3('user_idea_assignments.yaml')
+    secrets_client = boto3.client('secretsmanager')
+    users = []
+    
+    try:
+        paginator = secrets_client.get_paginator('list_secrets')
+        for page in paginator.paginate(
+            Filters=[{'Key': 'name', 'Values': ['production/kalshi/users/']}]
+        ):
+            for secret in page.get('SecretList', []):
+                name = secret.get('Name', '')
+                # Parse 'production/kalshi/users/jimc/metadata' -> 'jimc'
+                if name.endswith('/metadata'):
+                    parts = name.split('/')
+                    if len(parts) >= 4:
+                        username = parts[3]  # production/kalshi/users/<username>/metadata
+                        # Skip UUIDs (like ad88f20e-dc9c-45d2-a0ec-e0782c3e23d8)
+                        if not _is_uuid(username):
+                            users.append(username)
+        
+        logger.debug(f"Discovered users from Secrets Manager: {users}")
+        return users
+    except Exception as e:
+        logger.error(f"Failed to discover users from Secrets Manager: {e}")
+        return []
+
+
+def _is_uuid(s: str) -> bool:
+    """Check if string looks like a UUID."""
+    import re
+    uuid_pattern = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$', re.IGNORECASE)
+    return bool(uuid_pattern.match(s))
+
+
+def load_user_assignments() -> Dict[str, Any]:
+    """Build user assignments dynamically from Secrets Manager.
+    
+    Users are discovered from Secrets Manager (production/kalshi/users/*/metadata).
+    For dashboard portfolio view, all discovered users are considered enabled.
+    
+    Returns:
+        Dict with user assignments: {'users': [{'user_name': 'jimc', 'enabled': True}]}
+    """
+    users = _discover_users_from_secrets()
+    
+    result = {'users': []}
+    for user_name in users:
+        result['users'].append({
+            'user_name': user_name,
+            'enabled': True
+        })
+    
+    logger.debug(f"Built user assignments dynamically: {[u['user_name'] for u in result['users']]}")
+    return result
 
 
 def load_lambda_registry() -> Dict[str, Any]:
@@ -92,35 +146,21 @@ def load_lambda_registry() -> Dict[str, Any]:
 
 
 def get_users_for_idea(idea_id: str) -> List[str]:
-    """Get list of users assigned to a specific idea.
+    """Get list of all users (dashboard doesn't filter by idea).
     
     Args:
-        idea_id: Trading idea identifier
+        idea_id: Trading idea identifier (ignored for dashboard)
     
     Returns:
-        List of usernames enabled for this idea
+        List of all usernames from Secrets Manager
     """
-    assignments = load_user_assignments()
-    users = []
-    
-    for user_config in assignments.get('users', []):
-        if not user_config.get('enabled', True):
-            continue
-            
-        user_name = user_config.get('user_name')
-        for idea in user_config.get('ideas', []):
-            if idea.get('idea_id') == idea_id and idea.get('enabled', True):
-                users.append(user_name)
-                break
-    
-    return users
+    return _discover_users_from_secrets()
 
 
 def get_all_enabled_users() -> List[str]:
-    """Get list of all enabled users.
+    """Get list of all users from Secrets Manager.
     
     Returns:
-        List of all enabled usernames
+        List of all usernames discovered from Secrets Manager
     """
-    assignments = load_user_assignments()
-    return [u['user_name'] for u in assignments.get('users', []) if u.get('enabled', True)]
+    return _discover_users_from_secrets()

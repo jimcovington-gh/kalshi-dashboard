@@ -7,9 +7,8 @@ import { useRouter } from 'next/navigation';
 interface MentionEvent {
   event_ticker: string;
   title: string;
-  close_time: number;
-  close_time_iso: string;
-  scheduled_start?: string;
+  start_date: string;  // ISO format
+  hours_until_start: number;
   words: { market_ticker: string; word: string }[];
   word_count: number;
   container_status: string;
@@ -79,6 +78,10 @@ export default function VoiceTraderPage() {
   const [webUrl, setWebUrl] = useState('');
   const [scheduledStart, setScheduledStart] = useState('');
   const [qaDetectionEnabled, setQaDetectionEnabled] = useState(true);
+  
+  // Launch state
+  const [launching, setLaunching] = useState(false);
+  const [launchStatus, setLaunchStatus] = useState('');
   
   // Monitoring state
   const [containerState, setContainerState] = useState<ContainerState | null>(null);
@@ -276,6 +279,10 @@ export default function VoiceTraderPage() {
       return;
     }
     
+    setLaunching(true);
+    setLaunchStatus('Preparing launch...');
+    setError(null);
+    
     try {
       const body: any = {
         event_ticker: selectedEvent.event_ticker,
@@ -296,6 +303,8 @@ export default function VoiceTraderPage() {
         body.scheduled_start = scheduledStart;
       }
       
+      setLaunchStatus('Launching container...');
+      
       const response = await fetch(`${API_BASE}/voice-trader/launch`, {
         method: 'POST',
         headers: {
@@ -314,11 +323,15 @@ export default function VoiceTraderPage() {
       // Save session ID for status polling
       setSessionId(data.session_id);
       
+      setLaunchStatus('Container launched! Waiting for it to be ready...');
+      
       // Poll for container to be ready
       await waitForContainer(data.session_id);
       
     } catch (err: any) {
       setError(err.message);
+      setLaunchStatus('');
+      setLaunching(false);
     }
   };
 
@@ -326,6 +339,8 @@ export default function VoiceTraderPage() {
     // Poll status until we get WebSocket URL
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 2000));
+      
+      setLaunchStatus(`Waiting for container... (${i * 2}s)`);
       
       try {
         const response = await fetch(`${API_BASE}/voice-trader/status/${sessionId}`, {
@@ -335,8 +350,10 @@ export default function VoiceTraderPage() {
         const data = await response.json();
         
         if (data.websocket_url) {
+          setLaunchStatus('Connected!');
           setWsUrl(data.websocket_url);
           setPageState('monitoring');
+          setLaunching(false);
           return;
         }
         
@@ -348,6 +365,8 @@ export default function VoiceTraderPage() {
       }
     }
     
+    setLaunching(false);
+    setLaunchStatus('');
     throw new Error('Container did not start in time');
   };
 
@@ -440,7 +459,12 @@ export default function VoiceTraderPage() {
                   </div>
                   <div className="text-right">
                     <div className="text-sm text-gray-400">
-                      Closes: {new Date(event.close_time * 1000).toLocaleString()}
+                      Starts: {new Date(event.start_date).toLocaleString()}
+                    </div>
+                    <div className="text-sm text-yellow-400">
+                      {event.hours_until_start < 1 
+                        ? `${Math.round(event.hours_until_start * 60)} min` 
+                        : `${event.hours_until_start.toFixed(1)} hrs`} until start
                     </div>
                     <div className="text-sm text-blue-400">
                       {event.word_count} words to track
@@ -588,10 +612,18 @@ export default function VoiceTraderPage() {
           <div className="mt-8">
             <button
               onClick={handleLaunch}
-              className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded"
+              disabled={launching}
+              className={`w-full font-bold py-3 px-4 rounded ${
+                launching 
+                  ? 'bg-gray-600 cursor-not-allowed' 
+                  : 'bg-green-600 hover:bg-green-700'
+              } text-white`}
             >
-              🚀 Launch Voice Trader
+              {launching ? '⏳ ' + (launchStatus || 'Launching...') : '🚀 Launch Voice Trader'}
             </button>
+            {launchStatus && !launching && (
+              <p className="text-center text-gray-400 text-sm mt-2">{launchStatus}</p>
+            )}
           </div>
         </div>
         

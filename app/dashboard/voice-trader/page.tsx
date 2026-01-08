@@ -148,12 +148,21 @@ export default function VoiceTraderPage() {
     
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    ws.binaryType = 'arraybuffer'; // Enable binary data for audio
     
     ws.onopen = () => {
       console.log('Connected to voice trader');
+      // Request audio streaming
+      ws.send(JSON.stringify({ type: 'enable_audio_stream' }));
     };
     
     ws.onmessage = (event) => {
+      // Handle binary audio data
+      if (event.data instanceof ArrayBuffer) {
+        playAudioChunk(event.data);
+        return;
+      }
+      
       const data = JSON.parse(event.data);
       
       if (data.type === 'full_state') {
@@ -166,6 +175,8 @@ export default function VoiceTraderPage() {
         console.log('Word triggered:', data.word);
       } else if (data.type === 'disconnect_alert') {
         setError(data.message);
+      } else if (data.type === 'audio_active') {
+        setAudioActive(data.active);
       }
     };
     
@@ -175,12 +186,73 @@ export default function VoiceTraderPage() {
     
     ws.onclose = () => {
       console.log('WebSocket closed');
+      setAudioActive(false);
     };
     
     return () => {
       ws.close();
+      // Cleanup audio context
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
     };
   }, [pageState, wsUrl]);
+
+  // Initialize audio context for playback
+  const initAudioContext = useCallback(() => {
+    if (!audioContextRef.current) {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
+        sampleRate: 8000 // Match Kinesis/Transcribe sample rate
+      });
+      audioContextRef.current = ctx;
+      
+      // Create gain node for volume control
+      const gainNode = ctx.createGain();
+      gainNode.connect(ctx.destination);
+      gainNode.gain.value = audioMuted ? 0 : audioVolume;
+      gainNodeRef.current = gainNode;
+    }
+    return audioContextRef.current;
+  }, [audioMuted, audioVolume]);
+
+  // Play incoming audio chunk
+  const playAudioChunk = useCallback((arrayBuffer: ArrayBuffer) => {
+    if (audioMuted) return;
+    
+    try {
+      const ctx = initAudioContext();
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+      
+      // Decode and play PCM audio (16-bit signed, 8kHz)
+      const int16Array = new Int16Array(arrayBuffer);
+      const floatArray = new Float32Array(int16Array.length);
+      
+      // Convert 16-bit to float
+      for (let i = 0; i < int16Array.length; i++) {
+        floatArray[i] = int16Array[i] / 32768.0;
+      }
+      
+      const audioBuffer = ctx.createBuffer(1, floatArray.length, 8000);
+      audioBuffer.copyToChannel(floatArray, 0);
+      
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(gainNodeRef.current || ctx.destination);
+      source.start();
+    } catch (err) {
+      console.error('Audio playback error:', err);
+    }
+  }, [audioMuted, initAudioContext]);
+
+  // Update volume when slider changes
+  useEffect(() => {
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.value = audioMuted ? 0 : audioVolume;
+    }
+  }, [audioVolume, audioMuted]);
 
   const handleSelectEvent = (event: MentionEvent) => {
     setSelectedEvent(event);
@@ -233,21 +305,24 @@ export default function VoiceTraderPage() {
         throw new Error(data.error || 'Failed to launch');
       }
       
+      // Save session ID for status polling
+      setSessionId(data.session_id);
+      
       // Poll for container to be ready
-      await waitForContainer(selectedEvent.event_ticker);
+      await waitForContainer(data.session_id);
       
     } catch (err: any) {
       setError(err.message);
     }
   };
 
-  const waitForContainer = async (eventTicker: string) => {
+  const waitForContainer = async (sessionId: string) => {
     // Poll status until we get WebSocket URL
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 2000));
       
       try {
-        const response = await fetch(`${API_BASE}/voice-trader/status/${eventTicker}`, {
+        const response = await fetch(`${API_BASE}/voice-trader/status/${sessionId}`, {
           headers: { Authorization: `Bearer ${authToken}` }
         });
         
@@ -272,22 +347,23 @@ export default function VoiceTraderPage() {
 
   const handleReconnect = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'reconnect_call' }));
+      wsRef.current.send(JSON.stringify({ type: 'redial' }));
       setError(null);
     }
   };
 
   const handleStop = async () => {
-    if (!selectedEvent || !authToken) return;
+    if (!sessionId || !authToken) return;
     
     try {
-      await fetch(`${API_BASE}/voice-trader/stop/${selectedEvent.event_ticker}`, {
+      await fetch(`${API_BASE}/voice-trader/stop/${sessionId}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${authToken}` }
       });
       
       setPageState('events');
       setSelectedEvent(null);
+      setSessionId(null);
     } catch (err) {
       console.error('Stop error:', err);
     }
@@ -541,7 +617,7 @@ export default function VoiceTraderPage() {
                 onClick={handleReconnect}
                 className="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded"
               >
-                📞 Reconnect
+                📞 Redial
               </button>
             )}
             <button
@@ -558,6 +634,47 @@ export default function VoiceTraderPage() {
             {error}
           </div>
         )}
+        
+        {/* Audio Controls */}
+        <div className="bg-gray-800 rounded-lg p-3 mb-4 flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className={`w-3 h-3 rounded-full ${audioActive ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`} />
+            <span className="text-sm text-gray-400">
+              {audioActive ? 'Audio Active' : 'No Audio'}
+            </span>
+          </div>
+          
+          <button
+            onClick={() => {
+              setAudioMuted(!audioMuted);
+              // Resume audio context on user interaction (required by browsers)
+              if (audioContextRef.current?.state === 'suspended') {
+                audioContextRef.current.resume();
+              }
+            }}
+            className={`px-3 py-1 rounded text-sm ${audioMuted ? 'bg-red-600' : 'bg-gray-700'}`}
+          >
+            {audioMuted ? '🔇 Unmute' : '🔊 Mute'}
+          </button>
+          
+          <div className="flex items-center gap-2 flex-1 max-w-xs">
+            <span className="text-sm text-gray-400">Vol:</span>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.1"
+              value={audioVolume}
+              onChange={(e) => setAudioVolume(parseFloat(e.target.value))}
+              className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+            />
+            <span className="text-sm text-gray-400 w-8">{Math.round(audioVolume * 100)}%</span>
+          </div>
+          
+          <div className="text-xs text-gray-500 ml-auto">
+            💡 Click Unmute to hear the live call audio
+          </div>
+        </div>
         
         <div className="grid grid-cols-3 gap-4">
           {/* Left column: Word Grid */}

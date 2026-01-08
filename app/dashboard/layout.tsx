@@ -88,6 +88,12 @@ export default function DashboardLayout({
                 >
                   InstaButton
                 </Link>
+                <Link
+                  href="/dashboard/voice-trader"
+                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-orange-600 hover:text-orange-800 hover:bg-orange-50"
+                >
+                  🎙️ Voice
+                </Link>
                 {isAdminUser && (
                   <Link
                     href="/dashboard/admin"

@@ -338,6 +338,8 @@ Resources:
             TableName: production-kalshi-voice-trader-state
         - DynamoDBReadPolicy:
             TableName: production-kalshi-mention-events
+        - DynamoDBReadPolicy:
+            TableName: production-kalshi-market-metadata
         - Statement:
             - Effect: Allow
               Action:
@@ -354,7 +356,7 @@ Resources:
               Action:
                 - iam:PassRole
               Resource:
-                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/production-fargate-task-execution-role'
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/production-voice-mention-trader-task-execution-role'
                 - !Sub 'arn:aws:iam::${AWS::AccountId}:role/production-voice-mention-trader-task-role'
         - Statement:
             - Effect: Allow
@@ -362,6 +364,11 @@ Resources:
                 - secretsmanager:GetSecretValue
               Resource:
                 - arn:aws:secretsmanager:us-east-1:355149669325:secret:production/kalshi/users/*
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ec2:DescribeNetworkInterfaces
+              Resource: '*'
       Events:
         GetEvents:
           Type: Api

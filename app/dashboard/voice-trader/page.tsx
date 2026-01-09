@@ -59,7 +59,7 @@ interface TranscriptSegment {
   speaker_id?: string;
 }
 
-type PageState = 'loading' | 'events' | 'setup' | 'monitoring';
+type PageState = 'loading' | 'events' | 'setup' | 'cert_pending' | 'monitoring';
 
 const API_BASE = 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod';
 
@@ -617,15 +617,7 @@ export default function VoiceTraderPage() {
           setWsUrl(data.websocket_url);
           setCertAcceptUrl(data.cert_accept_url);
           
-          // Redirect to cert acceptance page
-          // The cert page will redirect back with ?cert_accepted=true&session_id=...
-          setLaunchStatus('Redirecting to accept certificate...');
-          
-          // Build return URL with session info
-          const returnUrl = `${window.location.origin}/dashboard/voice-trader?cert_accepted=true&session_id=${sessionId}`;
-          const certUrl = `${data.cert_accept_url}?return_url=${encodeURIComponent(returnUrl)}`;
-          
-          // Store session data before redirect
+          // Store session data for after cert acceptance
           sessionStorage.setItem('voice_trader_session', JSON.stringify({
             sessionId,
             wsUrl: data.websocket_url,
@@ -633,8 +625,11 @@ export default function VoiceTraderPage() {
             event: selectedEvent
           }));
           
-          // Redirect to cert page (which will redirect back after acceptance)
-          window.location.href = certUrl;
+          // Show intermediate cert acceptance page instead of immediate redirect
+          // (Browsers don't handle redirects to self-signed certs well)
+          setLaunching(false);
+          setLaunchStatus('');
+          setPageState('cert_pending');
           return;
         }
         
@@ -919,6 +914,63 @@ export default function VoiceTraderPage() {
                 {w.word}
               </span>
             ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Certificate acceptance intermediate page
+  if (pageState === 'cert_pending' && certAcceptUrl && selectedEvent) {
+    const returnUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/dashboard/voice-trader?cert_accepted=true&session_id=${sessionId}`;
+    const certUrl = `${certAcceptUrl}?return_url=${encodeURIComponent(returnUrl)}`;
+    
+    return (
+      <div className="min-h-screen bg-gray-900 text-white p-4 flex items-center justify-center">
+        <div className="max-w-lg w-full">
+          <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
+            <div className="text-center mb-6">
+              <div className="text-5xl mb-4">🔐</div>
+              <h1 className="text-2xl font-bold mb-2">Accept Security Certificate</h1>
+              <p className="text-gray-400">
+                One more step to enable real-time audio
+              </p>
+            </div>
+            
+            <div className="bg-gray-700 rounded-lg p-4 mb-6">
+              <h3 className="font-semibold mb-3">Steps:</h3>
+              <ol className="list-decimal list-inside space-y-3 text-sm text-gray-300">
+                <li>Click the button below to open the certificate page</li>
+                <li>Your browser will show a security warning - this is expected</li>
+                <li>Click <span className="text-yellow-400 font-medium">&quot;Advanced&quot;</span> then <span className="text-yellow-400 font-medium">&quot;Proceed&quot;</span></li>
+                <li>You&apos;ll be automatically redirected back here</li>
+              </ol>
+            </div>
+            
+            <a
+              href={certUrl}
+              className="block w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg text-center transition-colors"
+            >
+              Accept Certificate & Continue →
+            </a>
+            
+            <div className="mt-4 text-center">
+              <button
+                onClick={() => {
+                  setPageState('monitoring');
+                  setCertAccepted(true);
+                }}
+                className="text-gray-500 hover:text-gray-400 text-sm underline"
+              >
+                Skip (microphone won&apos;t work)
+              </button>
+            </div>
+            
+            <div className="mt-6 p-3 bg-gray-900 rounded text-xs text-gray-500">
+              <strong>Why is this needed?</strong> The voice trader uses a direct WebSocket 
+              connection for low-latency audio. Your browser needs to trust this connection 
+              for the microphone to work.
+            </div>
           </div>
         </div>
       </div>

@@ -53,6 +53,8 @@ def lambda_handler(event, context):
     try:
         if path.endswith('/events') and http_method == 'GET':
             return get_upcoming_events(event)
+        elif path.endswith('/running') and http_method == 'GET':
+            return get_running_containers(event)
         elif path.endswith('/launch') and http_method == 'POST':
             return launch_container(event)
         elif '/status/' in path and http_method == 'GET':
@@ -187,6 +189,114 @@ def get_upcoming_events(event):
     return response(200, {
         'events': mention_events,
         'count': len(mention_events)
+    })
+
+
+def get_running_containers(event):
+    """
+    Get all currently running voice trader containers.
+    
+    Returns list of running containers with their status, for reconnection.
+    """
+    state_table = dynamodb.Table(VOICE_TRADER_STATE_TABLE)
+    events_table = dynamodb.Table(MENTION_EVENTS_TABLE)
+    
+    # Scan for active sessions
+    running_containers = []
+    
+    result = state_table.scan()
+    items = result.get('Items', [])
+    
+    # Handle pagination
+    while 'LastEvaluatedKey' in result:
+        result = state_table.scan(ExclusiveStartKey=result['LastEvaluatedKey'])
+        items.extend(result.get('Items', []))
+    
+    for item in items:
+        status = item.get('status', '')
+        session_id = item.get('session_id', '')
+        task_arn = item.get('task_arn', '')
+        
+        # Skip stopped sessions
+        if status in ['stopped', 'failed', 'completed']:
+            continue
+        
+        # Skip old sessions (> 24 hours)
+        started_at = item.get('started_at', '')
+        if started_at:
+            try:
+                started_dt = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
+                if (datetime.now(timezone.utc) - started_dt).total_seconds() > 24 * 60 * 60:
+                    continue
+            except:
+                pass
+        
+        # Check ECS task status
+        public_ip = None
+        ecs_status = 'UNKNOWN'
+        if task_arn:
+            try:
+                tasks = ecs.describe_tasks(
+                    cluster=CLUSTER,
+                    tasks=[task_arn]
+                ).get('tasks', [])
+                
+                if tasks:
+                    task = tasks[0]
+                    ecs_status = task.get('lastStatus', 'UNKNOWN')
+                    
+                    # Skip if task is not running
+                    if ecs_status != 'RUNNING':
+                        continue
+                    
+                    # Get public IP
+                    attachments = task.get('attachments', [])
+                    for attachment in attachments:
+                        if attachment.get('type') == 'ElasticNetworkInterface':
+                            for detail in attachment.get('details', []):
+                                if detail.get('name') == 'networkInterfaceId':
+                                    eni_id = detail.get('value')
+                                    enis = ec2.describe_network_interfaces(
+                                        NetworkInterfaceIds=[eni_id]
+                                    ).get('NetworkInterfaces', [])
+                                    if enis:
+                                        public_ip = enis[0].get('Association', {}).get('PublicIp')
+                else:
+                    # Task not found, skip
+                    continue
+            except Exception as e:
+                print(f"Error checking task {task_arn}: {e}")
+                continue
+        
+        # Get event title
+        event_ticker = item.get('event_ticker', '')
+        title = event_ticker
+        try:
+            event_item = events_table.get_item(
+                Key={'event_ticker': event_ticker}
+            ).get('Item', {})
+            title = event_item.get('title', event_ticker)
+        except:
+            pass
+        
+        running_containers.append({
+            'session_id': session_id,
+            'event_ticker': event_ticker,
+            'title': title,
+            'user_name': item.get('user_name', ''),
+            'status': status,
+            'call_state': item.get('call_state', ''),
+            'started_at': started_at,
+            'public_ip': public_ip,
+            'websocket_url': f'wss://{public_ip}:8765' if public_ip else None
+        })
+    
+    # Sort by started_at descending (most recent first)
+    running_containers.sort(key=lambda x: x.get('started_at', ''), reverse=True)
+    
+    return response(200, {
+        'containers': running_containers,
+        'count': len(running_containers)
     })
 
 

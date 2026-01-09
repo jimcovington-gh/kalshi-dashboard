@@ -571,3 +571,71 @@ export async function getVolatileWatchlist(): Promise<VolatileWatchlistResponse>
     throw error;
   }
 }
+
+// Voice Trader Types and Functions
+export interface RunningVoiceContainer {
+  session_id: string;
+  event_ticker: string;
+  title: string;
+  user_name: string;
+  status: string;
+  call_state: string;
+  started_at: string;
+  public_ip?: string;
+  websocket_url?: string;
+}
+
+export interface RunningVoiceContainersResponse {
+  containers: RunningVoiceContainer[];
+  count: number;
+}
+
+export async function getRunningVoiceContainers(): Promise<RunningVoiceContainersResponse> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: '/voice-trader/running',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as unknown as RunningVoiceContainersResponse;
+  } catch (error) {
+    console.error('Error fetching running voice containers:', error);
+    throw error;
+  }
+}
+
+export async function stopVoiceContainer(sessionId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = post({
+      apiName: 'DashboardAPI',
+      path: `/voice-trader/stop/${sessionId}`,
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as unknown as { success: boolean; message: string };
+  } catch (error) {
+    console.error('Error stopping voice container:', error);
+    throw error;
+  }
+}

@@ -59,6 +59,18 @@ interface TranscriptSegment {
   speaker_id?: string;
 }
 
+interface RunningVoiceContainer {
+  session_id: string;
+  event_ticker: string;
+  title: string;
+  user_name: string;
+  status: string;
+  call_state: string;
+  started_at: string;
+  public_ip?: string;
+  websocket_url?: string;
+}
+
 type PageState = 'loading' | 'events' | 'setup' | 'cert_pending' | 'monitoring';
 
 const API_BASE = 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod';
@@ -119,6 +131,12 @@ export default function VoiceTraderPage() {
   
   // Auth token
   const [authToken, setAuthToken] = useState<string | null>(null);
+  
+  // Wake lock to prevent screen sleep during monitoring
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  
+  // Running containers (for reconnection)
+  const [runningContainers, setRunningContainers] = useState<RunningVoiceContainer[]>([]);
 
   // Check for cert_accepted param on load (redirect back from cert page)
   useEffect(() => {
@@ -187,7 +205,57 @@ export default function VoiceTraderPage() {
     }
   }, [certAccepted, authToken]);
 
-  // Fetch events
+  // Wake lock management - prevents screen sleep during monitoring
+  useEffect(() => {
+    if (pageState !== 'monitoring') {
+      // Release wake lock when not monitoring
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release();
+        wakeLockRef.current = null;
+        console.log('Wake lock released');
+      }
+      return;
+    }
+    
+    // Request wake lock when monitoring
+    async function requestWakeLock() {
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLockRef.current = await navigator.wakeLock.request('screen');
+          console.log('Wake lock acquired - screen will stay on');
+          
+          wakeLockRef.current.addEventListener('release', () => {
+            console.log('Wake lock released by system');
+          });
+        } catch (err) {
+          console.log('Wake lock request failed:', err);
+        }
+      } else {
+        console.log('Wake Lock API not supported');
+      }
+    }
+    
+    requestWakeLock();
+    
+    // Re-acquire wake lock when page becomes visible again
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && pageState === 'monitoring') {
+        requestWakeLock();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release();
+        wakeLockRef.current = null;
+      }
+    };
+  }, [pageState]);
+
+  // Fetch events and running containers
   useEffect(() => {
     if (pageState !== 'events' || !authToken) return;
     
@@ -207,9 +275,29 @@ export default function VoiceTraderPage() {
       }
     }
     
+    async function fetchRunningContainers() {
+      try {
+        const response = await fetch(`${API_BASE}/voice-trader/running`, {
+          headers: { Authorization: `Bearer ${authToken}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setRunningContainers(data.containers || []);
+        }
+      } catch (err) {
+        console.error('Error fetching running containers:', err);
+      }
+    }
+    
     fetchEvents();
-    const interval = setInterval(fetchEvents, 30000); // Refresh every 30s
-    return () => clearInterval(interval);
+    fetchRunningContainers();
+    const eventsInterval = setInterval(fetchEvents, 30000); // Refresh every 30s
+    const containersInterval = setInterval(fetchRunningContainers, 10000); // Refresh every 10s
+    return () => {
+      clearInterval(eventsInterval);
+      clearInterval(containersInterval);
+    };
   }, [pageState, authToken]);
 
   // WebSocket connection for monitoring (may fail due to mixed content)
@@ -366,6 +454,7 @@ export default function VoiceTraderPage() {
       mediaStreamRef.current = null;
     }
     if (audioWorkletRef.current) {
+      audioWorkletRef.current.port.close();
       audioWorkletRef.current.disconnect();
       audioWorkletRef.current = null;
     }
@@ -376,7 +465,9 @@ export default function VoiceTraderPage() {
     setMicActive(false);
   }, []);
 
-  // Start microphone capture and send audio to WebSocket
+  // Start microphone capture using AudioWorklet (lowest latency)
+  // Falls back to ScriptProcessorNode if AudioWorklet unavailable
+  // OPTIMIZED FOR LOW LATENCY - critical for real-time conference call interaction
   const startMicrophone = useCallback(async () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       console.error('WebSocket not connected');
@@ -384,7 +475,7 @@ export default function VoiceTraderPage() {
     }
 
     try {
-      // Request microphone access
+      // Request microphone access with low-latency constraints
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           sampleRate: 8000,
@@ -392,20 +483,52 @@ export default function VoiceTraderPage() {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-        }
+          // Request low latency from browser
+          latency: 0,
+        } as MediaTrackConstraints
       });
       mediaStreamRef.current = stream;
 
-      // Create audio context for processing
-      const audioContext = new AudioContext({ sampleRate: 8000 });
+      // Create audio context with low-latency hint
+      const audioContext = new AudioContext({ 
+        sampleRate: 8000,
+        latencyHint: 'interactive'  // Request lowest latency
+      });
       micContextRef.current = audioContext;
 
       // Create source from microphone
       const source = audioContext.createMediaStreamSource(stream);
 
-      // Create script processor for capturing audio (using deprecated API as fallback)
-      // In production, use AudioWorklet for better performance
-      const bufferSize = 2048;
+      // Try to use AudioWorklet (modern, lowest latency ~16ms)
+      // Falls back to ScriptProcessorNode (~32ms) if unavailable
+      if (audioContext.audioWorklet) {
+        try {
+          await audioContext.audioWorklet.addModule('/audio-worklet-processor.js');
+          
+          const workletNode = new AudioWorkletNode(audioContext, 'microphone-processor');
+          audioWorkletRef.current = workletNode;
+          
+          // Receive mu-law audio from worklet and send to WebSocket
+          workletNode.port.onmessage = (event) => {
+            if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+            wsRef.current.send(event.data);
+          };
+          
+          source.connect(workletNode);
+          // Don't connect to destination - we don't want to hear ourselves
+          
+          setMicActive(true);
+          console.log('Microphone capture started (AudioWorklet mode: ~16ms latency)');
+          return;
+        } catch (workletErr) {
+          console.warn('AudioWorklet failed, falling back to ScriptProcessor:', workletErr);
+        }
+      }
+
+      // Fallback: ScriptProcessorNode (deprecated but widely supported)
+      // CRITICAL: Use smallest possible buffer size for lowest latency
+      // bufferSize = 256 samples @ 8kHz = 32ms
+      const bufferSize = 256;
       const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
 
       processor.onaudioprocess = (e) => {
@@ -413,13 +536,13 @@ export default function VoiceTraderPage() {
 
         const inputData = e.inputBuffer.getChannelData(0);
         
-        // Convert Float32 PCM to mu-law
+        // Convert Float32 PCM to mu-law (optimized tight loop)
         const mulawData = new Uint8Array(inputData.length);
         for (let i = 0; i < inputData.length; i++) {
           mulawData[i] = linearToMulaw(inputData[i]);
         }
 
-        // Send as binary data to WebSocket
+        // Send as binary data to WebSocket immediately
         wsRef.current.send(mulawData.buffer);
       };
 
@@ -427,7 +550,7 @@ export default function VoiceTraderPage() {
       processor.connect(audioContext.destination);
 
       setMicActive(true);
-      console.log('Microphone capture started');
+      console.log('Microphone capture started (ScriptProcessor fallback: ~32ms latency)');
     } catch (err) {
       console.error('Failed to start microphone:', err);
       setError('Microphone access denied. Please allow microphone access to speak to the call.');
@@ -653,6 +776,49 @@ export default function VoiceTraderPage() {
     }
   };
 
+  // Reconnect to an existing running container
+  const handleReconnectToContainer = async (container: RunningVoiceContainer) => {
+    if (!authToken) return;
+    
+    setError(null);
+    setSessionId(container.session_id);
+    
+    // Find the event for this container
+    const matchingEvent = events.find(e => e.event_ticker === container.event_ticker);
+    if (matchingEvent) {
+      setSelectedEvent(matchingEvent);
+    } else {
+      // Create a minimal event object for display
+      setSelectedEvent({
+        event_ticker: container.event_ticker,
+        title: container.title || container.event_ticker,
+        start_date: container.started_at,
+        hours_until_start: 0,
+        words: [],
+        word_count: 0,
+        container_status: container.status
+      });
+    }
+    
+    if (container.websocket_url) {
+      setWsUrl(container.websocket_url);
+      setCertAcceptUrl(container.websocket_url.replace('wss://', 'https://'));
+      
+      // Store session data for potential cert acceptance
+      sessionStorage.setItem('voice_trader_session', JSON.stringify({
+        sessionId: container.session_id,
+        wsUrl: container.websocket_url,
+        certAcceptUrl: container.websocket_url.replace('wss://', 'https://'),
+        event: matchingEvent || { event_ticker: container.event_ticker, title: container.title }
+      }));
+      
+      // Go directly to monitoring (cert may already be accepted)
+      setPageState('monitoring');
+    } else {
+      setError('Container does not have a WebSocket URL yet');
+    }
+  };
+
   const sendDtmf = (digits: string) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && digits) {
       wsRef.current.send(JSON.stringify({ type: 'send_dtmf', digits }));
@@ -718,6 +884,52 @@ export default function VoiceTraderPage() {
           </div>
         )}
         
+        {/* Running Containers Section */}
+        {runningContainers.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-xl font-bold mb-4 text-green-400">🔴 Running Sessions</h2>
+            <p className="text-gray-400 text-sm mb-4">
+              These voice trader containers are currently running. Click to reconnect and monitor.
+            </p>
+            <div className="grid gap-3">
+              {runningContainers.map(container => (
+                <div
+                  key={container.session_id}
+                  className="bg-green-900/30 border border-green-700 rounded-lg p-4 hover:bg-green-900/50 cursor-pointer transition"
+                  onClick={() => handleReconnectToContainer(container)}
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
+                        <h3 className="text-lg font-semibold text-green-300">{container.title || container.event_ticker}</h3>
+                      </div>
+                      <p className="text-gray-400 text-sm">{container.event_ticker}</p>
+                      <p className="text-gray-500 text-xs mt-1">Session: {container.session_id}</p>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm text-green-400">
+                        {container.call_state || container.status}
+                      </div>
+                      <div className="text-sm text-gray-400">
+                        Started: {new Date(container.started_at).toLocaleTimeString()}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        User: {container.user_name}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-sm text-green-400 font-medium">
+                    → Click to reconnect and monitor
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {/* Upcoming Events Section */}
+        <h2 className="text-xl font-bold mb-4">📅 Upcoming Events</h2>
         {events.length === 0 ? (
           <div className="text-gray-400">No upcoming mention events found.</div>
         ) : (

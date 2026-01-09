@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { isAdmin, getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent, getVolatileWatchlist, VolatileWatchlistResponse } from '@/lib/api';
+import { isAdmin, getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent, getVolatileWatchlist, VolatileWatchlistResponse, getRunningVoiceContainers, stopVoiceContainer, RunningVoiceContainer, RunningVoiceContainersResponse } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
@@ -26,6 +26,11 @@ export default function AdminPage() {
   const [volatileWatchlist, setVolatileWatchlist] = useState<VolatileWatchlistResponse | null>(null);
   const [volatileWatchlistLoading, setVolatileWatchlistLoading] = useState(false);
   
+  // Voice trader containers state
+  const [voiceContainers, setVoiceContainers] = useState<RunningVoiceContainersResponse | null>(null);
+  const [voiceContainersLoading, setVoiceContainersLoading] = useState(false);
+  const [stoppingContainer, setStoppingContainer] = useState<string | null>(null);
+  
   // Per-user/per-idea toggle state
   const [toggleLoading, setToggleLoading] = useState<string | null>(null); // Format: "user_name#idea_id"
   
@@ -47,7 +52,8 @@ export default function AdminPage() {
         loadTradingStatus(),
         loadMentionMonitors(),
         loadAdminStats(),
-        loadVolatileWatchlist()
+        loadVolatileWatchlist(),
+        loadVoiceContainers()
       ]);
     } catch (err: any) {
       setError('Access denied');
@@ -76,6 +82,30 @@ export default function AdminPage() {
       console.error('Failed to load volatile watchlist:', err);
     } finally {
       setVolatileWatchlistLoading(false);
+    }
+  }
+
+  async function loadVoiceContainers() {
+    setVoiceContainersLoading(true);
+    try {
+      const data = await getRunningVoiceContainers();
+      setVoiceContainers(data);
+    } catch (err: any) {
+      console.error('Failed to load voice containers:', err);
+    } finally {
+      setVoiceContainersLoading(false);
+    }
+  }
+
+  async function handleStopVoiceContainer(sessionId: string) {
+    setStoppingContainer(sessionId);
+    try {
+      await stopVoiceContainer(sessionId);
+      await loadVoiceContainers();
+    } catch (err: any) {
+      setError(`Failed to stop container: ${err.message}`);
+    } finally {
+      setStoppingContainer(null);
     }
   }
 
@@ -764,6 +794,101 @@ export default function AdminPage() {
         )}
         {adminStats && adminStats.recent_trades.length === 0 && (
           <div className="text-center py-4 text-gray-500 text-sm">No recent trades</div>
+        )}
+      </div>
+
+      {/* Voice Trader Containers Section */}
+      <div className="bg-white rounded-lg shadow p-4">
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            🎙️ Running Voice Trader Containers
+          </h2>
+          <button onClick={loadVoiceContainers} disabled={voiceContainersLoading}
+            className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50">🔄</button>
+        </div>
+
+        {voiceContainers && voiceContainers.containers.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Session</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Event</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">User</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">Status</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">Call State</th>
+                  <th className="px-2 py-1 text-right font-medium text-gray-500">Started</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {voiceContainers.containers.map((container) => {
+                  const startedDate = new Date(container.started_at);
+                  const now = new Date();
+                  const diffMs = now.getTime() - startedDate.getTime();
+                  const diffMin = Math.floor(diffMs / 60000);
+                  const hours = Math.floor(diffMin / 60);
+                  const mins = diffMin % 60;
+                  const ageStr = `${hours}h ${mins}m`;
+                  
+                  const callStateColor = container.call_state === 'in_progress' 
+                    ? 'bg-green-100 text-green-700' 
+                    : container.call_state === 'qa_session'
+                    ? 'bg-orange-100 text-orange-700'
+                    : container.call_state === 'disconnected'
+                    ? 'bg-red-100 text-red-700'
+                    : 'bg-gray-100 text-gray-700';
+                  
+                  return (
+                    <tr key={container.session_id}>
+                      <td className="px-2 py-1 whitespace-nowrap font-mono text-xs">
+                        {container.session_id}
+                      </td>
+                      <td className="px-2 py-1 whitespace-nowrap">
+                        <div className="font-medium text-gray-900 text-xs truncate max-w-[200px]" title={container.title}>
+                          {container.title}
+                        </div>
+                        <div className="text-gray-500 text-xs truncate max-w-[200px]">{container.event_ticker}</div>
+                      </td>
+                      <td className="px-2 py-1 whitespace-nowrap text-gray-700">{container.user_name}</td>
+                      <td className="px-2 py-1 text-center">
+                        <span className="px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-700">
+                          {container.status}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1 text-center">
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${callStateColor}`}>
+                          {container.call_state || 'unknown'}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1 text-right text-gray-600 whitespace-nowrap">{ageStr} ago</td>
+                      <td className="px-2 py-1 text-center">
+                        <div className="flex gap-1 justify-center">
+                          <a
+                            href={`/dashboard/voice-trader?session=${container.session_id}`}
+                            className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                          >
+                            Monitor
+                          </a>
+                          <button
+                            onClick={() => handleStopVoiceContainer(container.session_id)}
+                            disabled={stoppingContainer === container.session_id}
+                            className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50"
+                          >
+                            {stoppingContainer === container.session_id ? '...' : 'Stop'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : voiceContainers ? (
+          <div className="text-center py-4 text-gray-500 text-sm">No running voice trader containers</div>
+        ) : (
+          <div className="text-center py-4 text-gray-400 text-sm">Loading...</div>
         )}
       </div>
 

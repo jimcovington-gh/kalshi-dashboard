@@ -678,11 +678,11 @@ export default function AdminPage() {
                 <tr>
                   <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '12%'}}>Time</th>
                   <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '10%'}}>User</th>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '35%'}}>Market</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '28%'}}>Market</th>
                   <th className="px-2 py-1 text-center font-medium text-gray-500" style={{width: '8%'}}>Side</th>
                   <th className="px-2 py-1 text-right font-medium text-gray-500" style={{width: '8%'}}>Qty</th>
                   <th className="px-2 py-1 text-right font-medium text-gray-500" style={{width: '10%'}}>Price</th>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '22%'}}>Idea</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '24%'}}>Idea</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -690,7 +690,7 @@ export default function AdminPage() {
                   <tr key={order.order_id} className="hover:bg-gray-50">
                     <td className="px-2 py-1 text-gray-600 whitespace-nowrap" style={{width: '12%'}}>{formatTimestamp(order.placed_at)}</td>
                     <td className="px-2 py-1 font-medium text-gray-900" style={{width: '10%'}}>{order.user_name}</td>
-                    <td className="px-2 py-1 whitespace-nowrap" style={{width: '35%'}}>
+                    <td className="px-2 py-1 whitespace-nowrap" style={{width: '28%'}}>
                       <a href={buildMarketUrlFromTicker(order.market_ticker)}
                         target="_blank" rel="noopener noreferrer"
                         className="text-blue-600 hover:underline font-mono">
@@ -704,7 +704,7 @@ export default function AdminPage() {
                     </td>
                     <td className="px-2 py-1 text-right font-mono text-gray-900">{order.quantity}</td>
                     <td className="px-2 py-1 text-right font-mono text-gray-900">${order.limit_price.toFixed(2)}</td>
-                    <td className="px-2 py-1 text-left text-gray-600 truncate max-w-[120px]" title={order.idea_name || ''}>
+                    <td className="px-2 py-1 text-left text-gray-600" style={{width: '24%'}}>
                       {order.idea_name || '—'}
                     </td>
                   </tr>
@@ -728,7 +728,7 @@ export default function AdminPage() {
                 <tr>
                   <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '12%'}}>Time</th>
                   <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '10%'}}>User</th>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '35%'}}>Market</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '28%'}}>Market</th>
                   <th className="px-2 py-1 text-center font-medium text-gray-500" style={{width: '8%'}}>Side</th>
                   <th className="px-2 py-1 text-right font-medium text-gray-500" style={{width: '8%'}}>Filled</th>
                   <th className="px-2 py-1 text-right font-medium text-gray-500" style={{width: '8%'}}>Price</th>
@@ -741,7 +741,7 @@ export default function AdminPage() {
                   <tr key={trade.order_id} className="hover:bg-gray-50">
                     <td className="px-2 py-1 text-gray-600 whitespace-nowrap" style={{width: '12%'}}>{formatTimestamp(trade.completed_at || trade.placed_at)}</td>
                     <td className="px-2 py-1 font-medium text-gray-900" style={{width: '10%'}}>{trade.user_name}</td>
-                    <td className="px-2 py-1 whitespace-nowrap" style={{width: '35%'}}>
+                    <td className="px-2 py-1 whitespace-nowrap" style={{width: '28%'}}>
                       <a href={`/dashboard/trades?ticker=${trade.market_ticker}&user_name=${trade.user_name}`}
                         className="text-blue-600 hover:underline font-mono">
                         {trade.market_ticker}

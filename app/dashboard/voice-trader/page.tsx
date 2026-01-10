@@ -115,6 +115,9 @@ export default function VoiceTraderPage() {
   const [audioActive, setAudioActive] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+  // Jitter buffer: track next scheduled playback time for gapless audio
+  const nextPlayTimeRef = useRef<number>(0);
+  const JITTER_BUFFER_MS = 50; // Buffer 50ms before starting playback (low latency for operator conversation);
   
   // Microphone state for two-way audio
   const [micEnabled, setMicEnabled] = useState(false);
@@ -359,6 +362,8 @@ export default function VoiceTraderPage() {
         console.log('WebSocket closed');
         setWsConnected(false);
         setAudioActive(false);
+        // Reset jitter buffer for next connection
+        nextPlayTimeRef.current = 0;
       };
     } catch (err) {
       console.error('Failed to create WebSocket:', err);
@@ -372,6 +377,8 @@ export default function VoiceTraderPage() {
         audioContextRef.current.close();
         audioContextRef.current = null;
       }
+      // Reset jitter buffer
+      nextPlayTimeRef.current = 0;
       // Cleanup microphone
       stopMicrophone();
     };
@@ -610,7 +617,7 @@ export default function VoiceTraderPage() {
     return audioContextRef.current;
   }, [audioMuted, audioVolume]);
 
-  // Play incoming audio chunk
+  // Play incoming audio chunk with jitter buffer for smooth playback
   const playAudioChunk = useCallback((arrayBuffer: ArrayBuffer) => {
     if (audioMuted) return;
     
@@ -620,7 +627,7 @@ export default function VoiceTraderPage() {
         ctx.resume();
       }
       
-      // Decode and play PCM audio (16-bit signed, 8kHz)
+      // Decode PCM audio (16-bit signed, 8kHz)
       const int16Array = new Int16Array(arrayBuffer);
       const floatArray = new Float32Array(int16Array.length);
       
@@ -632,10 +639,28 @@ export default function VoiceTraderPage() {
       const audioBuffer = ctx.createBuffer(1, floatArray.length, 8000);
       audioBuffer.copyToChannel(floatArray, 0);
       
+      // Calculate chunk duration in seconds
+      const chunkDuration = floatArray.length / 8000;
+      
+      // Jitter buffer: Schedule playback at precise times for gapless audio
+      const now = ctx.currentTime;
+      
+      // If this is the first chunk or we've fallen behind, reset the schedule
+      // Add jitter buffer delay on first chunk for smoother playback
+      if (nextPlayTimeRef.current <= now) {
+        nextPlayTimeRef.current = now + (JITTER_BUFFER_MS / 1000);
+      }
+      
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(gainNodeRef.current || ctx.destination);
-      source.start();
+      
+      // Schedule this chunk at the next available slot
+      source.start(nextPlayTimeRef.current);
+      
+      // Advance the play time for the next chunk
+      nextPlayTimeRef.current += chunkDuration;
+      
     } catch (err) {
       console.error('Audio playback error:', err);
     }

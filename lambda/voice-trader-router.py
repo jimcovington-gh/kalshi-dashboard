@@ -355,6 +355,8 @@ def launch_container(event):
         {'name': 'QA_DETECTION_ENABLED', 'value': str(qa_detection_enabled).lower()},
         {'name': 'ENVIRONMENT', 'value': 'production'},
         {'name': 'AWS_DEFAULT_REGION', 'value': 'us-east-1'},
+        # Phone provider: 'twilio' or 'telnyx' - controls which telephony service is used
+        {'name': 'PHONE_PROVIDER', 'value': 'telnyx'},
     ]
     
     if audio_source == 'phone':

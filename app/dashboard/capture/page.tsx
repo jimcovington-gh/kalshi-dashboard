@@ -36,6 +36,8 @@ interface QueuedCapture {
 
 interface LiveDataPoint {
   ts: number;
+  status?: string;
+  data_points?: number;
   win?: { yes_bid: number; yes_ask: number; last: number };
   spread?: { yes_bid: number; yes_ask: number; last: number };
   total?: { yes_bid: number; yes_ask: number; last: number };

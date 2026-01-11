@@ -344,12 +344,44 @@ def get_available_games():
     return events
 
 
+def get_feeder_ip():
+    """Get the sports data feeder IP from state table."""
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(CAPTURE_TABLE)
+    
+    try:
+        response = table.scan(
+            FilterExpression='begins_with(#k, :prefix)',
+            ExpressionAttributeNames={'#k': 'key'},
+            ExpressionAttributeValues={':prefix': 'FEEDER_STATE#'}
+        )
+        
+        items = response.get('Items', [])
+        if items:
+            # Get the most recent feeder (should only be one)
+            feeder = items[0]
+            private_ip = feeder.get('private_ip', '')
+            status = feeder.get('status', '')
+            
+            # Check if heartbeat is recent (within last 2 minutes)
+            heartbeat = int(feeder.get('heartbeat', 0))
+            now = int(time.time())
+            if now - heartbeat < 120 and status == 'running' and private_ip:
+                return private_ip
+        
+    except Exception as e:
+        print(f"Error fetching feeder IP: {e}")
+    
+    return None
+
+
 def get_capture_queue():
     """Get all queued and active captures from DynamoDB."""
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table(CAPTURE_TABLE)
     
     captures = []
+    feeder_ip = get_feeder_ip()
     
     try:
         # Scan for capture queue items
@@ -383,6 +415,7 @@ def get_capture_queue():
                 'capture_user': item.get('capture_user', ''),
                 'data_points': int(item.get('data_points', 0)),
                 's3_path': item.get('s3_path', ''),
+                'feeder_url': f'ws://{feeder_ip}:8080' if feeder_ip else None,
             })
         
     except Exception as e:

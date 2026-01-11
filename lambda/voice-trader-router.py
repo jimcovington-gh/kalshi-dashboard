@@ -806,12 +806,30 @@ def launch_ec2_session(event):
     
     # Build shell command to run voice trader
     # Use bash explicitly and full venv path (SSM uses /bin/sh by default)
-    # Kill any existing voice trader process first
+    # Kill any existing voice trader process first, wait for it to die
+    # IMPORTANT: Use full venv path pattern to avoid killing bash shells that contain "python main.py" string
     env_exports = ' '.join([f'{k}="{v}"' for k, v in env_vars.items()])
+    kill_pattern = "/opt/voice-trader/fargate-voice-mention-trader/venv/bin/python main.py"
     command = f'''#!/bin/bash
-# Kill any existing voice trader process
-pkill -f "python main.py" || true
-sleep 1
+set -e
+
+# Kill any existing voice trader process and wait for it to die
+# Using full venv path to avoid matching bash shells that contain "python main.py" as args
+KILL_PATTERN="{kill_pattern}"
+
+if pgrep -f "$KILL_PATTERN" > /dev/null 2>&1; then
+    echo "Killing existing voice trader process..."
+    pkill -9 -f "$KILL_PATTERN" || true
+    # Wait for process to actually terminate
+    for i in {{1..10}}; do
+        if ! pgrep -f "$KILL_PATTERN" > /dev/null 2>&1; then
+            echo "Process terminated"
+            break
+        fi
+        echo "Waiting for process to die ($i)..."
+        sleep 0.5
+    done
+fi
 
 cd /opt/voice-trader/fargate-voice-mention-trader
 {env_exports} nohup /opt/voice-trader/fargate-voice-mention-trader/venv/bin/python main.py > /tmp/voice-trader-{session_id}.log 2>&1 &

@@ -31,6 +31,7 @@ interface QueuedCapture {
   capture_user: string;
   data_points: number;
   s3_path: string;
+  feeder_url?: string;
 }
 
 interface LiveDataPoint {
@@ -207,8 +208,52 @@ export default function CaptureGamePage() {
     setLiveData([]);
     setPageState('viewing');
     
-    // TODO: Connect to sportsfeeder WebSocket
-    // For now, we'll show a placeholder
+    if (!capture.feeder_url) {
+      console.error('No feeder URL available for this capture');
+      setError('Cannot connect to live data - feeder not available');
+      setTimeout(() => setPageState('lobby'), 2000);
+      return;
+    }
+    
+    try {
+      const ws = new WebSocket(capture.feeder_url);
+      wsRef.current = ws;
+      
+      ws.onopen = () => {
+        console.log('Connected to sports feeder');
+        // Subscribe to this event
+        ws.send(JSON.stringify({
+          type: 'subscribe',
+          event_tickers: [capture.event_ticker]
+        }));
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'game_update') {
+            setLiveData(prev => [...prev, data.data]);
+          }
+        } catch (err) {
+          console.error('Error parsing WebSocket message:', err);
+        }
+      };
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setError('Connection error - returning to lobby');
+        setTimeout(() => setPageState('lobby'), 2000);
+      };
+      
+      ws.onclose = () => {
+        console.log('WebSocket closed');
+      };
+      
+    } catch (err: any) {
+      console.error('Error connecting to feeder:', err);
+      setError('Failed to connect to live data');
+      setTimeout(() => setPageState('lobby'), 2000);
+    }
   }, []);
 
   // Format timestamp for display

@@ -462,7 +462,10 @@ export default function CaptureGamePage() {
                         >
                           <div className="flex-1">
                             <p className="text-sm font-medium text-gray-900">{game.title}</p>
-                            <p className="text-xs text-gray-500">{game.time_display}</p>
+                            <p className="text-xs text-gray-500">
+                              {game.time_display}
+                              {game.has_started && <span className="ml-2 text-yellow-600">• Game in progress</span>}
+                            </p>
                           </div>
                           <button
                             onClick={() => setConfirmGame(game)}
@@ -472,7 +475,7 @@ export default function CaptureGamePage() {
                                 : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
                             }`}
                           >
-                            {game.has_started ? 'Capture (Started)' : 'Capture'}
+                            {game.has_started ? 'Queue Now' : 'Queue'}
                           </button>
                         </div>
                       ))}

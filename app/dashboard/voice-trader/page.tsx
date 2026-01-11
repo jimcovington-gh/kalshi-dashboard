@@ -146,7 +146,8 @@ export default function VoiceTraderPage() {
   const [wsConnected, setWsConnected] = useState(false);
   
   // Auto-dial state (true if voice trader will dial at scheduled time without user interaction)
-  const [autoDial, setAutoDial] = useState(true);
+  // Default to false so Start Call button shows until server confirms auto-dial
+  const [autoDial, setAutoDial] = useState(false);
   
   // Auth token
   const [authToken, setAuthToken] = useState<string | null>(null);
@@ -1530,8 +1531,8 @@ export default function VoiceTraderPage() {
             </div>
           </div>
           <div className="flex gap-2">
-            {/* Start Call button - only show when voice trader is waiting for manual dial */}
-            {!autoDial && containerState?.call_state === 'connecting' && containerState?.status_message?.toLowerCase().includes('ready to dial') && (
+            {/* Start Call button - show when waiting for manual dial or status says ready */}
+            {containerState?.call_state === 'connecting' && (!autoDial || containerState?.status_message?.toLowerCase().includes('ready to dial')) && (
               <button
                 onClick={() => {
                   wsRef.current?.send(JSON.stringify({ type: 'dial' }));

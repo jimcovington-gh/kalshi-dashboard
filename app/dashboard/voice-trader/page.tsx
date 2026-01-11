@@ -118,6 +118,9 @@ export default function VoiceTraderPage() {
   // Jitter buffer: track next scheduled playback time for gapless audio
   const nextPlayTimeRef = useRef<number>(0);
   const JITTER_BUFFER_MS = 50; // Buffer 50ms before starting playback (low latency for operator conversation);
+  // Audio chunk counter for debugging
+  const audioChunkCountRef = useRef<number>(0);
+  const audioChunkLogIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // Microphone state for two-way audio
   const [micEnabled, setMicEnabled] = useState(false);
@@ -359,11 +362,12 @@ export default function VoiceTraderPage() {
       };
       
       ws.onclose = () => {
-        console.log('WebSocket closed');
+        console.log(`[AUDIO] WebSocket closed. Total chunks received: ${audioChunkCountRef.current}`);
         setWsConnected(false);
         setAudioActive(false);
-        // Reset jitter buffer for next connection
+        // Reset jitter buffer and chunk counter for next connection
         nextPlayTimeRef.current = 0;
+        audioChunkCountRef.current = 0;
       };
     } catch (err) {
       console.error('Failed to create WebSocket:', err);
@@ -619,6 +623,15 @@ export default function VoiceTraderPage() {
 
   // Play incoming audio chunk with jitter buffer for smooth playback
   const playAudioChunk = useCallback((arrayBuffer: ArrayBuffer) => {
+    // Count ALL chunks received (even if muted)
+    audioChunkCountRef.current++;
+    const chunkNum = audioChunkCountRef.current;
+    
+    // Log every 50 chunks (roughly every second at 50 chunks/sec)
+    if (chunkNum === 1 || chunkNum % 50 === 0) {
+      console.log(`[AUDIO] Received chunk #${chunkNum}, size=${arrayBuffer.byteLength} bytes`);
+    }
+    
     if (audioMuted) return;
     
     try {

@@ -87,6 +87,9 @@ def lambda_handler(event, context):
         elif '/stop/' in path and http_method == 'POST':
             session_id = path_parts[-1]
             return stop_container(session_id)
+        elif '/dial/' in path and http_method == 'POST':
+            session_id = path_parts[-1]
+            return request_dial(session_id)
         elif '/redial/' in path and http_method == 'POST':
             session_id = path_parts[-1]
             return request_redial(session_id)
@@ -558,6 +561,41 @@ def stop_container(session_id: str):
             return response(500, {'error': f'Failed to stop: {str(e)}'})
     
     return response(400, {'error': 'No task ARN found'})
+
+
+def request_dial(session_id: str):
+    """
+    Request initial dial via DynamoDB flag.
+    
+    This is an HTTP alternative to WebSocket dial command.
+    Sets a flag in DynamoDB that the voice trader server polls for.
+    """
+    state_table = dynamodb.Table(VOICE_TRADER_STATE_TABLE)
+    
+    item = state_table.get_item(
+        Key={'session_id': session_id}
+    ).get('Item', {})
+    
+    if not item:
+        return response(404, {'error': 'No session found'})
+    
+    # Set dial_requested flag in DynamoDB
+    # Voice trader server will poll this and start dialing
+    state_table.update_item(
+        Key={'session_id': session_id},
+        UpdateExpression='SET dial_requested = :val, dial_requested_at = :ts',
+        ExpressionAttributeValues={
+            ':val': True,
+            ':ts': datetime.now(timezone.utc).isoformat()
+        }
+    )
+    
+    print(f"Dial requested for session {session_id}")
+    
+    return response(200, {
+        'success': True,
+        'message': 'Dial request sent'
+    })
 
 
 def request_redial(session_id: str):

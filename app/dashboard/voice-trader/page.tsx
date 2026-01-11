@@ -471,6 +471,11 @@ export default function VoiceTraderPage() {
             transcript_segments: prev?.transcript_segments || 0
           }));
           
+          // Reset dialing state when call progresses past connecting
+          if (data.call_state && data.call_state !== 'connecting') {
+            setDialing(false);
+          }
+          
           // Update audio active from polling
           if (data.audio_active !== undefined) {
             setAudioActive(data.audio_active);
@@ -507,7 +512,7 @@ export default function VoiceTraderPage() {
         console.error('Error polling status:', err);
       }
     };
-    
+        
     // Poll immediately and every 2 seconds
     pollState();
     const interval = setInterval(pollState, 2000);
@@ -901,13 +906,8 @@ export default function VoiceTraderPage() {
         
         if (isValidCert) {
           // Valid Let's Encrypt cert - go straight to monitoring
-          // Only set pendingDial if no scheduled start (AUTO_DIAL=false)
-          // If scheduled start is set, voice trader will dial automatically at that time
-          if (!scheduledStart) {
-            console.log('Setting pendingDial for immediate dial after WebSocket connects');
-            setPendingDial(true);
-            pendingDialRef.current = true;
-          }
+          // No need for pendingDial anymore - server shows "Ready to dial" status
+          // and user clicks Start Call button (works via WebSocket or HTTP)
           setLaunching(false);
           setLaunchStatus('');
           setPageState('monitoring');
@@ -1551,25 +1551,37 @@ export default function VoiceTraderPage() {
             </div>
           </div>
           <div className="flex gap-2">
-            {/* Start Call button - show when waiting for manual dial or status says ready */}
-            {containerState?.call_state === 'connecting' && (!autoDial || containerState?.status_message?.toLowerCase().includes('ready to dial')) && !dialing && (
+            {/* Start Call button - show when status says ready to dial */}
+            {containerState?.status_message?.toLowerCase().includes('ready to dial') && !dialing && (
               <button
-                onClick={() => {
+                onClick={async () => {
+                  setDialing(true);
+                  
+                  // Try WebSocket first (faster)
                   if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                    console.log('Sending dial command via Start Call button');
+                    console.log('Sending dial via WebSocket');
                     wsRef.current.send(JSON.stringify({ type: 'dial' }));
-                    setDialing(true);
                   } else {
-                    console.error('WebSocket not connected, cannot send dial');
-                    setError('WebSocket not connected. Please refresh the page.');
+                    // Fallback to HTTP endpoint
+                    console.log('WebSocket not connected, using HTTP fallback');
+                    try {
+                      const response = await fetch(`${API_BASE}/voice-trader/dial/${sessionId}`, {
+                        method: 'POST',
+                        headers: { Authorization: `Bearer ${authToken}` }
+                      });
+                      if (!response.ok) {
+                        const data = await response.json();
+                        throw new Error(data.error || 'Failed to dial');
+                      }
+                      console.log('Dial request sent via HTTP');
+                    } catch (err: any) {
+                      console.error('Failed to dial:', err);
+                      setError(err.message);
+                      setDialing(false);
+                    }
                   }
                 }}
-                disabled={!wsConnected}
-                className={`px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75 ${
-                  wsConnected 
-                    ? 'bg-green-600 hover:bg-green-700 cursor-pointer' 
-                    : 'bg-gray-600 cursor-not-allowed opacity-50'
-                }`}
+                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75"
               >
                 📞 Start Call
               </button>

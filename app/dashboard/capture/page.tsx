@@ -1,12 +1,11 @@
 'use client';
 
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useRouter } from 'next/navigation';
 
 // API base URL for capture game Lambda
 const CAPTURE_API_BASE = 'https://8mmffkzucg.execute-api.us-east-1.amazonaws.com/prod';
-const SPORTSFEEDER_WS_BASE = 'ws://PLACEHOLDER:8080';
 
 interface AvailableGame {
   event_ticker: string;
@@ -18,6 +17,13 @@ interface AvailableGame {
   event_timestamp: number;
   time_display: string;
   has_started: boolean;
+}
+
+interface S3Stats {
+  file_count: number;
+  total_bytes: number;
+  total_mb: number;
+  display: string;
 }
 
 interface QueuedCapture {
@@ -32,25 +38,10 @@ interface QueuedCapture {
   data_points: number;
   s3_path: string;
   feeder_url?: string;
+  s3_stats?: S3Stats;
 }
 
-interface LiveDataPoint {
-  ts: number;
-  status?: string;
-  data_points?: number;
-  win?: { yes_bid: number; yes_ask: number; last: number };
-  spread?: { yes_bid: number; yes_ask: number; last: number };
-  total?: { yes_bid: number; yes_ask: number; last: number };
-  game?: {
-    home: number;
-    away: number;
-    period: string;
-    clock: string;
-    status: string;
-  };
-}
-
-type PageState = 'loading' | 'lobby' | 'viewing';
+type PageState = 'loading' | 'lobby';
 
 // League icons and colors
 const LEAGUE_CONFIG: Record<string, { icon: string; color: string; bgColor: string }> = {
@@ -74,12 +65,6 @@ export default function CaptureGamePage() {
   
   // Confirmation dialog
   const [confirmGame, setConfirmGame] = useState<AvailableGame | null>(null);
-  
-  // Live view state
-  const [viewingCapture, setViewingCapture] = useState<QueuedCapture | null>(null);
-  const [liveData, setLiveData] = useState<LiveDataPoint[]>([]);
-  const wsRef = useRef<WebSocket | null>(null);
-  const liveDataRef = useRef<HTMLDivElement>(null);
   
   const router = useRouter();
 
@@ -140,21 +125,8 @@ export default function CaptureGamePage() {
     
     return () => {
       clearInterval(interval);
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
     };
   }, [loadLobby]);
-
-  // Auto-scroll live data
-  useEffect(() => {
-    if (liveDataRef.current) {
-      liveDataRef.current.scrollTop = liveDataRef.current.scrollHeight;
-    }
-  }, [liveData]);
 
   // Queue a game for capture
   const queueGame = async (game: AvailableGame) => {
@@ -206,52 +178,6 @@ export default function CaptureGamePage() {
       alert(`Error: ${err.message}`);
     }
   };
-
-  // Poll interval ref for live data
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Show capture status (live streaming not available - feeder is on private VPC)
-  const connectToLiveData = useCallback((capture: QueuedCapture) => {
-    setViewingCapture(capture);
-    setLiveData([]);
-    setPageState('viewing');
-    setError('');
-    
-    // Note: Live streaming is not currently available because the feeder runs
-    // on a private VPC IP. Data is being captured to S3 for later analysis.
-    // Show status updates by polling the queue status instead.
-    const pollStatus = async () => {
-      try {
-        const response = await fetch(`${CAPTURE_API_BASE}/capture/queue`, {
-          headers: { 'Authorization': authToken },
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          const thisCapture = data.captures?.find((c: QueuedCapture) => c.event_ticker === capture.event_ticker);
-          if (thisCapture) {
-            setLiveData(prev => {
-              const newPoint = {
-                ts: Date.now(),
-                status: thisCapture.status,
-                data_points: thisCapture.data_points,
-              };
-              const updated = [...prev, newPoint];
-              return updated.slice(-50);
-            });
-          }
-        }
-      } catch (err) {
-        console.error('Error polling status:', err);
-      }
-    };
-    
-    // Initial poll
-    pollStatus();
-    
-    // Set up polling interval
-    pollIntervalRef.current = setInterval(pollStatus, 5000);
-  }, [authToken]);
 
   // Format timestamp for display
   const formatTime = (ts: number) => {
@@ -337,6 +263,7 @@ export default function CaptureGamePage() {
       <div className="mb-8">
         <h2 className="text-lg font-semibold mb-4 text-gray-800">
           📊 Active & Queued Captures
+          <span className="text-sm font-normal text-gray-500 ml-2">(refreshes every 30s)</span>
         </h2>
         <div className="bg-white rounded-lg shadow overflow-hidden">
           <table className="min-w-full divide-y divide-gray-200">
@@ -346,7 +273,7 @@ export default function CaptureGamePage() {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">League</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Time</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Data Points</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Captured Data</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
@@ -375,17 +302,17 @@ export default function CaptureGamePage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
-                      {capture.data_points > 0 ? capture.data_points.toLocaleString() : '-'}
+                      {capture.s3_stats && capture.s3_stats.total_bytes > 0 ? (
+                        <span className="text-green-600 font-medium">
+                          ✅ {capture.s3_stats.display}
+                        </span>
+                      ) : capture.status === 'queued' ? (
+                        <span className="text-gray-400">Waiting...</span>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm space-x-2">
-                      {capture.status === 'capturing' && (
-                        <button
-                          onClick={() => connectToLiveData(capture)}
-                          className="text-purple-600 hover:text-purple-800"
-                        >
-                          View Live
-                        </button>
-                      )}
                       {capture.status === 'queued' && (
                         <button
                           onClick={() => removeFromQueue(capture.event_ticker)}
@@ -394,8 +321,8 @@ export default function CaptureGamePage() {
                           Remove
                         </button>
                       )}
-                      {capture.status === 'completed' && capture.s3_path && (
-                        <span className="text-gray-500 text-xs">Saved to S3</span>
+                      {(capture.status === 'capturing' || capture.status === 'completed') && capture.s3_stats && capture.s3_stats.total_bytes > 0 && (
+                        <span className="text-gray-500 text-xs">{capture.s3_stats.file_count} file(s)</span>
                       )}
                     </td>
                   </tr>
@@ -482,69 +409,6 @@ export default function CaptureGamePage() {
     );
   };
 
-  // Render live view
-  const renderLiveView = () => {
-    if (!viewingCapture) return null;
-    
-    return (
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-800">
-              🔴 Live Capture: {viewingCapture.title}
-            </h2>
-            <p className="text-sm text-gray-500">{viewingCapture.league}</p>
-          </div>
-          <button
-            onClick={() => {
-              setViewingCapture(null);
-              setPageState('lobby');
-              if (pollIntervalRef.current) {
-                clearInterval(pollIntervalRef.current);
-                pollIntervalRef.current = null;
-              }
-              if (wsRef.current) {
-                wsRef.current.close();
-              }
-            }}
-            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
-          >
-            ← Back to Lobby
-          </button>
-        </div>
-        
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="bg-green-50 border border-green-200 rounded-md p-3 mb-4">
-            <p className="text-sm text-green-800">
-              <strong>✅ Capture Active:</strong> Data is being recorded to S3 for later analysis.
-              The feeder flushes data every 30 seconds. Check S3 bucket <code className="bg-green-100 px-1 rounded">production-kalshi-trading-captures</code> for files.
-            </p>
-          </div>
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Capture Status (polling every 5s)</h3>
-          <div
-            ref={liveDataRef}
-            className="h-64 overflow-y-auto bg-gray-900 rounded-md p-3 font-mono text-xs"
-          >
-            {liveData.length === 0 ? (
-              <div className="text-gray-400 text-center py-8">
-                Waiting for status updates...
-              </div>
-            ) : (
-              liveData.map((point, index) => (
-                <div key={index} className="text-green-400 mb-1">
-                  <span className="text-gray-500">{formatTime(point.ts / 1000)}</span>
-                  <span className="ml-2">
-                    Status: <span className={point.status === 'capturing' ? 'text-green-400' : 'text-yellow-400'}>{point.status}</span>
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   // Loading state
   if (pageState === 'loading') {
     return (
@@ -574,12 +438,8 @@ export default function CaptureGamePage() {
         </div>
       )}
 
-      {pageState === 'viewing' ? renderLiveView() : (
-        <>
-          {renderQueuedCaptures()}
-          {renderAvailableGames()}
-        </>
-      )}
+      {renderQueuedCaptures()}
+      {renderAvailableGames()}
 
       {renderConfirmDialog()}
     </div>

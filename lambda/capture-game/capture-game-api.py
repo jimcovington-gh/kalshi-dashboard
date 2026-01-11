@@ -387,6 +387,37 @@ def get_feeder_ip():
     return None
 
 
+# S3 bucket for capture data
+S3_CAPTURE_BUCKET = "production-kalshi-trading-captures"
+
+
+def get_capture_s3_stats(event_ticker: str) -> dict:
+    """Get S3 stats (total file size, file count) for a capture's event_ticker prefix."""
+    s3 = boto3.client('s3')
+    
+    try:
+        # List objects in the event_ticker prefix
+        paginator = s3.get_paginator('list_objects_v2')
+        total_size = 0
+        file_count = 0
+        
+        for page in paginator.paginate(Bucket=S3_CAPTURE_BUCKET, Prefix=f"{event_ticker}/"):
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    total_size += obj.get('Size', 0)
+                    file_count += 1
+        
+        return {
+            'file_count': file_count,
+            'total_bytes': total_size,
+            'total_mb': round(total_size / (1024 * 1024), 2) if total_size > 0 else 0,
+            'display': f"{round(total_size / 1024, 1)} KB" if total_size < 1024 * 1024 else f"{round(total_size / (1024 * 1024), 2)} MB"
+        }
+    except Exception as e:
+        print(f"Error getting S3 stats for {event_ticker}: {e}")
+        return {'file_count': 0, 'total_bytes': 0, 'total_mb': 0, 'display': '-'}
+
+
 def get_capture_queue():
     """Get all queued and active captures from DynamoDB."""
     dynamodb = boto3.resource('dynamodb')
@@ -416,18 +447,27 @@ def get_capture_queue():
             items.extend(response.get('Items', []))
         
         for item in items:
+            event_ticker = item.get('event_ticker', '')
+            status = item.get('status', 'queued')
+            
+            # Get S3 stats for capturing/completed captures
+            s3_stats = None
+            if status in ('capturing', 'completed'):
+                s3_stats = get_capture_s3_stats(event_ticker)
+            
             captures.append({
-                'event_ticker': item.get('event_ticker', ''),
+                'event_ticker': event_ticker,
                 'title': item.get('title', ''),
                 'league': item.get('league', ''),
                 'scheduled_start': int(item.get('scheduled_start', 0)),
                 'queued_at': int(item.get('queued_at', 0)),
                 'queued_by': item.get('queued_by', ''),
-                'status': item.get('status', 'queued'),  # queued, capturing, completed, failed
+                'status': status,
                 'capture_user': item.get('capture_user', ''),
                 'data_points': int(item.get('data_points', 0)),
                 's3_path': item.get('s3_path', ''),
                 'feeder_url': f'ws://{feeder_ip}:8080' if feeder_ip else None,
+                's3_stats': s3_stats,
             })
         
     except Exception as e:

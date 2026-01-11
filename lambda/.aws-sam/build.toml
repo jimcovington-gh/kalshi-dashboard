@@ -15,5 +15,5 @@ codeuri = "/home/ubuntu/kalshi/kalshi-dashboard/lambda/layer"
 build_method = "python3.12"
 compatible_runtimes = ["python3.12"]
 architecture = "x86_64"
-manifest_hash = ""
+manifest_hash = "7c5075828e1dfd9e9d8d605006efbdbe"
 layer = "SharedCodeLayer"

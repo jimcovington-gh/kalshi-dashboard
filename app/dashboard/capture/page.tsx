@@ -208,45 +208,47 @@ export default function CaptureGamePage() {
   // Poll interval ref for live data
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Connect to live data via HTTP polling (feeder is on private IP, can't use WebSocket directly)
+  // Show capture status (live streaming not available - feeder is on private VPC)
   const connectToLiveData = useCallback((capture: QueuedCapture) => {
     setViewingCapture(capture);
     setLiveData([]);
     setPageState('viewing');
     setError('');
     
-    // Poll the feeder via our API proxy every 2 seconds
-    const pollLiveData = async () => {
+    // Note: Live streaming is not currently available because the feeder runs
+    // on a private VPC IP. Data is being captured to S3 for later analysis.
+    // Show status updates by polling the queue status instead.
+    const pollStatus = async () => {
       try {
-        const response = await fetch(`${CAPTURE_API_BASE}/capture/live/${encodeURIComponent(capture.event_ticker)}`, {
+        const response = await fetch(`${CAPTURE_API_BASE}/capture/queue`, {
           headers: { 'Authorization': authToken },
         });
         
         if (response.ok) {
           const data = await response.json();
-          if (data && !data.error) {
+          const thisCapture = data.captures?.find((c: QueuedCapture) => c.event_ticker === capture.event_ticker);
+          if (thisCapture) {
             setLiveData(prev => {
-              // Add new data point with timestamp
               const newPoint = {
                 ts: Date.now(),
-                ...data
+                status: thisCapture.status,
+                data_points: thisCapture.data_points,
               };
-              // Keep last 100 data points
               const updated = [...prev, newPoint];
-              return updated.slice(-100);
+              return updated.slice(-50);
             });
           }
         }
       } catch (err) {
-        console.error('Error polling live data:', err);
+        console.error('Error polling status:', err);
       }
     };
     
     // Initial poll
-    pollLiveData();
+    pollStatus();
     
     // Set up polling interval
-    pollIntervalRef.current = setInterval(pollLiveData, 2000);
+    pollIntervalRef.current = setInterval(pollStatus, 5000);
   }, [authToken]);
 
   // Format timestamp for display
@@ -510,22 +512,30 @@ export default function CaptureGamePage() {
         </div>
         
         <div className="bg-white rounded-lg shadow p-4">
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Live Data Stream (polling every 2s)</h3>
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+            <p className="text-sm text-blue-800">
+              <strong>Note:</strong> Live market data streaming is not available in the dashboard.
+              Data is being captured to S3 for later analysis. The status below shows capture progress.
+            </p>
+          </div>
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Capture Status (polling every 5s)</h3>
           <div
             ref={liveDataRef}
-            className="h-96 overflow-y-auto bg-gray-900 rounded-md p-3 font-mono text-xs"
+            className="h-64 overflow-y-auto bg-gray-900 rounded-md p-3 font-mono text-xs"
           >
             {liveData.length === 0 ? (
               <div className="text-gray-400 text-center py-8">
-                Waiting for data from feeder...
+                Waiting for status updates...
               </div>
             ) : (
               liveData.map((point, index) => (
                 <div key={index} className="text-green-400 mb-1">
                   <span className="text-gray-500">{formatTime(point.ts / 1000)}</span>
-                  {/* Display raw data as JSON for now */}
+                  <span className="ml-2">
+                    Status: <span className={point.status === 'capturing' ? 'text-green-400' : 'text-yellow-400'}>{point.status}</span>
+                  </span>
                   <span className="ml-2 text-cyan-400">
-                    {JSON.stringify(point, null, 0).substring(0, 200)}
+                    Data points: {point.data_points || 0}
                   </span>
                 </div>
               ))

@@ -1545,6 +1545,10 @@ export default function VoiceTraderPage() {
               {containerState?.status_message || containerState?.call_state || 'Connecting...'}
               {containerState?.qa_started && ' • Q&A Active'}
             </div>
+            {/* WebSocket connection indicator */}
+            <div className={`text-xs px-2 py-1 rounded ${wsConnected ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'}`}>
+              {wsConnected ? '● Connected' : '○ Disconnected'}
+            </div>
           </div>
           <div className="flex gap-2">
             {/* Start Call button - show when waiting for manual dial or status says ready */}
@@ -1560,7 +1564,12 @@ export default function VoiceTraderPage() {
                     setError('WebSocket not connected. Please refresh the page.');
                   }
                 }}
-                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75"
+                disabled={!wsConnected}
+                className={`px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75 ${
+                  wsConnected 
+                    ? 'bg-green-600 hover:bg-green-700 cursor-pointer' 
+                    : 'bg-gray-600 cursor-not-allowed opacity-50'
+                }`}
               >
                 📞 Start Call
               </button>

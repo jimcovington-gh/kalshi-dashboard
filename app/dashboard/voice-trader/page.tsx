@@ -875,6 +875,8 @@ export default function VoiceTraderPage() {
         
         if (isValidCert) {
           // Valid Let's Encrypt cert - go straight to monitoring
+          // Set pendingDial so dial command is sent when WebSocket connects
+          setPendingDial(true);
           setLaunching(false);
           setLaunchStatus('');
           setPageState('monitoring');

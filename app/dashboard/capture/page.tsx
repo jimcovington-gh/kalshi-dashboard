@@ -138,6 +138,9 @@ export default function CaptureGamePage() {
     
     return () => {
       clearInterval(interval);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
       if (wsRef.current) {
         wsRef.current.close();
       }
@@ -202,59 +205,49 @@ export default function CaptureGamePage() {
     }
   };
 
-  // Connect to sportsfeeder WebSocket for live data
+  // Poll interval ref for live data
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Connect to live data via HTTP polling (feeder is on private IP, can't use WebSocket directly)
   const connectToLiveData = useCallback((capture: QueuedCapture) => {
     setViewingCapture(capture);
     setLiveData([]);
     setPageState('viewing');
+    setError('');
     
-    if (!capture.feeder_url) {
-      console.error('No feeder URL available for this capture');
-      setError('Cannot connect to live data - feeder not available');
-      setTimeout(() => setPageState('lobby'), 2000);
-      return;
-    }
-    
-    try {
-      const ws = new WebSocket(capture.feeder_url);
-      wsRef.current = ws;
-      
-      ws.onopen = () => {
-        console.log('Connected to sports feeder');
-        // Subscribe to this event
-        ws.send(JSON.stringify({
-          type: 'subscribe',
-          event_tickers: [capture.event_ticker]
-        }));
-      };
-      
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'game_update') {
-            setLiveData(prev => [...prev, data.data]);
+    // Poll the feeder via our API proxy every 2 seconds
+    const pollLiveData = async () => {
+      try {
+        const response = await fetch(`${CAPTURE_API_BASE}/capture/live/${encodeURIComponent(capture.event_ticker)}`, {
+          headers: { 'Authorization': authToken },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data && !data.error) {
+            setLiveData(prev => {
+              // Add new data point with timestamp
+              const newPoint = {
+                ts: Date.now(),
+                ...data
+              };
+              // Keep last 100 data points
+              const updated = [...prev, newPoint];
+              return updated.slice(-100);
+            });
           }
-        } catch (err) {
-          console.error('Error parsing WebSocket message:', err);
         }
-      };
-      
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setError('Connection error - returning to lobby');
-        setTimeout(() => setPageState('lobby'), 2000);
-      };
-      
-      ws.onclose = () => {
-        console.log('WebSocket closed');
-      };
-      
-    } catch (err: any) {
-      console.error('Error connecting to feeder:', err);
-      setError('Failed to connect to live data');
-      setTimeout(() => setPageState('lobby'), 2000);
-    }
-  }, []);
+      } catch (err) {
+        console.error('Error polling live data:', err);
+      }
+    };
+    
+    // Initial poll
+    pollLiveData();
+    
+    // Set up polling interval
+    pollIntervalRef.current = setInterval(pollLiveData, 2000);
+  }, [authToken]);
 
   // Format timestamp for display
   const formatTime = (ts: number) => {
@@ -502,6 +495,10 @@ export default function CaptureGamePage() {
             onClick={() => {
               setViewingCapture(null);
               setPageState('lobby');
+              if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+              }
               if (wsRef.current) {
                 wsRef.current.close();
               }
@@ -513,39 +510,23 @@ export default function CaptureGamePage() {
         </div>
         
         <div className="bg-white rounded-lg shadow p-4">
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Live Data Stream</h3>
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Live Data Stream (polling every 2s)</h3>
           <div
             ref={liveDataRef}
             className="h-96 overflow-y-auto bg-gray-900 rounded-md p-3 font-mono text-xs"
           >
             {liveData.length === 0 ? (
               <div className="text-gray-400 text-center py-8">
-                Waiting for data... Connect to sportsfeeder to see live updates.
+                Waiting for data from feeder...
               </div>
             ) : (
               liveData.map((point, index) => (
                 <div key={index} className="text-green-400 mb-1">
                   <span className="text-gray-500">{formatTime(point.ts / 1000)}</span>
-                  {point.win && (
-                    <span className="ml-2">
-                      WIN: {(point.win.yes_bid * 100).toFixed(0)}¢/{(point.win.yes_ask * 100).toFixed(0)}¢
-                    </span>
-                  )}
-                  {point.spread && (
-                    <span className="ml-2">
-                      SPREAD: {(point.spread.yes_bid * 100).toFixed(0)}¢/{(point.spread.yes_ask * 100).toFixed(0)}¢
-                    </span>
-                  )}
-                  {point.total && (
-                    <span className="ml-2">
-                      TOTAL: {(point.total.yes_bid * 100).toFixed(0)}¢/{(point.total.yes_ask * 100).toFixed(0)}¢
-                    </span>
-                  )}
-                  {point.game && (
-                    <span className="ml-2 text-yellow-400">
-                      [{point.game.away}-{point.game.home} {point.game.period} {point.game.clock}]
-                    </span>
-                  )}
+                  {/* Display raw data as JSON for now */}
+                  <span className="ml-2 text-cyan-400">
+                    {JSON.stringify(point, null, 0).substring(0, 200)}
+                  </span>
                 </div>
               ))
             )}

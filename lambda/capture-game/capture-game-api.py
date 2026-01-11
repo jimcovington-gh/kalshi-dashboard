@@ -353,6 +353,7 @@ def get_feeder_ip():
         # Get the feeder state directly by key
         response = table.get_item(Key={'key': 'FEEDER_STATE'})
         feeder = response.get('Item')
+        print(f"DEBUG get_feeder_ip: feeder={feeder}")
         
         if feeder:
             ip_address = feeder.get('ip_address', '')
@@ -361,21 +362,28 @@ def get_feeder_ip():
             # Check if heartbeat is recent (within last 2 minutes)
             # last_heartbeat is an ISO string like "2026-01-11T20:15:08.104405+00:00"
             last_heartbeat_str = feeder.get('last_heartbeat', '')
+            print(f"DEBUG get_feeder_ip: ip={ip_address}, status={status}, heartbeat={last_heartbeat_str}")
+            
             if last_heartbeat_str and status == 'running' and ip_address:
                 from datetime import datetime, timezone
                 try:
                     # Parse ISO format timestamp
-                    heartbeat_dt = datetime.fromisoformat(last_heartbeat_str.replace('+00:00', '+00:00'))
+                    heartbeat_dt = datetime.fromisoformat(last_heartbeat_str)
                     now = datetime.now(timezone.utc)
                     age_seconds = (now - heartbeat_dt).total_seconds()
+                    print(f"DEBUG get_feeder_ip: age_seconds={age_seconds}")
                     if age_seconds < 120:
+                        print(f"DEBUG get_feeder_ip: returning {ip_address}")
                         return ip_address
+                    else:
+                        print(f"DEBUG get_feeder_ip: heartbeat too old ({age_seconds}s)")
                 except Exception as e:
                     print(f"Error parsing heartbeat timestamp: {e}")
         
     except Exception as e:
         print(f"Error fetching feeder IP: {e}")
     
+    print("DEBUG get_feeder_ip: returning None")
     return None
 
 
@@ -603,6 +611,51 @@ def lambda_handler(event, context):
                     'message': message,
                 })
             }
+        
+        # GET /capture/live/{event_ticker} - Get live game data from feeder
+        elif path.startswith('/capture/live/') and http_method == 'GET':
+            event_ticker = path.split('/capture/live/')[1]
+            
+            if not event_ticker:
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({'error': 'event_ticker is required'})
+                }
+            
+            feeder_ip = get_feeder_ip()
+            if not feeder_ip:
+                return {
+                    'statusCode': 503,
+                    'headers': headers,
+                    'body': json.dumps({'error': 'Feeder not available'})
+                }
+            
+            # Fetch game data from feeder HTTP API
+            try:
+                import urllib.request
+                feeder_url = f'http://{feeder_ip}:8081/game/{event_ticker}'
+                req = urllib.request.Request(feeder_url, headers={'Accept': 'application/json'})
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    game_data = json.loads(response.read().decode('utf-8'))
+                    return {
+                        'statusCode': 200,
+                        'headers': headers,
+                        'body': json.dumps(game_data, default=decimal_default)
+                    }
+            except urllib.error.HTTPError as e:
+                return {
+                    'statusCode': e.code,
+                    'headers': headers,
+                    'body': json.dumps({'error': f'Feeder returned {e.code}'})
+                }
+            except Exception as e:
+                print(f"Error fetching from feeder: {e}")
+                return {
+                    'statusCode': 500,
+                    'headers': headers,
+                    'body': json.dumps({'error': f'Failed to fetch from feeder: {str(e)}'})
+                }
         
         else:
             return {

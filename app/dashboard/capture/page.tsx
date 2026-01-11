@@ -514,10 +514,10 @@ export default function CaptureGamePage() {
         </div>
         
         <div className="bg-white rounded-lg shadow p-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
-            <p className="text-sm text-blue-800">
-              <strong>Note:</strong> Live market data streaming is not available in the dashboard.
-              Data is being captured to S3 for later analysis. The status below shows capture progress.
+          <div className="bg-green-50 border border-green-200 rounded-md p-3 mb-4">
+            <p className="text-sm text-green-800">
+              <strong>✅ Capture Active:</strong> Data is being recorded to S3 for later analysis.
+              The feeder flushes data every 30 seconds. Check S3 bucket <code className="bg-green-100 px-1 rounded">production-kalshi-trading-captures</code> for files.
             </p>
           </div>
           <h3 className="text-sm font-medium text-gray-700 mb-2">Capture Status (polling every 5s)</h3>
@@ -535,9 +535,6 @@ export default function CaptureGamePage() {
                   <span className="text-gray-500">{formatTime(point.ts / 1000)}</span>
                   <span className="ml-2">
                     Status: <span className={point.status === 'capturing' ? 'text-green-400' : 'text-yellow-400'}>{point.status}</span>
-                  </span>
-                  <span className="ml-2 text-cyan-400">
-                    Data points: {point.data_points || 0}
                   </span>
                 </div>
               ))

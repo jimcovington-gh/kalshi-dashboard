@@ -32,8 +32,8 @@ SERIES_METADATA_TABLE = os.environ.get('SERIES_METADATA_TABLE', 'production-kals
 # Series tickers for supported leagues (only NFL, NCAA Basketball, NBA)
 SUPPORTED_SERIES = {
     'KXNFLGAME': 'NFL',
-    'KXNCAABGAME': 'NCAA Basketball',
-    'KXNCAAWBBGAME': 'NCAA Women\'s Basketball',
+    'KXNCAAMBGAME': 'NCAA Men\'s Basketball',
+    'KXNCAAWBGAME': 'NCAA Women\'s Basketball',
     'KXNBAGAME': 'NBA',
 }
 

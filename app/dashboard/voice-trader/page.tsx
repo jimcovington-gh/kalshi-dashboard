@@ -71,6 +71,16 @@ interface RunningVoiceContainer {
   websocket_url?: string;
 }
 
+interface EC2Status {
+  instance_id: string;
+  status: 'running' | 'stopped' | 'stopping' | 'pending' | 'terminated';
+  public_ip?: string;
+  launch_time?: string;
+  uptime_hours?: number;
+  websocket_url?: string;
+  dns_name?: string;
+}
+
 type PageState = 'loading' | 'events' | 'setup' | 'cert_pending' | 'monitoring';
 
 const API_BASE = 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod';
@@ -143,6 +153,11 @@ export default function VoiceTraderPage() {
   
   // Running containers (for reconnection)
   const [runningContainers, setRunningContainers] = useState<RunningVoiceContainer[]>([]);
+
+  // EC2 Voice Server state
+  const [ec2Status, setEc2Status] = useState<EC2Status | null>(null);
+  const [ec2Loading, setEc2Loading] = useState(false);
+  const [ec2Error, setEc2Error] = useState<string | null>(null);
 
   // Check for cert_accepted param on load (redirect back from cert page)
   useEffect(() => {
@@ -295,14 +310,34 @@ export default function VoiceTraderPage() {
         console.error('Error fetching running containers:', err);
       }
     }
+
+    async function fetchEC2Status() {
+      try {
+        const response = await fetch(`${API_BASE}/voice-trader/ec2/status`, {
+          headers: { Authorization: `Bearer ${authToken}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setEc2Status(data);
+          setEc2Error(null);
+        }
+      } catch (err) {
+        console.error('Error fetching EC2 status:', err);
+        setEc2Error('Failed to fetch EC2 status');
+      }
+    }
     
     fetchEvents();
     fetchRunningContainers();
+    fetchEC2Status();
     const eventsInterval = setInterval(fetchEvents, 30000); // Refresh every 30s
     const containersInterval = setInterval(fetchRunningContainers, 10000); // Refresh every 10s
+    const ec2Interval = setInterval(fetchEC2Status, 5000); // Refresh EC2 status every 5s
     return () => {
       clearInterval(eventsInterval);
       clearInterval(containersInterval);
+      clearInterval(ec2Interval);
     };
   }, [pageState, authToken]);
 
@@ -686,6 +721,82 @@ export default function VoiceTraderPage() {
     }
   }, [audioVolume, audioMuted]);
 
+  // EC2 Control handlers
+  const handleEC2Start = async () => {
+    if (!authToken) return;
+    setEc2Loading(true);
+    setEc2Error(null);
+    try {
+      const response = await fetch(`${API_BASE}/voice-trader/ec2/start`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setEc2Error(data.error || 'Failed to start EC2 instance');
+      } else {
+        // Immediately update status to show pending
+        setEc2Status(prev => prev ? { ...prev, status: 'pending' } : null);
+      }
+    } catch (err) {
+      setEc2Error('Failed to start EC2 instance');
+    } finally {
+      setEc2Loading(false);
+    }
+  };
+
+  const handleEC2Stop = async () => {
+    if (!authToken) return;
+    if (!confirm('Are you sure you want to stop the voice server? This will disconnect any active sessions.')) {
+      return;
+    }
+    setEc2Loading(true);
+    setEc2Error(null);
+    try {
+      const response = await fetch(`${API_BASE}/voice-trader/ec2/stop`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setEc2Error(data.error || 'Failed to stop EC2 instance');
+      } else {
+        // Immediately update status to show stopping
+        setEc2Status(prev => prev ? { ...prev, status: 'stopping' } : null);
+      }
+    } catch (err) {
+      setEc2Error('Failed to stop EC2 instance');
+    } finally {
+      setEc2Loading(false);
+    }
+  };
+
+  const handleEC2Reboot = async () => {
+    if (!authToken) return;
+    if (!confirm('Are you sure you want to reboot the voice server? Active sessions will be disconnected.')) {
+      return;
+    }
+    setEc2Loading(true);
+    setEc2Error(null);
+    try {
+      const response = await fetch(`${API_BASE}/voice-trader/ec2/reboot`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setEc2Error(data.error || 'Failed to reboot EC2 instance');
+      } else {
+        // Immediately update status to show pending
+        setEc2Status(prev => prev ? { ...prev, status: 'pending' } : null);
+      }
+    } catch (err) {
+      setEc2Error('Failed to reboot EC2 instance');
+    } finally {
+      setEc2Loading(false);
+    }
+  };
+
   const handleSelectEvent = (event: MentionEvent) => {
     setSelectedEvent(event);
     setPageState('setup');
@@ -921,6 +1032,113 @@ export default function VoiceTraderPage() {
             {error}
           </div>
         )}
+
+        {/* EC2 Voice Server Control Panel */}
+        <div className="mb-8 bg-gray-800 rounded-lg p-4">
+          <h2 className="text-lg font-bold mb-3 flex items-center gap-2">
+            <span>🖥️</span>
+            <span>Voice Server</span>
+            {ec2Status && (
+              <span className={`ml-2 px-2 py-0.5 rounded text-xs font-medium ${
+                ec2Status.status === 'running' ? 'bg-green-700 text-green-200' :
+                ec2Status.status === 'stopped' ? 'bg-red-700 text-red-200' :
+                ec2Status.status === 'pending' || ec2Status.status === 'stopping' ? 'bg-yellow-700 text-yellow-200' :
+                'bg-gray-700 text-gray-300'
+              }`}>
+                {ec2Status.status.toUpperCase()}
+              </span>
+            )}
+          </h2>
+          
+          {ec2Error && (
+            <div className="bg-red-900/50 border border-red-700 text-red-200 px-3 py-2 rounded mb-3 text-sm">
+              {ec2Error}
+            </div>
+          )}
+          
+          {ec2Status ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-4 text-sm">
+                <div>
+                  <span className="text-gray-400">Status:</span>{' '}
+                  <span className={
+                    ec2Status.status === 'running' ? 'text-green-400' :
+                    ec2Status.status === 'stopped' ? 'text-red-400' :
+                    'text-yellow-400'
+                  }>
+                    {ec2Status.status === 'running' && '●'} {ec2Status.status}
+                  </span>
+                </div>
+                {ec2Status.public_ip && (
+                  <div>
+                    <span className="text-gray-400">IP:</span>{' '}
+                    <span className="font-mono text-blue-400">{ec2Status.public_ip}</span>
+                  </div>
+                )}
+                {ec2Status.dns_name && (
+                  <div>
+                    <span className="text-gray-400">DNS:</span>{' '}
+                    <span className="font-mono text-blue-400">{ec2Status.dns_name}</span>
+                  </div>
+                )}
+                {ec2Status.uptime_hours !== null && ec2Status.uptime_hours !== undefined && (
+                  <div>
+                    <span className="text-gray-400">Uptime:</span>{' '}
+                    <span className="text-white">
+                      {ec2Status.uptime_hours < 1 
+                        ? `${Math.round(ec2Status.uptime_hours * 60)} min`
+                        : `${ec2Status.uptime_hours.toFixed(1)} hrs`}
+                    </span>
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex gap-2">
+                {ec2Status.status === 'stopped' && (
+                  <button
+                    onClick={handleEC2Start}
+                    disabled={ec2Loading}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-500 disabled:bg-gray-600 rounded text-sm font-medium transition"
+                  >
+                    {ec2Loading ? 'Starting...' : '▶️ Start Server'}
+                  </button>
+                )}
+                {ec2Status.status === 'running' && (
+                  <>
+                    <button
+                      onClick={handleEC2Stop}
+                      disabled={ec2Loading}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:bg-gray-600 rounded text-sm font-medium transition"
+                    >
+                      {ec2Loading ? 'Stopping...' : '⏹️ Stop Server'}
+                    </button>
+                    <button
+                      onClick={handleEC2Reboot}
+                      disabled={ec2Loading}
+                      className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:bg-gray-600 rounded text-sm font-medium transition"
+                    >
+                      {ec2Loading ? 'Rebooting...' : '🔄 Reboot'}
+                    </button>
+                  </>
+                )}
+                {(ec2Status.status === 'pending' || ec2Status.status === 'stopping') && (
+                  <span className="px-4 py-2 bg-gray-700 rounded text-sm text-gray-300 flex items-center gap-2">
+                    <span className="animate-spin">⏳</span>
+                    {ec2Status.status === 'pending' ? 'Starting...' : 'Stopping...'}
+                  </span>
+                )}
+              </div>
+              
+              {ec2Status.status !== 'running' && (
+                <p className="text-yellow-400 text-sm">
+                  ⚠️ Voice server must be running to start trading sessions
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="text-gray-400">Loading EC2 status...</div>
+          )}
+        </div>
         
         {/* Running Containers Section */}
         {runningContainers.length > 0 && (

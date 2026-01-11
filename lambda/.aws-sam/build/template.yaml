@@ -343,6 +343,8 @@ Resources:
           MARKET_METADATA_TABLE: production-kalshi-market-metadata
           SUBNETS: subnet-0ba02a0291289ed61
           SECURITY_GROUPS: sg-056792d76ef21c4c5
+          VOICE_TRADER_EC2_INSTANCE_ID: i-0ae0218a057e5b4c3
+          VOICE_TRADER_EC2_PUBLIC_DNS: voice.apexmarkets.us
       Policies:
       - DynamoDBCrudPolicy:
           TableName: production-kalshi-voice-trader-state
@@ -380,6 +382,20 @@ Resources:
           Action:
           - ec2:DescribeNetworkInterfaces
           Resource: '*'
+      - Statement:
+        - Effect: Allow
+          Action:
+          - ec2:DescribeInstances
+          - ec2:StartInstances
+          - ec2:StopInstances
+          - ec2:RebootInstances
+          Resource:
+            Fn::Sub: arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0ae0218a057e5b4c3
+      - Statement:
+        - Effect: Allow
+          Action:
+          - ec2:DescribeInstances
+          Resource: '*'
       Events:
         GetEvents:
           Type: Api
@@ -415,6 +431,34 @@ Resources:
             RestApiId:
               Ref: DashboardApi
             Path: /voice-trader/redial/{session_id}
+            Method: POST
+        EC2Status:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voice-trader/ec2/status
+            Method: GET
+        EC2Start:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voice-trader/ec2/start
+            Method: POST
+        EC2Stop:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voice-trader/ec2/stop
+            Method: POST
+        EC2Reboot:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voice-trader/ec2/reboot
             Method: POST
     Metadata:
       SamResourceId: VoiceTraderRouterFunction

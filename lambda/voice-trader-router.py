@@ -8,6 +8,12 @@ Handles:
 - POST /voice-trader/stop/{session_id} - Stop container
 - POST /voice-trader/redial/{session_id} - Request redial via WebSocket
 
+EC2 Control Endpoints:
+- GET /voice-trader/ec2/status - Get EC2 instance status
+- POST /voice-trader/ec2/start - Start EC2 instance
+- POST /voice-trader/ec2/stop - Stop EC2 instance
+- POST /voice-trader/ec2/reboot - Reboot EC2 instance
+
 Called from the dashboard UI.
 """
 
@@ -32,6 +38,10 @@ MARKET_METADATA_TABLE = os.environ.get('MARKET_METADATA_TABLE', 'production-kals
 MENTION_EVENTS_TABLE = os.environ.get('MENTION_EVENTS_TABLE', 'production-kalshi-mention-events')
 VOICE_TRADER_STATE_TABLE = os.environ.get('VOICE_TRADER_STATE_TABLE', 'production-kalshi-voice-trader-state')
 
+# EC2 Configuration - Voice Trader instance
+VOICE_TRADER_EC2_INSTANCE_ID = os.environ.get('VOICE_TRADER_EC2_INSTANCE_ID', 'i-0ae0218a057e5b4c3')
+VOICE_TRADER_EC2_PUBLIC_DNS = os.environ.get('VOICE_TRADER_EC2_PUBLIC_DNS', 'voice.apexmarkets.us')
+
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -51,7 +61,17 @@ def lambda_handler(event, context):
     path_parts = path.strip('/').split('/')
     
     try:
-        if path.endswith('/events') and http_method == 'GET':
+        # EC2 control endpoints
+        if '/ec2/status' in path and http_method == 'GET':
+            return get_ec2_status()
+        elif '/ec2/start' in path and http_method == 'POST':
+            return start_ec2()
+        elif '/ec2/stop' in path and http_method == 'POST':
+            return stop_ec2()
+        elif '/ec2/reboot' in path and http_method == 'POST':
+            return reboot_ec2()
+        # Existing endpoints
+        elif path.endswith('/events') and http_method == 'GET':
             return get_upcoming_events(event)
         elif path.endswith('/running') and http_method == 'GET':
             return get_running_containers(event)
@@ -550,6 +570,157 @@ def request_redial(session_id: str):
         'cert_accept_url': item.get('cert_accept_url'),
         'message': 'Send redial message to WebSocket'
     })
+
+
+# ============================================================================
+# EC2 Control Functions
+# ============================================================================
+
+def get_ec2_status():
+    """
+    Get Voice Trader EC2 instance status.
+    
+    Returns:
+    - instance_id: EC2 instance ID
+    - status: running, stopped, pending, stopping, etc.
+    - public_ip: Public IP if running
+    - launch_time: When instance was launched
+    - uptime_hours: Hours since launch (if running)
+    - websocket_url: WebSocket URL (if running and DNS configured)
+    """
+    try:
+        result = ec2.describe_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        
+        if not result.get('Reservations') or not result['Reservations'][0].get('Instances'):
+            return response(404, {'error': 'EC2 instance not found'})
+        
+        instance = result['Reservations'][0]['Instances'][0]
+        state = instance['State']['Name']
+        public_ip = instance.get('PublicIpAddress')
+        launch_time = instance.get('LaunchTime')
+        
+        # Calculate uptime if running
+        uptime_hours = None
+        if state == 'running' and launch_time:
+            uptime_seconds = (datetime.now(timezone.utc) - launch_time.replace(tzinfo=timezone.utc)).total_seconds()
+            uptime_hours = round(uptime_seconds / 3600, 2)
+        
+        # Build websocket URL
+        websocket_url = None
+        if state == 'running':
+            # Use configured DNS name if available, otherwise use public IP
+            host = VOICE_TRADER_EC2_PUBLIC_DNS or public_ip
+            websocket_url = f'wss://{host}:8765' if host else None
+        
+        return response(200, {
+            'instance_id': VOICE_TRADER_EC2_INSTANCE_ID,
+            'status': state,
+            'public_ip': public_ip,
+            'launch_time': launch_time.isoformat() if launch_time else None,
+            'uptime_hours': uptime_hours,
+            'websocket_url': websocket_url,
+            'dns_name': VOICE_TRADER_EC2_PUBLIC_DNS
+        })
+        
+    except Exception as e:
+        return response(500, {'error': f'Failed to get EC2 status: {str(e)}'})
+
+
+def start_ec2():
+    """Start the Voice Trader EC2 instance."""
+    try:
+        # Check current state first
+        result = ec2.describe_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        instance = result['Reservations'][0]['Instances'][0]
+        current_state = instance['State']['Name']
+        
+        if current_state == 'running':
+            return response(200, {
+                'success': True,
+                'message': 'Instance is already running',
+                'status': 'running'
+            })
+        
+        if current_state not in ['stopped']:
+            return response(400, {
+                'error': f'Cannot start instance in state: {current_state}',
+                'status': current_state
+            })
+        
+        # Start the instance
+        ec2.start_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        
+        return response(200, {
+            'success': True,
+            'message': 'Instance starting',
+            'status': 'pending',
+            'previous_state': current_state
+        })
+        
+    except Exception as e:
+        return response(500, {'error': f'Failed to start EC2: {str(e)}'})
+
+
+def stop_ec2():
+    """Stop the Voice Trader EC2 instance."""
+    try:
+        # Check current state first
+        result = ec2.describe_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        instance = result['Reservations'][0]['Instances'][0]
+        current_state = instance['State']['Name']
+        
+        if current_state == 'stopped':
+            return response(200, {
+                'success': True,
+                'message': 'Instance is already stopped',
+                'status': 'stopped'
+            })
+        
+        if current_state not in ['running']:
+            return response(400, {
+                'error': f'Cannot stop instance in state: {current_state}',
+                'status': current_state
+            })
+        
+        # Stop the instance
+        ec2.stop_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        
+        return response(200, {
+            'success': True,
+            'message': 'Instance stopping',
+            'status': 'stopping',
+            'previous_state': current_state
+        })
+        
+    except Exception as e:
+        return response(500, {'error': f'Failed to stop EC2: {str(e)}'})
+
+
+def reboot_ec2():
+    """Reboot the Voice Trader EC2 instance."""
+    try:
+        # Check current state first
+        result = ec2.describe_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        instance = result['Reservations'][0]['Instances'][0]
+        current_state = instance['State']['Name']
+        
+        if current_state != 'running':
+            return response(400, {
+                'error': f'Cannot reboot instance in state: {current_state}',
+                'status': current_state
+            })
+        
+        # Reboot the instance
+        ec2.reboot_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        
+        return response(200, {
+            'success': True,
+            'message': 'Instance rebooting',
+            'status': 'rebooting'
+        })
+        
+    except Exception as e:
+        return response(500, {'error': f'Failed to reboot EC2: {str(e)}'})
 
 
 def response(status_code: int, body: dict) -> dict:

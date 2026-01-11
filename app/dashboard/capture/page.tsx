@@ -216,8 +216,12 @@ export default function CaptureGamePage() {
     return new Date(ts * 1000).toLocaleTimeString();
   };
 
+  // Filter out games that are already queued/capturing
+  const queuedTickers = new Set(queuedCaptures.map(c => c.event_ticker));
+  const gamesNotInQueue = availableGames.filter(game => !queuedTickers.has(game.event_ticker));
+  
   // Group games by league
-  const gamesByLeague = availableGames.reduce((acc, game) => {
+  const gamesByLeague = gamesNotInQueue.reduce((acc, game) => {
     const league = game.league || 'Other';
     if (!acc[league]) acc[league] = [];
     acc[league].push(game);

@@ -261,9 +261,11 @@ export default function CaptureGamePage() {
     return new Date(ts * 1000).toLocaleTimeString();
   };
 
-  // Filter out games that are already queued/capturing
+  // Filter out games that are already queued/capturing OR have already started
   const queuedTickers = new Set(queuedCaptures.map(c => c.event_ticker));
-  const gamesNotInQueue = availableGames.filter(game => !queuedTickers.has(game.event_ticker));
+  const gamesNotInQueue = availableGames.filter(game => 
+    !queuedTickers.has(game.event_ticker) && !game.has_started
+  );
   
   // Group games by league
   const gamesByLeague = gamesNotInQueue.reduce((acc, game) => {
@@ -462,20 +464,13 @@ export default function CaptureGamePage() {
                         >
                           <div className="flex-1">
                             <p className="text-sm font-medium text-gray-900">{game.title}</p>
-                            <p className="text-xs text-gray-500">
-                              {game.time_display}
-                              {game.has_started && <span className="ml-2 text-yellow-600">• Game in progress</span>}
-                            </p>
+                            <p className="text-xs text-gray-500">{game.time_display}</p>
                           </div>
                           <button
                             onClick={() => setConfirmGame(game)}
-                            className={`ml-4 px-3 py-1 rounded-md text-sm font-medium ${
-                              game.has_started
-                                ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
-                                : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
-                            }`}
+                            className="ml-4 px-3 py-1 rounded-md text-sm font-medium bg-purple-100 text-purple-700 hover:bg-purple-200"
                           >
-                            {game.has_started ? 'Queue Now' : 'Queue'}
+                            Queue
                           </button>
                         </div>
                       ))}

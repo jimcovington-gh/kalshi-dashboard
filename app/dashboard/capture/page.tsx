@@ -370,7 +370,7 @@ export default function CaptureGamePage() {
     return (
       <div>
         <h2 className="text-lg font-semibold mb-4 text-gray-800">
-          🎮 Available Games (Next 24 Hours)
+          Available Games (Next 24 Hours)
         </h2>
         
         {sortedLeagues.length === 0 ? (

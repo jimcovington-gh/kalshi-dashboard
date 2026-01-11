@@ -52,7 +52,7 @@ type PageState = 'loading' | 'lobby' | 'viewing';
 // League icons and colors
 const LEAGUE_CONFIG: Record<string, { icon: string; color: string; bgColor: string }> = {
   'NFL': { icon: '🏈', color: 'text-green-700', bgColor: 'bg-green-50' },
-  'NCAA Basketball': { icon: '🏀', color: 'text-orange-700', bgColor: 'bg-orange-50' },
+  'NCAA Men\'s Basketball': { icon: '🏀', color: 'text-orange-700', bgColor: 'bg-orange-50' },
   'NCAA Women\'s Basketball': { icon: '🏀', color: 'text-pink-700', bgColor: 'bg-pink-50' },
   'NBA': { icon: '🏀', color: 'text-blue-700', bgColor: 'bg-blue-50' },
 };
@@ -67,7 +67,7 @@ export default function CaptureGamePage() {
   // Lobby state
   const [availableGames, setAvailableGames] = useState<AvailableGame[]>([]);
   const [queuedCaptures, setQueuedCaptures] = useState<QueuedCapture[]>([]);
-  const [expandedLeagues, setExpandedLeagues] = useState<Set<string>>(new Set(['NFL', 'NBA', 'NCAA Basketball']));
+  const [expandedLeagues, setExpandedLeagues] = useState<Set<string>>(new Set(['NFL', 'NBA', 'NCAA Men\'s Basketball']));
   
   // Confirmation dialog
   const [confirmGame, setConfirmGame] = useState<AvailableGame | null>(null);
@@ -363,7 +363,7 @@ export default function CaptureGamePage() {
   // Render available games
   const renderAvailableGames = () => {
     const sortedLeagues = Object.keys(gamesByLeague).sort((a, b) => {
-      const order = ['NFL', 'NBA', 'NCAA Basketball', 'NCAA Women\'s Basketball'];
+      const order = ['NFL', 'NBA', 'NCAA Men\'s Basketball', 'NCAA Women\'s Basketball'];
       return order.indexOf(a) - order.indexOf(b);
     });
     

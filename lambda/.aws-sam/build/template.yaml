@@ -344,7 +344,6 @@ Resources:
           SUBNETS: subnet-0ba02a0291289ed61
           SECURITY_GROUPS: sg-056792d76ef21c4c5
           VOICE_TRADER_EC2_INSTANCE_ID: i-0ae0218a057e5b4c3
-          VOICE_TRADER_EC2_PUBLIC_DNS: voice.apexmarkets.us
       Policies:
       - DynamoDBCrudPolicy:
           TableName: production-kalshi-voice-trader-state

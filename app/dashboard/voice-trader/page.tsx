@@ -75,10 +75,10 @@ interface EC2Status {
   instance_id: string;
   status: 'running' | 'stopped' | 'stopping' | 'pending' | 'terminated';
   public_ip?: string;
+  public_dns?: string;
   launch_time?: string;
   uptime_hours?: number;
   websocket_url?: string;
-  dns_name?: string;
 }
 
 type PageState = 'loading' | 'events' | 'setup' | 'cert_pending' | 'monitoring';
@@ -1075,10 +1075,10 @@ export default function VoiceTraderPage() {
                     <span className="font-mono text-blue-400">{ec2Status.public_ip}</span>
                   </div>
                 )}
-                {ec2Status.dns_name && (
+                {ec2Status.public_dns && (
                   <div>
                     <span className="text-gray-400">DNS:</span>{' '}
-                    <span className="font-mono text-blue-400">{ec2Status.dns_name}</span>
+                    <span className="font-mono text-blue-400 text-xs">{ec2Status.public_dns}</span>
                   </div>
                 )}
                 {ec2Status.uptime_hours !== null && ec2Status.uptime_hours !== undefined && (

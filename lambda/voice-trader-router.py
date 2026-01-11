@@ -40,7 +40,7 @@ VOICE_TRADER_STATE_TABLE = os.environ.get('VOICE_TRADER_STATE_TABLE', 'productio
 
 # EC2 Configuration - Voice Trader instance
 VOICE_TRADER_EC2_INSTANCE_ID = os.environ.get('VOICE_TRADER_EC2_INSTANCE_ID', 'i-0ae0218a057e5b4c3')
-VOICE_TRADER_EC2_PUBLIC_DNS = os.environ.get('VOICE_TRADER_EC2_PUBLIC_DNS', 'voice.apexmarkets.us')
+# Dynamic IP - no static DNS needed (like QuickBets approach)
 
 
 class DecimalEncoder(json.JSONEncoder):
@@ -584,9 +584,10 @@ def get_ec2_status():
     - instance_id: EC2 instance ID
     - status: running, stopped, pending, stopping, etc.
     - public_ip: Public IP if running
+    - public_dns: AWS public DNS name if running
     - launch_time: When instance was launched
     - uptime_hours: Hours since launch (if running)
-    - websocket_url: WebSocket URL (if running and DNS configured)
+    - websocket_url: WebSocket URL using IP (if running)
     """
     try:
         result = ec2.describe_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
@@ -597,6 +598,7 @@ def get_ec2_status():
         instance = result['Reservations'][0]['Instances'][0]
         state = instance['State']['Name']
         public_ip = instance.get('PublicIpAddress')
+        public_dns = instance.get('PublicDnsName')
         launch_time = instance.get('LaunchTime')
         
         # Calculate uptime if running
@@ -605,21 +607,19 @@ def get_ec2_status():
             uptime_seconds = (datetime.now(timezone.utc) - launch_time.replace(tzinfo=timezone.utc)).total_seconds()
             uptime_hours = round(uptime_seconds / 3600, 2)
         
-        # Build websocket URL
+        # Build websocket URL using public IP (dynamic, like QuickBets)
         websocket_url = None
-        if state == 'running':
-            # Use configured DNS name if available, otherwise use public IP
-            host = VOICE_TRADER_EC2_PUBLIC_DNS or public_ip
-            websocket_url = f'wss://{host}:8765' if host else None
+        if state == 'running' and public_ip:
+            websocket_url = f'wss://{public_ip}:8765'
         
         return response(200, {
             'instance_id': VOICE_TRADER_EC2_INSTANCE_ID,
             'status': state,
             'public_ip': public_ip,
+            'public_dns': public_dns,
             'launch_time': launch_time.isoformat() if launch_time else None,
             'uptime_hours': uptime_hours,
-            'websocket_url': websocket_url,
-            'dns_name': VOICE_TRADER_EC2_PUBLIC_DNS
+            'websocket_url': websocket_url
         })
         
     except Exception as e:

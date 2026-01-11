@@ -399,6 +399,11 @@ def launch_container(event):
         else:
             scheduled_start_ts = int(scheduled_start)
         env_vars.append({'name': 'SCHEDULED_START_TS', 'value': str(scheduled_start_ts)})
+        # Auto-dial at scheduled time (no user interaction needed)
+        env_vars.append({'name': 'AUTO_DIAL', 'value': 'true'})
+    else:
+        # No scheduled time - wait for user to click Start Call
+        env_vars.append({'name': 'AUTO_DIAL', 'value': 'false'})
     
     # Launch ECS task
     try:
@@ -805,6 +810,11 @@ def launch_ec2_session(event):
             env_vars['SCHEDULED_START_TS'] = str(int(dt.timestamp()))
         else:
             env_vars['SCHEDULED_START_TS'] = str(int(scheduled_start))
+        # Auto-dial at scheduled time (no user interaction needed)
+        env_vars['AUTO_DIAL'] = 'true'
+    else:
+        # No scheduled time - wait for user to click Start Call
+        env_vars['AUTO_DIAL'] = 'false'
     
     # Build shell command to run voice trader
     # Use bash explicitly and full venv path (SSM uses /bin/sh by default)

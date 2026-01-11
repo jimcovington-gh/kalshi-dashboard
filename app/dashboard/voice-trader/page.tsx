@@ -145,6 +145,9 @@ export default function VoiceTraderPage() {
   // WebSocket connection state
   const [wsConnected, setWsConnected] = useState(false);
   
+  // Auto-dial state (true if voice trader will dial at scheduled time without user interaction)
+  const [autoDial, setAutoDial] = useState(true);
+  
   // Auth token
   const [authToken, setAuthToken] = useState<string | null>(null);
   
@@ -381,6 +384,10 @@ export default function VoiceTraderPage() {
           setWords(data.words || []);
           setPnl(data.pnl);
           setTranscript(data.transcript || []);
+          // Track if voice trader is waiting for manual dial
+          if (data.auto_dial !== undefined) {
+            setAutoDial(data.auto_dial);
+          }
         } else if (data.type === 'word_triggered') {
           // Flash animation could go here
           console.log('Word triggered:', data.word);
@@ -875,8 +882,11 @@ export default function VoiceTraderPage() {
         
         if (isValidCert) {
           // Valid Let's Encrypt cert - go straight to monitoring
-          // Set pendingDial so dial command is sent when WebSocket connects
-          setPendingDial(true);
+          // Only set pendingDial if no scheduled start (AUTO_DIAL=false)
+          // If scheduled start is set, voice trader will dial automatically at that time
+          if (!scheduledStart) {
+            setPendingDial(true);
+          }
           setLaunching(false);
           setLaunchStatus('');
           setPageState('monitoring');
@@ -1501,6 +1511,17 @@ export default function VoiceTraderPage() {
             </div>
           </div>
           <div className="flex gap-2">
+            {/* Start Call button - only show when voice trader is waiting for manual dial */}
+            {!autoDial && containerState?.call_state === 'connecting' && containerState?.status_message?.toLowerCase().includes('ready to dial') && (
+              <button
+                onClick={() => {
+                  wsRef.current?.send(JSON.stringify({ type: 'dial' }));
+                }}
+                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75"
+              >
+                📞 Start Call
+              </button>
+            )}
             {error && (
               <button
                 onClick={handleReconnect}

@@ -41,7 +41,8 @@ VOICE_TRADER_STATE_TABLE = os.environ.get('VOICE_TRADER_STATE_TABLE', 'productio
 
 # EC2 Configuration - Voice Trader instance
 VOICE_TRADER_EC2_INSTANCE_ID = os.environ.get('VOICE_TRADER_EC2_INSTANCE_ID', 'i-0ae0218a057e5b4c3')
-# Dynamic IP - no static DNS needed (like QuickBets approach)
+# Use domain name for WebSocket URL (Let's Encrypt cert) instead of IP
+VOICE_TRADER_EC2_DOMAIN = os.environ.get('VOICE_TRADER_EC2_DOMAIN', 'voice.apexmarkets.us')
 
 
 class DecimalEncoder(json.JSONEncoder):
@@ -311,7 +312,8 @@ def get_running_containers(event):
             'call_state': item.get('call_state', ''),
             'started_at': started_at,
             'public_ip': public_ip,
-            'websocket_url': f'wss://{public_ip}:8765' if public_ip else None
+            'domain': VOICE_TRADER_EC2_DOMAIN if item.get('instance_id') else None,
+            'websocket_url': f'wss://{VOICE_TRADER_EC2_DOMAIN}:8765' if item.get('instance_id') else (f'wss://{public_ip}:8765' if public_ip else None)
         })
     
     # Sort by started_at descending (most recent first)
@@ -871,7 +873,8 @@ echo $!
         'session_id': session_id,
         'event_ticker': event_ticker,
         'public_ip': public_ip,
-        'websocket_url': f'wss://{public_ip}:8765',
+        'domain': VOICE_TRADER_EC2_DOMAIN,
+        'websocket_url': f'wss://{VOICE_TRADER_EC2_DOMAIN}:8765',
         'message': 'Session launching on EC2'
     })
 

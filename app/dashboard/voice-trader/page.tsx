@@ -866,8 +866,23 @@ export default function VoiceTraderPage() {
       
       // EC2 launch returns websocket_url immediately, Fargate needs to wait
       if (useEC2 && data.websocket_url) {
-        const certAcceptUrl = data.websocket_url.replace('wss://', 'https://').replace(':8765', ':8765');
         setWsUrl(data.websocket_url);
+        
+        // Check if using domain (Let's Encrypt) or IP (self-signed)
+        // Domain-based URLs have valid certs, no acceptance needed
+        const wsUrlObj = new URL(data.websocket_url.replace('wss://', 'https://'));
+        const isValidCert = data.domain || !wsUrlObj.hostname.match(/^\d+\.\d+\.\d+\.\d+$/);
+        
+        if (isValidCert) {
+          // Valid Let's Encrypt cert - go straight to monitoring
+          setLaunching(false);
+          setLaunchStatus('');
+          setPageState('monitoring');
+          return;
+        }
+        
+        // Self-signed cert (IP-based) - need user to accept
+        const certAcceptUrl = data.websocket_url.replace('wss://', 'https://').replace(':8765', ':8765');
         setCertAcceptUrl(certAcceptUrl);
         
         // Store session data for after cert acceptance

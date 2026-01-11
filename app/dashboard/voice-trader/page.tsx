@@ -815,8 +815,11 @@ export default function VoiceTraderPage() {
       return;
     }
     
+    // Check if EC2 is running - use EC2 launch if so
+    const useEC2 = ec2Status?.status === 'running';
+    
     setLaunching(true);
-    setLaunchStatus('Preparing launch...');
+    setLaunchStatus(useEC2 ? 'Launching on EC2 server...' : 'Preparing launch...');
     setError(null);
     
     try {
@@ -839,9 +842,11 @@ export default function VoiceTraderPage() {
         body.scheduled_start = scheduledStart;
       }
       
-      setLaunchStatus('Launching container...');
+      // Use EC2 endpoint if EC2 is running, otherwise Fargate
+      const launchEndpoint = useEC2 ? '/voice-trader/ec2/launch' : '/voice-trader/launch';
+      setLaunchStatus(useEC2 ? 'Launching on EC2...' : 'Launching container...');
       
-      const response = await fetch(`${API_BASE}/voice-trader/launch`, {
+      const response = await fetch(`${API_BASE}${launchEndpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -859,9 +864,30 @@ export default function VoiceTraderPage() {
       // Save session ID for status polling
       setSessionId(data.session_id);
       
+      // EC2 launch returns websocket_url immediately, Fargate needs to wait
+      if (useEC2 && data.websocket_url) {
+        const certAcceptUrl = data.websocket_url.replace('wss://', 'https://').replace(':8765', ':8765');
+        setWsUrl(data.websocket_url);
+        setCertAcceptUrl(certAcceptUrl);
+        
+        // Store session data for after cert acceptance
+        sessionStorage.setItem('voice_trader_session', JSON.stringify({
+          sessionId: data.session_id,
+          wsUrl: data.websocket_url,
+          certAcceptUrl: certAcceptUrl,
+          event: selectedEvent
+        }));
+        
+        // Go to cert acceptance page
+        setLaunching(false);
+        setLaunchStatus('');
+        setPageState('cert_pending');
+        return;
+      }
+      
       setLaunchStatus('Container launched! Waiting for it to be ready...');
       
-      // Poll for container to be ready
+      // Poll for container to be ready (Fargate only)
       await waitForContainer(data.session_id);
       
     } catch (err: any) {

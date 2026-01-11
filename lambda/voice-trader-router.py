@@ -806,8 +806,13 @@ def launch_ec2_session(event):
     
     # Build shell command to run voice trader
     # Use bash explicitly and full venv path (SSM uses /bin/sh by default)
+    # Kill any existing voice trader process first
     env_exports = ' '.join([f'{k}="{v}"' for k, v in env_vars.items()])
     command = f'''#!/bin/bash
+# Kill any existing voice trader process
+pkill -f "python main.py" || true
+sleep 1
+
 cd /opt/voice-trader/fargate-voice-mention-trader
 {env_exports} nohup /opt/voice-trader/fargate-voice-mention-trader/venv/bin/python main.py > /tmp/voice-trader-{session_id}.log 2>&1 &
 echo $!

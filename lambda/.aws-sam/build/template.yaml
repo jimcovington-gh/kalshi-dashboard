@@ -395,6 +395,14 @@ Resources:
           Action:
           - ec2:DescribeInstances
           Resource: '*'
+      - Statement:
+        - Effect: Allow
+          Action:
+          - ssm:SendCommand
+          - ssm:GetCommandInvocation
+          Resource:
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript
+          - Fn::Sub: arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0ae0218a057e5b4c3
       Events:
         GetEvents:
           Type: Api
@@ -458,6 +466,13 @@ Resources:
             RestApiId:
               Ref: DashboardApi
             Path: /voice-trader/ec2/reboot
+            Method: POST
+        EC2Launch:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voice-trader/ec2/launch
             Method: POST
     Metadata:
       SamResourceId: VoiceTraderRouterFunction

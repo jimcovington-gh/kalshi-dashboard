@@ -28,6 +28,7 @@ from decimal import Decimal
 ecs = boto3.client('ecs', region_name='us-east-1')
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 ec2 = boto3.client('ec2', region_name='us-east-1')
+ssm = boto3.client('ssm', region_name='us-east-1')
 
 # Configuration
 CLUSTER = os.environ.get('ECS_CLUSTER', 'production-kalshi-fargate-cluster')
@@ -70,6 +71,8 @@ def lambda_handler(event, context):
             return stop_ec2()
         elif '/ec2/reboot' in path and http_method == 'POST':
             return reboot_ec2()
+        elif '/ec2/launch' in path and http_method == 'POST':
+            return launch_ec2_session(event)
         # Existing endpoints
         elif path.endswith('/events') and http_method == 'GET':
             return get_upcoming_events(event)
@@ -721,6 +724,133 @@ def reboot_ec2():
         
     except Exception as e:
         return response(500, {'error': f'Failed to reboot EC2: {str(e)}'})
+
+
+def launch_ec2_session(event):
+    """
+    Launch a voice trader session on the EC2 instance via SSM.
+    
+    Similar to Fargate launch but uses SSM RunCommand to start the process.
+    """
+    body = json.loads(event.get('body', '{}'))
+    
+    event_ticker = body.get('event_ticker')
+    audio_source = body.get('audio_source', 'phone')
+    phone_number = body.get('phone_number')
+    passcode = body.get('passcode')
+    web_url = body.get('web_url')
+    scheduled_start = body.get('scheduled_start')
+    user_name = body.get('user_name', 'jimc')
+    qa_detection_enabled = body.get('qa_detection_enabled', True)
+    
+    # Validation
+    if not event_ticker:
+        return response(400, {'error': 'event_ticker required'})
+    
+    if audio_source == 'phone':
+        if not phone_number:
+            return response(400, {'error': 'phone_number required for phone audio'})
+    elif audio_source == 'web':
+        if not web_url:
+            return response(400, {'error': 'web_url required for web audio'})
+    else:
+        return response(400, {'error': 'audio_source must be "phone" or "web"'})
+    
+    # Check EC2 instance is running
+    try:
+        result = ec2.describe_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        instance = result['Reservations'][0]['Instances'][0]
+        instance_state = instance['State']['Name']
+        public_ip = instance.get('PublicIpAddress')
+        
+        if instance_state != 'running':
+            return response(400, {
+                'error': f'EC2 instance is {instance_state}. Start it first.',
+                'status': instance_state
+            })
+        
+        if not public_ip:
+            return response(500, {'error': 'EC2 instance has no public IP'})
+            
+    except Exception as e:
+        return response(500, {'error': f'Failed to check EC2 status: {str(e)}'})
+    
+    # Generate unique session ID
+    session_id = str(uuid.uuid4())[:8]
+    
+    # Build environment variables for the command
+    env_vars = {
+        'SESSION_ID': session_id,
+        'EVENT_TICKER': event_ticker,
+        'USER_NAME': user_name,
+        'AUDIO_SOURCE': audio_source,
+        'QA_DETECTION_ENABLED': str(qa_detection_enabled).lower(),
+        'ENVIRONMENT': 'production',
+        'AWS_DEFAULT_REGION': 'us-east-1',
+        'PHONE_PROVIDER': 'telnyx',
+    }
+    
+    if audio_source == 'phone':
+        env_vars['PHONE_NUMBER'] = phone_number
+        if passcode:
+            env_vars['PASSCODE'] = passcode
+    else:
+        env_vars['WEB_URL'] = web_url
+    
+    if scheduled_start:
+        if isinstance(scheduled_start, str):
+            dt = datetime.fromisoformat(scheduled_start.replace('Z', '+00:00'))
+            env_vars['SCHEDULED_START_TS'] = str(int(dt.timestamp()))
+        else:
+            env_vars['SCHEDULED_START_TS'] = str(int(scheduled_start))
+    
+    # Build shell command to run voice trader
+    # Use bash explicitly and full venv path (SSM uses /bin/sh by default)
+    env_exports = ' '.join([f'{k}="{v}"' for k, v in env_vars.items()])
+    command = f'''#!/bin/bash
+cd /opt/voice-trader/fargate-voice-mention-trader
+{env_exports} nohup /opt/voice-trader/fargate-voice-mention-trader/venv/bin/python main.py > /tmp/voice-trader-{session_id}.log 2>&1 &
+echo $!
+'''
+    
+    # Run command via SSM
+    try:
+        ssm_response = ssm.send_command(
+            InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID],
+            DocumentName='AWS-RunShellScript',
+            Parameters={'commands': [command]},
+            TimeoutSeconds=60
+        )
+        
+        command_id = ssm_response['Command']['CommandId']
+        
+    except Exception as e:
+        return response(500, {'error': f'Failed to send SSM command: {str(e)}'})
+    
+    # Save state
+    state_table = dynamodb.Table(VOICE_TRADER_STATE_TABLE)
+    state_table.put_item(Item={
+        'session_id': session_id,
+        'event_ticker': event_ticker,
+        'instance_id': VOICE_TRADER_EC2_INSTANCE_ID,
+        'ssm_command_id': command_id,
+        'status': 'launching',
+        'audio_source': audio_source,
+        'user_name': user_name,
+        'phone_number': phone_number if audio_source == 'phone' else None,
+        'public_ip': public_ip,
+        'started_at': datetime.now(timezone.utc).isoformat(),
+        'ttl': int(datetime.now(timezone.utc).timestamp()) + (7 * 24 * 60 * 60)
+    })
+    
+    return response(200, {
+        'success': True,
+        'session_id': session_id,
+        'event_ticker': event_ticker,
+        'public_ip': public_ip,
+        'websocket_url': f'wss://{public_ip}:8765',
+        'message': 'Session launching on EC2'
+    })
 
 
 def response(status_code: int, body: dict) -> dict:

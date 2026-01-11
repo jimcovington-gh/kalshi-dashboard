@@ -350,24 +350,28 @@ def get_feeder_ip():
     table = dynamodb.Table(CAPTURE_TABLE)
     
     try:
-        response = table.scan(
-            FilterExpression='begins_with(#k, :prefix)',
-            ExpressionAttributeNames={'#k': 'key'},
-            ExpressionAttributeValues={':prefix': 'FEEDER_STATE#'}
-        )
+        # Get the feeder state directly by key
+        response = table.get_item(Key={'key': 'FEEDER_STATE'})
+        feeder = response.get('Item')
         
-        items = response.get('Items', [])
-        if items:
-            # Get the most recent feeder (should only be one)
-            feeder = items[0]
-            private_ip = feeder.get('private_ip', '')
+        if feeder:
+            ip_address = feeder.get('ip_address', '')
             status = feeder.get('status', '')
             
             # Check if heartbeat is recent (within last 2 minutes)
-            heartbeat = int(feeder.get('heartbeat', 0))
-            now = int(time.time())
-            if now - heartbeat < 120 and status == 'running' and private_ip:
-                return private_ip
+            # last_heartbeat is an ISO string like "2026-01-11T20:15:08.104405+00:00"
+            last_heartbeat_str = feeder.get('last_heartbeat', '')
+            if last_heartbeat_str and status == 'running' and ip_address:
+                from datetime import datetime, timezone
+                try:
+                    # Parse ISO format timestamp
+                    heartbeat_dt = datetime.fromisoformat(last_heartbeat_str.replace('+00:00', '+00:00'))
+                    now = datetime.now(timezone.utc)
+                    age_seconds = (now - heartbeat_dt).total_seconds()
+                    if age_seconds < 120:
+                        return ip_address
+                except Exception as e:
+                    print(f"Error parsing heartbeat timestamp: {e}")
         
     except Exception as e:
         print(f"Error fetching feeder IP: {e}")

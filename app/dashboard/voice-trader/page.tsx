@@ -155,6 +155,12 @@ export default function VoiceTraderPage() {
   // Wake lock to prevent screen sleep during monitoring
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   
+  // Ref to track pending dial (avoids closure issues in WebSocket callbacks)
+  const pendingDialRef = useRef(false);
+  
+  // State for dial button UI feedback
+  const [dialing, setDialing] = useState(false);
+  
   // Running containers (for reconnection)
   const [runningContainers, setRunningContainers] = useState<RunningVoiceContainer[]>([]);
 
@@ -172,6 +178,7 @@ export default function VoiceTraderPage() {
       console.log('Certificate accepted, will send dial command');
       setCertAccepted(true);
       setPendingDial(true);
+      pendingDialRef.current = true;
       
       // Restore session if passed
       if (savedSession) {
@@ -360,11 +367,14 @@ export default function VoiceTraderPage() {
         console.log('Connected to voice trader WebSocket');
         setWsConnected(true);
         
-        // If we just came back from cert acceptance, send dial command
-        if (pendingDial) {
-          console.log('Sending dial command after cert acceptance');
+        // If we need to dial (came from cert acceptance or fresh launch without scheduled time)
+        // Use ref to avoid closure issues with React state
+        if (pendingDialRef.current) {
+          console.log('Sending dial command (pendingDialRef was true)');
           ws?.send(JSON.stringify({ type: 'dial' }));
+          pendingDialRef.current = false;
           setPendingDial(false);
+          setDialing(true);
         }
         
         // Request audio streaming
@@ -388,6 +398,10 @@ export default function VoiceTraderPage() {
           // Track if voice trader is waiting for manual dial
           if (data.auto_dial !== undefined) {
             setAutoDial(data.auto_dial);
+          }
+          // Reset dialing state when call progresses past connecting
+          if (data.call?.call_state && data.call.call_state !== 'connecting') {
+            setDialing(false);
           }
         } else if (data.type === 'word_triggered') {
           // Flash animation could go here
@@ -890,7 +904,9 @@ export default function VoiceTraderPage() {
           // Only set pendingDial if no scheduled start (AUTO_DIAL=false)
           // If scheduled start is set, voice trader will dial automatically at that time
           if (!scheduledStart) {
+            console.log('Setting pendingDial for immediate dial after WebSocket connects');
             setPendingDial(true);
+            pendingDialRef.current = true;
           }
           setLaunching(false);
           setLaunchStatus('');
@@ -1532,15 +1548,28 @@ export default function VoiceTraderPage() {
           </div>
           <div className="flex gap-2">
             {/* Start Call button - show when waiting for manual dial or status says ready */}
-            {containerState?.call_state === 'connecting' && (!autoDial || containerState?.status_message?.toLowerCase().includes('ready to dial')) && (
+            {containerState?.call_state === 'connecting' && (!autoDial || containerState?.status_message?.toLowerCase().includes('ready to dial')) && !dialing && (
               <button
                 onClick={() => {
-                  wsRef.current?.send(JSON.stringify({ type: 'dial' }));
+                  if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                    console.log('Sending dial command via Start Call button');
+                    wsRef.current.send(JSON.stringify({ type: 'dial' }));
+                    setDialing(true);
+                  } else {
+                    console.error('WebSocket not connected, cannot send dial');
+                    setError('WebSocket not connected. Please refresh the page.');
+                  }
                 }}
                 className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75"
               >
                 📞 Start Call
               </button>
+            )}
+            {/* Show dialing indicator */}
+            {dialing && containerState?.call_state === 'connecting' && (
+              <span className="bg-yellow-600 px-4 py-2 rounded animate-pulse">
+                📞 Dialing...
+              </span>
             )}
             {error && (
               <button

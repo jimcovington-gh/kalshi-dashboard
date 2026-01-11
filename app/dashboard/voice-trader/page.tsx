@@ -846,7 +846,11 @@ export default function VoiceTraderPage() {
       }
       
       if (scheduledStart) {
-        body.scheduled_start = scheduledStart;
+        // Convert local datetime-local value to ISO UTC string
+        // datetime-local gives us "2026-01-11T14:36" in local time
+        // We need to convert to UTC ISO: "2026-01-11T19:36:00.000Z"
+        const localDate = new Date(scheduledStart);
+        body.scheduled_start = localDate.toISOString();
       }
       
       // Use EC2 endpoint if EC2 is running, otherwise Fargate
@@ -1379,14 +1383,29 @@ export default function VoiceTraderPage() {
           
           <div className="mt-6">
             <label className="block text-sm text-gray-400 mb-1">Scheduled Start Time (optional)</label>
-            <input
-              type="datetime-local"
-              value={scheduledStart}
-              onChange={e => setScheduledStart(e.target.value)}
-              className="w-full bg-gray-700 rounded px-3 py-2 text-white"
-            />
+            <div className="flex gap-2">
+              <input
+                type="datetime-local"
+                value={scheduledStart}
+                onChange={e => setScheduledStart(e.target.value)}
+                className="flex-1 bg-gray-700 rounded px-3 py-2 text-white"
+              />
+              {scheduledStart && (
+                <button
+                  type="button"
+                  onClick={() => setScheduledStart('')}
+                  className="px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded text-white"
+                  title="Clear scheduled time"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
             <p className="text-xs text-gray-500 mt-1">
-              Container will wait until this time before dialing
+              {scheduledStart 
+                ? `Will dial at ${new Date(scheduledStart).toLocaleTimeString()} local time`
+                : 'Leave empty to dial immediately or show Start Call button'
+              }
             </p>
           </div>
           

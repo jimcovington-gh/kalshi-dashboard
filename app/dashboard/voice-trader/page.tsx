@@ -84,6 +84,7 @@ interface EC2Status {
 type PageState = 'loading' | 'events' | 'setup' | 'monitoring';
 
 const API_BASE = 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod';
+const EC2_BASE = 'https://voice.apexmarkets.us:8080';  // Direct EC2 endpoint
 
 export default function VoiceTraderPage() {
   const router = useRouter();
@@ -237,9 +238,8 @@ export default function VoiceTraderPage() {
     
     async function fetchEvents() {
       try {
-        const response = await fetch(`${API_BASE}/voice-trader/events`, {
-          headers: { Authorization: `Bearer ${authToken}` }
-        });
+        // Fetch events directly from EC2
+        const response = await fetch(`${EC2_BASE}/events`);
         
         if (!response.ok) throw new Error('Failed to fetch events');
         
@@ -247,39 +247,71 @@ export default function VoiceTraderPage() {
         setEvents(data.events || []);
       } catch (err) {
         console.error('Error fetching events:', err);
-        setError('Failed to load events');
+        setError('Failed to load events - is the voice server running?');
       }
     }
     
     async function fetchRunningContainers() {
+      // Get status directly from EC2
       try {
-        const response = await fetch(`${API_BASE}/voice-trader/running`, {
-          headers: { Authorization: `Bearer ${authToken}` }
-        });
+        const response = await fetch(`${EC2_BASE}/status`);
         
         if (response.ok) {
           const data = await response.json();
-          setRunningContainers(data.containers || []);
+          // Convert single session status to container list format
+          if (data.status !== 'idle' && data.session_id) {
+            setRunningContainers([{
+              session_id: data.session_id || 'current',
+              event_ticker: data.event_ticker,
+              title: data.event_ticker,
+              user_name: data.user_name || 'unknown',
+              status: data.status,
+              call_state: data.call_state,
+              started_at: data.started_at,
+              websocket_url: 'wss://voice.apexmarkets.us:8765'
+            }]);
+          } else {
+            setRunningContainers([]);
+          }
         }
       } catch (err) {
-        console.error('Error fetching running containers:', err);
+        console.error('Error fetching status:', err);
+        setRunningContainers([]);
       }
     }
 
     async function fetchEC2Status() {
+      // Check if EC2 is responding by hitting health endpoint
       try {
-        const response = await fetch(`${API_BASE}/voice-trader/ec2/status`, {
-          headers: { Authorization: `Bearer ${authToken}` }
-        });
+        const response = await fetch(`${EC2_BASE}/health`);
         
         if (response.ok) {
           const data = await response.json();
-          setEc2Status(data);
+          setEc2Status({
+            instance_id: 'i-0ae0218a057e5b4c3',
+            status: 'running',
+            public_ip: '34.236.92.101',
+            websocket_url: 'wss://voice.apexmarkets.us:8765',
+            uptime_hours: data.uptime_seconds ? data.uptime_seconds / 3600 : undefined
+          });
           setEc2Error(null);
+        } else {
+          setEc2Status({
+            instance_id: 'i-0ae0218a057e5b4c3',
+            status: 'stopped',
+            public_ip: undefined,
+            websocket_url: undefined
+          });
         }
       } catch (err) {
-        console.error('Error fetching EC2 status:', err);
-        setEc2Error('Failed to fetch EC2 status');
+        // If we can't reach EC2, it's probably stopped
+        setEc2Status({
+          instance_id: 'i-0ae0218a057e5b4c3',
+          status: 'stopped',
+          public_ip: undefined,
+          websocket_url: undefined
+        });
+        setEc2Error('Voice server not responding');
       }
     }
     
@@ -296,76 +328,102 @@ export default function VoiceTraderPage() {
     };
   }, [pageState, authToken]);
 
-  // WebSocket connection for monitoring (may fail due to mixed content)
+  // WebSocket connection for monitoring with retry logic
   useEffect(() => {
     if (pageState !== 'monitoring' || !wsUrl) return;
     
-    // Try to connect to WebSocket
     let ws: WebSocket | null = null;
-    try {
-      ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-      ws.binaryType = 'arraybuffer'; // Enable binary data for audio
+    let retryCount = 0;
+    const maxRetries = 15;  // Try for ~30 seconds (2s intervals)
+    let retryTimeout: NodeJS.Timeout | null = null;
+    let isConnecting = true;
+    
+    const connectWebSocket = () => {
+      if (!isConnecting) return;
       
-      ws.onopen = () => {
-        console.log('Connected to voice trader WebSocket');
-        setWsConnected(true);
+      try {
+        console.log(`WebSocket connecting to ${wsUrl} (attempt ${retryCount + 1}/${maxRetries})...`);
+        ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+        ws.binaryType = 'arraybuffer'; // Enable binary data for audio
         
-        // Request audio streaming
-        ws?.send(JSON.stringify({ type: 'enable_audio_stream' }));
-      };
-      
-      ws.onmessage = (event) => {
-        // Handle binary audio data
-        if (event.data instanceof ArrayBuffer) {
-          playAudioChunk(event.data);
-          return;
-        }
+        ws.onopen = () => {
+          console.log('Connected to voice trader WebSocket');
+          setWsConnected(true);
+          retryCount = 0;  // Reset retry count on success
+          
+          // Request audio streaming
+          ws?.send(JSON.stringify({ type: 'enable_audio_stream' }));
+        };
         
-        const data = JSON.parse(event.data);
-        
-        if (data.type === 'full_state') {
-          setContainerState(data.call);
-          setWords(data.words || []);
-          setPnl(data.pnl);
-          setTranscript(data.transcript || []);
-          // Track if voice trader is waiting for manual dial
-          if (data.auto_dial !== undefined) {
-            setAutoDial(data.auto_dial);
+        ws.onmessage = (event) => {
+          // Handle binary audio data
+          if (event.data instanceof ArrayBuffer) {
+            playAudioChunk(event.data);
+            return;
           }
-          // Reset dialing state when call progresses past connecting
-          if (data.call?.call_state && data.call.call_state !== 'connecting') {
-            setDialing(false);
+          
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'full_state') {
+            setContainerState(data.call);
+            setWords(data.words || []);
+            setPnl(data.pnl);
+            setTranscript(data.transcript || []);
+            // Track if voice trader is waiting for manual dial
+            if (data.auto_dial !== undefined) {
+              setAutoDial(data.auto_dial);
+            }
+            // Reset dialing state when call progresses past connecting
+            if (data.call?.call_state && data.call.call_state !== 'connecting') {
+              setDialing(false);
+            }
+          } else if (data.type === 'word_triggered') {
+            // Flash animation could go here
+            console.log('Word triggered:', data.word);
+          } else if (data.type === 'disconnect_alert') {
+            setError(data.message);
+          } else if (data.type === 'audio_active') {
+            setAudioActive(data.active);
           }
-        } else if (data.type === 'word_triggered') {
-          // Flash animation could go here
-          console.log('Word triggered:', data.word);
-        } else if (data.type === 'disconnect_alert') {
-          setError(data.message);
-        } else if (data.type === 'audio_active') {
-          setAudioActive(data.active);
+        };
+        
+        ws.onerror = (err) => {
+          console.error('WebSocket error:', err);
+        };
+        
+        ws.onclose = (event) => {
+          console.log(`WebSocket closed (code: ${event.code}). Total chunks received: ${audioChunkCountRef.current}`);
+          setWsConnected(false);
+          setAudioActive(false);
+          // Reset jitter buffer and chunk counter for next connection
+          nextPlayTimeRef.current = 0;
+          audioChunkCountRef.current = 0;
+          
+          // Retry if we haven't connected yet and haven't exceeded retries
+          if (isConnecting && retryCount < maxRetries) {
+            retryCount++;
+            console.log(`Retrying WebSocket in 2 seconds... (${retryCount}/${maxRetries})`);
+            retryTimeout = setTimeout(connectWebSocket, 2000);
+          }
+        };
+      } catch (err) {
+        console.error('Failed to create WebSocket:', err);
+        setWsConnected(false);
+        
+        // Retry on exception too
+        if (isConnecting && retryCount < maxRetries) {
+          retryCount++;
+          retryTimeout = setTimeout(connectWebSocket, 2000);
         }
-      };
-      
-      ws.onerror = (err) => {
-        console.error('WebSocket error (may be blocked by browser):', err);
-        setWsConnected(false);
-      };
-      
-      ws.onclose = () => {
-        console.log(`[AUDIO] WebSocket closed. Total chunks received: ${audioChunkCountRef.current}`);
-        setWsConnected(false);
-        setAudioActive(false);
-        // Reset jitter buffer and chunk counter for next connection
-        nextPlayTimeRef.current = 0;
-        audioChunkCountRef.current = 0;
-      };
-    } catch (err) {
-      console.error('Failed to create WebSocket:', err);
-      setWsConnected(false);
-    }
+      }
+    };
+    
+    connectWebSocket();
     
     return () => {
+      isConnecting = false;
+      if (retryTimeout) clearTimeout(retryTimeout);
       if (ws) ws.close();
       // Cleanup audio context
       if (audioContextRef.current) {
@@ -381,14 +439,13 @@ export default function VoiceTraderPage() {
 
   // Polling fallback for state updates (when WebSocket blocked by browser)
   useEffect(() => {
-    if (pageState !== 'monitoring' || !sessionId || !authToken) return;
+    if (pageState !== 'monitoring' || !sessionId) return;
     
     // Always poll for state since WebSocket is often blocked (mixed content)
     const pollState = async () => {
       try {
-        const response = await fetch(`${API_BASE}/voice-trader/status/${sessionId}`, {
-          headers: { Authorization: `Bearer ${authToken}` }
-        });
+        // Poll EC2 directly for session status
+        const response = await fetch(`${EC2_BASE}/status`);
         
         if (!response.ok) return;
         
@@ -776,46 +833,32 @@ export default function VoiceTraderPage() {
       return;
     }
     
-    // Always use EC2 - Fargate support removed
+    // Check if EC2 server is responding
     if (ec2Status?.status !== 'running') {
-      setError('EC2 server is not running. Please start it first.');
+      setError('Voice server is not running. Please start it first.');
       return;
     }
     
     setLaunching(true);
-    setLaunchStatus('Launching on EC2 server...');
+    setLaunchStatus('Dialing...');
     setError(null);
     
     try {
+      // Call EC2 directly - no Lambda needed!
       const body: any = {
         event_ticker: selectedEvent.event_ticker,
-        audio_source: audioSource,
-        qa_detection_enabled: qaDetectionEnabled,
+        user_name: 'jimc',  // TODO: Get from auth
+        phone_number: phoneNumber,
       };
       
-      if (audioSource === 'phone') {
-        body.phone_number = phoneNumber;
-        if (passcode) {
-          body.passcode = passcode;
-        }
-      } else {
-        body.web_url = webUrl;
+      if (passcode) {
+        body.passcode = passcode;
       }
       
-      if (scheduledStart) {
-        // Convert local datetime-local value to ISO UTC string
-        const localDate = new Date(scheduledStart);
-        body.scheduled_start = localDate.toISOString();
-      }
-      
-      // Always use EC2 endpoint
-      setLaunchStatus('Launching on EC2...');
-      
-      const response = await fetch(`${API_BASE}/voice-trader/ec2/launch`, {
+      const response = await fetch(`${EC2_BASE}/dial`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`
         },
         body: JSON.stringify(body)
       });
@@ -898,12 +941,12 @@ export default function VoiceTraderPage() {
   };
 
   const handleStop = async () => {
-    if (!sessionId || !authToken) return;
+    if (!sessionId) return;
     
     try {
-      await fetch(`${API_BASE}/voice-trader/stop/${sessionId}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` }
+      // Call EC2 directly to hangup
+      await fetch(`${EC2_BASE}/hangup`, {
+        method: 'POST'
       });
       
       setPageState('events');

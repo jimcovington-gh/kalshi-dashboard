@@ -1171,9 +1171,9 @@ export default function VoiceTraderPage() {
                       Starts: {new Date(event.start_date).toLocaleString()}
                     </div>
                     <div className="text-sm text-yellow-400">
-                      {event.hours_until_start < 1 
-                        ? `${Math.round(event.hours_until_start * 60)} min` 
-                        : `${event.hours_until_start.toFixed(1)} hrs`} until start
+                      {(event.hours_until_start ?? 0) < 1 
+                        ? `${Math.round((event.hours_until_start ?? 0) * 60)} min` 
+                        : `${(event.hours_until_start ?? 0).toFixed(1)} hrs`} until start
                     </div>
                     <div className="text-sm text-blue-400">
                       {event.word_count} words to track
@@ -1567,11 +1567,11 @@ export default function VoiceTraderPage() {
                 <div className="text-sm space-y-1">
                   <div className="flex justify-between">
                     <span className="text-gray-400">Cash:</span>
-                    <span>${pnl.cash_balance.toFixed(2)}</span>
+                    <span>${(pnl.cash_balance ?? 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Exposure:</span>
-                    <span>${pnl.total_exposure.toFixed(2)}</span>
+                    <span>${(pnl.total_exposure ?? 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Trades:</span>

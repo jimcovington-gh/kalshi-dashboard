@@ -521,10 +521,10 @@ export default function VoiceTraderPage() {
           setAudioActive(false);
         }
         
-        // Set error for disconnected call (enables Redial button)
+        // Don't set error for disconnected - the status display handles it cleanly
         if (data.call_state === 'disconnected') {
-          setError('Call disconnected. Click Redial to reconnect.');
           setAudioActive(false);
+          setDialing(false);  // Reset dialing state
         }
         
       } catch (err) {
@@ -1397,12 +1397,39 @@ export default function VoiceTraderPage() {
   }
 
   if (pageState === 'monitoring' && selectedEvent) {
+    // Derive simple call status from state
+    const isCallActive = containerState?.call_state === 'in_progress' || containerState?.call_state === 'qa_session';
+    const isConnecting = containerState?.call_state === 'connecting' || dialing;
+    const isDisconnected = containerState?.call_state === 'disconnected' || containerState?.call_state === 'completed';
+    const isReadyToDial = containerState?.status_message?.toLowerCase().includes('ready to dial');
+    
+    // Single status message
+    let statusMessage = 'Connecting...';
+    let statusColor = 'text-gray-400';
+    if (error) {
+      statusMessage = error;
+      statusColor = 'text-red-400';
+    } else if (isCallActive) {
+      statusMessage = '🟢 Call Active';
+      statusColor = 'text-green-400';
+    } else if (isConnecting) {
+      statusMessage = '📞 Dialing...';
+      statusColor = 'text-yellow-400';
+    } else if (isDisconnected) {
+      statusMessage = '🔴 Call Ended';
+      statusColor = 'text-red-400';
+    } else if (isReadyToDial) {
+      statusMessage = '⏳ Ready to Dial';
+      statusColor = 'text-blue-400';
+    } else if (containerState?.status_message) {
+      statusMessage = containerState.status_message;
+    }
+    
     return (
       <div className="min-h-screen bg-gray-900 text-white p-4">
-        {/* Header */}
+        {/* Header - SIMPLIFIED */}
         <div className="flex justify-between items-center mb-4">
           <div>
-            {/* Emergency exit - always works regardless of WebSocket/API state */}
             <button
               onClick={() => {
                 setPageState('events');
@@ -1410,6 +1437,10 @@ export default function VoiceTraderPage() {
                 setSessionId(null);
                 setWsConnected(false);
                 setError(null);
+                setDialing(false);
+                setContainerState(null);  // Clear container state
+                setWords([]);  // Clear word grid
+                setTranscript([]);  // Clear transcript
                 if (wsRef.current) {
                   wsRef.current.close();
                   wsRef.current = null;
@@ -1420,68 +1451,62 @@ export default function VoiceTraderPage() {
               ← Back to Lobby
             </button>
             <h1 className="text-xl font-bold">{selectedEvent.title}</h1>
-            {/* Single unified status line */}
-            <div className={`text-sm ${getCallStateColor(containerState?.call_state || '')}`}>
-              {error ? `⚠️ ${error}` : (containerState?.status_message || 'Connecting...')}
-            </div>
+            <div className={`text-sm ${statusColor}`}>{statusMessage}</div>
           </div>
-          <div className="flex gap-2">
-            {/* Start Call button - show when status says ready to dial */}
-            {containerState?.status_message?.toLowerCase().includes('ready to dial') && !dialing && (
+          
+          {/* ONE button based on state */}
+          <div>
+            {isReadyToDial && !dialing && (
               <button
                 onClick={async () => {
                   setDialing(true);
-                  
-                  // Simple, direct HTTPS POST to container
-                  // No WebSocket needed, no Lambda in the middle, just works
+                  setError(null);
                   const containerUrl = wsUrl?.replace('wss://', 'https://').replace(':8765', ':8080');
                   if (!containerUrl) {
                     setError('Container URL not available');
                     setDialing(false);
                     return;
                   }
-                  
-                  console.log('Sending dial via direct HTTPS to container');
                   try {
-                    const response = await fetch(`${containerUrl}/dial`, {
-                      method: 'POST'
-                    });
+                    const response = await fetch(`${containerUrl}/dial`, { method: 'POST' });
                     if (!response.ok) {
                       const data = await response.json();
                       throw new Error(data.error || 'Failed to dial');
                     }
-                    console.log('Dial request sent directly to container');
                   } catch (err: any) {
-                    console.error('Failed to dial:', err);
                     setError(err.message);
                     setDialing(false);
                   }
                 }}
-                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75"
+                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded"
               >
                 📞 Start Call
               </button>
             )}
-            {/* Show dialing indicator */}
-            {dialing && containerState?.call_state === 'connecting' && (
-              <span className="bg-yellow-600 px-4 py-2 rounded animate-pulse">
-                📞 Dialing...
-              </span>
+            {isConnecting && (
+              <span className="bg-yellow-600 px-4 py-2 rounded animate-pulse">📞 Dialing...</span>
             )}
-            {error && (
+            {isCallActive && (
               <button
-                onClick={handleReconnect}
-                className="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75"
+                onClick={handleStop}
+                className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded"
               >
-                📞 Redial
+                📴 End Call
               </button>
             )}
-            <button
-              onClick={handleStop}
-              className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75"
-            >
-              📴 End Call
-            </button>
+            {isDisconnected && (
+              <button
+                onClick={() => {
+                  setError(null);
+                  setDialing(false);
+                  // Go back to lobby to restart cleanly
+                  setPageState('events');
+                }}
+                className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded"
+              >
+                ↩ Return to Lobby
+              </button>
+            )}
           </div>
         </div>
         

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
 interface MentionEvent {
   event_ticker: string;
@@ -81,22 +81,17 @@ interface EC2Status {
   websocket_url?: string;
 }
 
-type PageState = 'loading' | 'events' | 'setup' | 'cert_pending' | 'monitoring';
+type PageState = 'loading' | 'events' | 'setup' | 'monitoring';
 
 const API_BASE = 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod';
 
 export default function VoiceTraderPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [pageState, setPageState] = useState<PageState>('loading');
   const [events, setEvents] = useState<MentionEvent[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<MentionEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  
-  // Track if we need to send dial command after cert acceptance
-  const [pendingDial, setPendingDial] = useState(false);
-  const [certAccepted, setCertAccepted] = useState(false);
   
   // Setup form state
   const [audioSource, setAudioSource] = useState<'phone' | 'web'>('phone');
@@ -116,7 +111,6 @@ export default function VoiceTraderPage() {
   const [pnl, setPnl] = useState<PnLSummary | null>(null);
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
   const [wsUrl, setWsUrl] = useState<string | null>(null);
-  const [certAcceptUrl, setCertAcceptUrl] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   
   // Audio playback state
@@ -155,9 +149,6 @@ export default function VoiceTraderPage() {
   // Wake lock to prevent screen sleep during monitoring
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   
-  // Ref to track pending dial (avoids closure issues in WebSocket callbacks)
-  const pendingDialRef = useRef(false);
-  
   // State for dial button UI feedback
   const [dialing, setDialing] = useState(false);
   
@@ -170,26 +161,6 @@ export default function VoiceTraderPage() {
   const [ec2Error, setEc2Error] = useState<string | null>(null);
 
   // Check for cert_accepted param on load (redirect back from cert page)
-  useEffect(() => {
-    const certParam = searchParams.get('cert_accepted');
-    const savedSession = searchParams.get('session_id');
-    
-    if (certParam === 'true') {
-      console.log('Certificate accepted, will send dial command');
-      setCertAccepted(true);
-      setPendingDial(true);
-      pendingDialRef.current = true;
-      
-      // Restore session if passed
-      if (savedSession) {
-        setSessionId(savedSession);
-      }
-      
-      // Clean URL params
-      router.replace('/dashboard/voice-trader', { scroll: false });
-    }
-  }, [searchParams, router]);
-
   // Fetch auth token on mount
   useEffect(() => {
     async function getAuth() {
@@ -209,33 +180,6 @@ export default function VoiceTraderPage() {
     }
     getAuth();
   }, [router]);
-
-  // Restore session after cert acceptance redirect
-  useEffect(() => {
-    if (!certAccepted || !authToken) return;
-    
-    const savedData = sessionStorage.getItem('voice_trader_session');
-    if (savedData) {
-      try {
-        const { sessionId: savedSessionId, wsUrl: savedWsUrl, certAcceptUrl: savedCertUrl, event } = JSON.parse(savedData);
-        
-        setSessionId(savedSessionId);
-        setWsUrl(savedWsUrl);
-        setCertAcceptUrl(savedCertUrl);
-        if (event) setSelectedEvent(event);
-        
-        // Go to monitoring page
-        setPageState('monitoring');
-        
-        // Clear saved data
-        sessionStorage.removeItem('voice_trader_session');
-        
-        console.log('Session restored after cert acceptance, will send dial command when WebSocket connects');
-      } catch (err) {
-        console.error('Error restoring session:', err);
-      }
-    }
-  }, [certAccepted, authToken]);
 
   // Wake lock management - prevents screen sleep during monitoring
   useEffect(() => {
@@ -366,16 +310,6 @@ export default function VoiceTraderPage() {
       ws.onopen = () => {
         console.log('Connected to voice trader WebSocket');
         setWsConnected(true);
-        
-        // If we need to dial (came from cert acceptance or fresh launch without scheduled time)
-        // Use ref to avoid closure issues with React state
-        if (pendingDialRef.current) {
-          console.log('Sending dial command (pendingDialRef was true)');
-          ws?.send(JSON.stringify({ type: 'dial' }));
-          pendingDialRef.current = false;
-          setPendingDial(false);
-          setDialing(true);
-        }
         
         // Request audio streaming
         ws?.send(JSON.stringify({ type: 'enable_audio_stream' }));
@@ -842,11 +776,14 @@ export default function VoiceTraderPage() {
       return;
     }
     
-    // Check if EC2 is running - use EC2 launch if so
-    const useEC2 = ec2Status?.status === 'running';
+    // Always use EC2 - Fargate support removed
+    if (ec2Status?.status !== 'running') {
+      setError('EC2 server is not running. Please start it first.');
+      return;
+    }
     
     setLaunching(true);
-    setLaunchStatus(useEC2 ? 'Launching on EC2 server...' : 'Preparing launch...');
+    setLaunchStatus('Launching on EC2 server...');
     setError(null);
     
     try {
@@ -867,17 +804,14 @@ export default function VoiceTraderPage() {
       
       if (scheduledStart) {
         // Convert local datetime-local value to ISO UTC string
-        // datetime-local gives us "2026-01-11T14:36" in local time
-        // We need to convert to UTC ISO: "2026-01-11T19:36:00.000Z"
         const localDate = new Date(scheduledStart);
         body.scheduled_start = localDate.toISOString();
       }
       
-      // Use EC2 endpoint if EC2 is running, otherwise Fargate
-      const launchEndpoint = useEC2 ? '/voice-trader/ec2/launch' : '/voice-trader/launch';
-      setLaunchStatus(useEC2 ? 'Launching on EC2...' : 'Launching container...');
+      // Always use EC2 endpoint
+      setLaunchStatus('Launching on EC2...');
       
-      const response = await fetch(`${API_BASE}${launchEndpoint}`, {
+      const response = await fetch(`${API_BASE}/voice-trader/ec2/launch`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -895,101 +829,24 @@ export default function VoiceTraderPage() {
       // Save session ID for status polling
       setSessionId(data.session_id);
       
-      // EC2 launch returns websocket_url immediately, Fargate needs to wait
-      if (useEC2 && data.websocket_url) {
+      // EC2 launch returns websocket_url immediately
+      if (data.websocket_url) {
         setWsUrl(data.websocket_url);
         
-        // Check if using domain (Let's Encrypt) or IP (self-signed)
-        // Domain-based URLs have valid certs, no acceptance needed
-        const wsUrlObj = new URL(data.websocket_url.replace('wss://', 'https://'));
-        const isValidCert = data.domain || !wsUrlObj.hostname.match(/^\d+\.\d+\.\d+\.\d+$/);
-        
-        if (isValidCert) {
-          // Valid Let's Encrypt cert - go straight to monitoring
-          // No need for pendingDial anymore - server shows "Ready to dial" status
-          // and user clicks Start Call button (works via WebSocket or HTTP)
-          setLaunching(false);
-          setLaunchStatus('');
-          setPageState('monitoring');
-          return;
-        }
-        
-        // Self-signed cert (IP-based) - need user to accept
-        const certAcceptUrl = data.websocket_url.replace('wss://', 'https://').replace(':8765', ':8765');
-        setCertAcceptUrl(certAcceptUrl);
-        
-        // Store session data for after cert acceptance
-        sessionStorage.setItem('voice_trader_session', JSON.stringify({
-          sessionId: data.session_id,
-          wsUrl: data.websocket_url,
-          certAcceptUrl: certAcceptUrl,
-          event: selectedEvent
-        }));
-        
-        // Go to cert acceptance page
+        // EC2 uses voice.apexmarkets.us with Let's Encrypt - valid cert, go straight to monitoring
         setLaunching(false);
         setLaunchStatus('');
-        setPageState('cert_pending');
+        setPageState('monitoring');
         return;
       }
       
-      setLaunchStatus('Container launched! Waiting for it to be ready...');
-      
-      // Poll for container to be ready (Fargate only)
-      await waitForContainer(data.session_id);
+      throw new Error('No WebSocket URL returned from server');
       
     } catch (err: any) {
       setError(err.message);
       setLaunchStatus('');
       setLaunching(false);
     }
-  };
-
-  const waitForContainer = async (sessionId: string) => {
-    // Poll status until we get WebSocket URL
-    for (let i = 0; i < 60; i++) {
-      await new Promise(r => setTimeout(r, 2000));
-      
-      setLaunchStatus(`Waiting for container... (${i * 2}s)`);
-      
-      try {
-        const response = await fetch(`${API_BASE}/voice-trader/status/${sessionId}`, {
-          headers: { Authorization: `Bearer ${authToken}` }
-        });
-        
-        const data = await response.json();
-        
-        if (data.websocket_url && data.cert_accept_url) {
-          setWsUrl(data.websocket_url);
-          setCertAcceptUrl(data.cert_accept_url);
-          
-          // Store session data for after cert acceptance
-          sessionStorage.setItem('voice_trader_session', JSON.stringify({
-            sessionId,
-            wsUrl: data.websocket_url,
-            certAcceptUrl: data.cert_accept_url,
-            event: selectedEvent
-          }));
-          
-          // Show intermediate cert acceptance page instead of immediate redirect
-          // (Browsers don't handle redirects to self-signed certs well)
-          setLaunching(false);
-          setLaunchStatus('');
-          setPageState('cert_pending');
-          return;
-        }
-        
-        if (data.ecs_status === 'STOPPED' || data.status === 'failed') {
-          throw new Error('Container failed to start');
-        }
-      } catch (err) {
-        console.error('Status poll error:', err);
-      }
-    }
-    
-    setLaunching(false);
-    setLaunchStatus('');
-    throw new Error('Container did not start in time');
   };
 
   const handleReconnect = () => {
@@ -1025,17 +882,8 @@ export default function VoiceTraderPage() {
     
     if (container.websocket_url) {
       setWsUrl(container.websocket_url);
-      setCertAcceptUrl(container.websocket_url.replace('wss://', 'https://'));
       
-      // Store session data for potential cert acceptance
-      sessionStorage.setItem('voice_trader_session', JSON.stringify({
-        sessionId: container.session_id,
-        wsUrl: container.websocket_url,
-        certAcceptUrl: container.websocket_url.replace('wss://', 'https://'),
-        event: matchingEvent || { event_ticker: container.event_ticker, title: container.title }
-      }));
-      
-      // Go directly to monitoring (cert may already be accepted)
+      // Go directly to monitoring - EC2 uses Let's Encrypt, cert is valid
       setPageState('monitoring');
     } else {
       setError('Container does not have a WebSocket URL yet');
@@ -1477,63 +1325,6 @@ export default function VoiceTraderPage() {
     );
   }
 
-  // Certificate acceptance intermediate page
-  if (pageState === 'cert_pending' && certAcceptUrl && selectedEvent) {
-    const returnUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/dashboard/voice-trader?cert_accepted=true&session_id=${sessionId}`;
-    const certUrl = `${certAcceptUrl}?return_url=${encodeURIComponent(returnUrl)}`;
-    
-    return (
-      <div className="min-h-screen bg-gray-900 text-white p-4 flex items-center justify-center">
-        <div className="max-w-lg w-full">
-          <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
-            <div className="text-center mb-6">
-              <div className="text-5xl mb-4">🔐</div>
-              <h1 className="text-2xl font-bold mb-2">Accept Security Certificate</h1>
-              <p className="text-gray-400">
-                One more step to enable real-time audio
-              </p>
-            </div>
-            
-            <div className="bg-gray-700 rounded-lg p-4 mb-6">
-              <h3 className="font-semibold mb-3">Steps:</h3>
-              <ol className="list-decimal list-inside space-y-3 text-sm text-gray-300">
-                <li>Click the button below to open the certificate page</li>
-                <li>Your browser will show a security warning - this is expected</li>
-                <li>Click <span className="text-yellow-400 font-medium">&quot;Advanced&quot;</span> then <span className="text-yellow-400 font-medium">&quot;Proceed&quot;</span></li>
-                <li>You&apos;ll be automatically redirected back here</li>
-              </ol>
-            </div>
-            
-            <a
-              href={certUrl}
-              className="block w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg text-center transition-colors"
-            >
-              Accept Certificate & Continue →
-            </a>
-            
-            <div className="mt-4 text-center">
-              <button
-                onClick={() => {
-                  setPageState('monitoring');
-                  setCertAccepted(true);
-                }}
-                className="text-gray-500 hover:text-gray-400 text-sm underline"
-              >
-                Skip (microphone won&apos;t work)
-              </button>
-            </div>
-            
-            <div className="mt-6 p-3 bg-gray-900 rounded text-xs text-gray-500">
-              <strong>Why is this needed?</strong> The voice trader uses a direct WebSocket 
-              connection for low-latency audio. Your browser needs to trust this connection 
-              for the microphone to work.
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   if (pageState === 'monitoring' && selectedEvent) {
     return (
       <div className="min-h-screen bg-gray-900 text-white p-4">
@@ -1613,30 +1404,6 @@ export default function VoiceTraderPage() {
         {error && (
           <div className="bg-red-900 border border-red-500 text-red-200 px-4 py-3 rounded mb-4">
             {error}
-          </div>
-        )}
-        
-        {/* Certificate acceptance message - only show if WebSocket failed to connect after cert redirect */}
-        {!wsConnected && certAcceptUrl && !pendingDial && (
-          <div className="bg-yellow-900 border border-yellow-600 text-yellow-200 px-4 py-3 rounded mb-4">
-            <div className="font-semibold mb-1">🔐 WebSocket Connection Failed</div>
-            <div className="text-sm">
-              If the microphone is not working, you may need to manually accept the certificate:
-              <ol className="list-decimal ml-5 mt-2">
-                <li>
-                  <a 
-                    href={certAcceptUrl} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-yellow-400 underline hover:text-yellow-300"
-                  >
-                    Click here to open {certAcceptUrl}
-                  </a>
-                </li>
-                <li>Click &quot;Advanced&quot; → &quot;Proceed to {certAcceptUrl?.replace('https://', '').split(':')[0]} (unsafe)&quot;</li>
-                <li>Return to this tab and refresh the page</li>
-              </ol>
-            </div>
           </div>
         )}
         

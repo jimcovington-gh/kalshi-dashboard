@@ -378,6 +378,18 @@ export default function VoiceTraderPage() {
             if (data.call?.call_state && data.call.call_state !== 'connecting') {
               setDialing(false);
             }
+          } else if (data.type === 'transcript') {
+            // Real-time transcript segment from voice trader
+            setTranscript(prev => {
+              // Limit to last 100 segments
+              const newSegment = {
+                text: data.text,
+                is_final: data.is_final,
+                speaker_id: data.speaker_id,
+                timestamp: data.timestamp
+              };
+              return [...prev.slice(-99), newSegment];
+            });
           } else if (data.type === 'word_triggered') {
             // Flash animation could go here
             console.log('Word triggered:', data.word);

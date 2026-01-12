@@ -395,6 +395,7 @@ export default function VoiceTraderPage() {
             console.log('Word triggered:', data.word);
           } else if (data.type === 'disconnect_alert') {
             setError(data.message);
+            setAudioActive(false);  // Call disconnected - not active anymore
           } else if (data.type === 'audio_active') {
             setAudioActive(data.active);
           }
@@ -411,6 +412,11 @@ export default function VoiceTraderPage() {
           // Reset jitter buffer and chunk counter for next connection
           nextPlayTimeRef.current = 0;
           audioChunkCountRef.current = 0;
+          
+          // If we were connected (had received chunks) and connection drops, show disconnect
+          if (audioChunkCountRef.current > 0 || !isConnecting) {
+            setError('Connection lost. Click Redial to reconnect.');
+          }
           
           // Retry if we haven't connected yet and haven't exceeded retries
           if (isConnecting && retryCount < maxRetries) {
@@ -463,6 +469,13 @@ export default function VoiceTraderPage() {
         
         const data = await response.json();
         
+        // Handle idle state - no active session on server
+        if (data.status === 'idle') {
+          setError('Session ended. Return to events to start a new call.');
+          setAudioActive(false);
+          return;
+        }
+        
         // Update state from DynamoDB data (pushed by container)
         if (data.call_state || data.status_message) {
           setContainerState(prev => ({
@@ -504,11 +517,13 @@ export default function VoiceTraderPage() {
         // Check if container stopped or call disconnected
         if (data.ecs_status === 'STOPPED' || data.status === 'stopped') {
           setError('Container stopped');
+          setAudioActive(false);
         }
         
         // Set error for disconnected call (enables Redial button)
         if (data.call_state === 'disconnected') {
           setError('Call disconnected. Click Redial to reconnect.');
+          setAudioActive(false);
         }
         
       } catch (err) {
@@ -1451,7 +1466,7 @@ export default function VoiceTraderPage() {
               onClick={handleStop}
               className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75"
             >
-              Stop
+              📴 End Call
             </button>
           </div>
         </div>

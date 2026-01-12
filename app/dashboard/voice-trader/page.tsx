@@ -413,9 +413,10 @@ export default function VoiceTraderPage() {
           nextPlayTimeRef.current = 0;
           audioChunkCountRef.current = 0;
           
-          // If we were connected (had received chunks) and connection drops, show disconnect
-          if (audioChunkCountRef.current > 0 || !isConnecting) {
-            setError('Connection lost. Click Redial to reconnect.');
+          // Only show error if connection dropped unexpectedly (not user-initiated close)
+          // Code 1000 = normal closure, 1001 = going away (navigation)
+          if (event.code !== 1000 && event.code !== 1001 && !isConnecting) {
+            setError(`Connection lost (code: ${event.code})`);
           }
           
           // Retry if we haven't connected yet and haven't exceeded retries
@@ -1419,13 +1420,9 @@ export default function VoiceTraderPage() {
               ← Back to Lobby
             </button>
             <h1 className="text-xl font-bold">{selectedEvent.title}</h1>
+            {/* Single unified status line */}
             <div className={`text-sm ${getCallStateColor(containerState?.call_state || '')}`}>
-              {containerState?.status_message || containerState?.call_state || 'Connecting...'}
-              {containerState?.qa_started && ' • Q&A Active'}
-            </div>
-            {/* WebSocket connection indicator */}
-            <div className={`text-xs px-2 py-1 rounded ${wsConnected ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'}`}>
-              {wsConnected ? '● Connected' : '○ Disconnected'}
+              {error ? `⚠️ ${error}` : (containerState?.status_message || 'Connecting...')}
             </div>
           </div>
           <div className="flex gap-2">
@@ -1488,25 +1485,8 @@ export default function VoiceTraderPage() {
           </div>
         </div>
         
-        {error && (
-          <div className="bg-red-900 border border-red-500 text-red-200 px-4 py-3 rounded mb-4">
-            {error}
-          </div>
-        )}
-        
-        {/* Audio Controls */}
+        {/* Audio Controls - simplified */}
         <div className="bg-gray-800 rounded-lg p-3 mb-4 flex items-center gap-3 flex-wrap">
-          {/* Call status indicator */}
-          <div className="flex items-center gap-2">
-            <span className={`w-3 h-3 rounded-full ${audioActive ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`} />
-            <span className={`text-sm ${audioActive ? 'text-green-400' : 'text-gray-400'}`}>
-              {audioActive ? '📞 Connected' : 'Waiting for audio...'}
-            </span>
-          </div>
-          
-          {/* Divider */}
-          <div className="h-6 w-px bg-gray-600" />
-          
           {/* Speaker control (incoming call audio) */}
           <div className="flex items-center gap-2">
             <button

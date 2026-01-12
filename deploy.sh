@@ -79,12 +79,24 @@ fi
 echo -e "${GREEN}✅ SAM build passed${NC}"
 
 echo "Deploying Lambda functions..."
-if ! sam deploy > /tmp/sam-deploy.log 2>&1; then
-    echo -e "${RED}❌ SAM deploy failed!${NC}"
-    cat /tmp/sam-deploy.log | tail -30
-    exit 1
+# Capture both stdout and stderr, and the exit code
+set +e  # Temporarily allow errors
+sam deploy > /tmp/sam-deploy.log 2>&1
+SAM_EXIT_CODE=$?
+set -e  # Re-enable exit on error
+
+if [ $SAM_EXIT_CODE -ne 0 ]; then
+    # Check if this is just "no changes" (which SAM incorrectly returns as exit code 1)
+    if grep -q "No changes to deploy" /tmp/sam-deploy.log; then
+        echo -e "${YELLOW}⚠️  No Lambda changes to deploy (stack is up to date)${NC}"
+    else
+        echo -e "${RED}❌ SAM deploy failed!${NC}"
+        cat /tmp/sam-deploy.log | tail -30
+        exit 1
+    fi
+else
+    echo -e "${GREEN}✅ Lambda functions deployed${NC}"
 fi
-echo -e "${GREEN}✅ Lambda functions deployed${NC}"
 
 cd "$SCRIPT_DIR"
 echo ""

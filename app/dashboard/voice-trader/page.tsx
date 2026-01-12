@@ -561,12 +561,17 @@ export default function VoiceTraderPage() {
   // Falls back to ScriptProcessorNode if AudioWorklet unavailable
   // OPTIMIZED FOR LOW LATENCY - critical for real-time conference call interaction
   const startMicrophone = useCallback(async () => {
+    console.log('[MIC] startMicrophone called');
+    console.log('[MIC] wsRef.current:', wsRef.current);
+    console.log('[MIC] readyState:', wsRef.current?.readyState, '(OPEN=1)');
+    
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.error('WebSocket not connected');
+      console.error('[MIC] WebSocket not connected - aborting mic start');
       return;
     }
 
     try {
+      console.log('[MIC] Requesting microphone access...');
       // Request microphone access with low-latency constraints
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -651,12 +656,15 @@ export default function VoiceTraderPage() {
 
   // Toggle microphone
   const toggleMicrophone = useCallback(async () => {
+    console.log('[MIC] Toggle clicked, micActive:', micActive, 'wsConnected:', wsConnected);
     if (micActive) {
+      console.log('[MIC] Stopping microphone...');
       stopMicrophone();
     } else {
+      console.log('[MIC] Starting microphone...');
       await startMicrophone();
     }
-  }, [micActive, startMicrophone, stopMicrophone]);
+  }, [micActive, wsConnected, startMicrophone, stopMicrophone]);
 
   // Linear PCM to mu-law conversion
   const linearToMulaw = (sample: number): number => {
@@ -969,19 +977,23 @@ export default function VoiceTraderPage() {
   };
 
   const handleStop = async () => {
-    if (!sessionId) return;
-    
+    // Don't check sessionId - EC2 knows which call to hang up
     try {
-      // Call EC2 directly to hangup
-      await fetch(`${EC2_BASE}/hangup`, {
+      console.log('Sending hangup to EC2...');
+      const response = await fetch(`${EC2_BASE}/hangup`, {
         method: 'POST'
       });
+      console.log('Hangup response:', response.status);
       
+      // Go back to lobby
       setPageState('events');
       setSelectedEvent(null);
       setSessionId(null);
+      setContainerState(null);
+      setError(null);
     } catch (err) {
       console.error('Stop error:', err);
+      setError('Failed to end call: ' + (err as Error).message);
     }
   };
 

@@ -1401,6 +1401,23 @@ export default function VoiceTraderPage() {
         {/* Header */}
         <div className="flex justify-between items-center mb-4">
           <div>
+            {/* Emergency exit - always works regardless of WebSocket/API state */}
+            <button
+              onClick={() => {
+                setPageState('events');
+                setSelectedEvent(null);
+                setSessionId(null);
+                setWsConnected(false);
+                setError(null);
+                if (wsRef.current) {
+                  wsRef.current.close();
+                  wsRef.current = null;
+                }
+              }}
+              className="text-gray-400 hover:text-white text-sm mb-1 flex items-center gap-1"
+            >
+              ← Back to Lobby
+            </button>
             <h1 className="text-xl font-bold">{selectedEvent.title}</h1>
             <div className={`text-sm ${getCallStateColor(containerState?.call_state || '')}`}>
               {containerState?.status_message || containerState?.call_state || 'Connecting...'}

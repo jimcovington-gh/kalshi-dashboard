@@ -598,16 +598,72 @@ export default function VoiceTraderPage() {
 
       // Try to use AudioWorklet (modern, lowest latency ~16ms)
       // Falls back to ScriptProcessorNode (~32ms) if unavailable
+      // Use inline blob URL for reliability (avoids file loading/caching issues)
       if (audioContext.audioWorklet) {
         try {
-          await audioContext.audioWorklet.addModule('/audio-worklet-processor.js');
+          // Inline worklet code as blob - more reliable than external file
+          const workletCode = `
+            class MicrophoneProcessor extends AudioWorkletProcessor {
+              constructor() {
+                super();
+                this.buffer = [];
+                this.targetSamples = 256; // ~32ms at 8kHz
+              }
+              
+              process(inputs, outputs, parameters) {
+                const input = inputs[0];
+                if (!input || !input[0]) return true;
+                
+                const samples = input[0];
+                for (let i = 0; i < samples.length; i++) {
+                  this.buffer.push(this.linearToMulaw(samples[i]));
+                }
+                
+                if (this.buffer.length >= this.targetSamples) {
+                  const data = new Uint8Array(this.buffer);
+                  this.buffer = [];
+                  this.port.postMessage(data.buffer, [data.buffer]);
+                }
+                return true;
+              }
+              
+              linearToMulaw(sample) {
+                const BIAS = 33;
+                const sign = sample < 0 ? 0x80 : 0;
+                if (sample < 0) sample = -sample;
+                sample = Math.min(sample * 32768, 32767) + BIAS;
+                let exp = 7;
+                for (let mask = 0x4000; (sample & mask) === 0 && exp > 0; mask >>= 1) exp--;
+                const mantissa = (sample >> (exp + 3)) & 0x0F;
+                return (~(sign | (exp << 4) | mantissa)) & 0xFF;
+              }
+            }
+            registerProcessor('microphone-processor', MicrophoneProcessor);
+          `;
+          
+          const blob = new Blob([workletCode], { type: 'application/javascript' });
+          const workletUrl = URL.createObjectURL(blob);
+          await audioContext.audioWorklet.addModule(workletUrl);
+          URL.revokeObjectURL(workletUrl);
           
           const workletNode = new AudioWorkletNode(audioContext, 'microphone-processor');
           audioWorkletRef.current = workletNode;
           
+          // Track sent packets for debugging
+          let micPacketsSent = 0;
+          
           // Receive mu-law audio from worklet and send to WebSocket
           workletNode.port.onmessage = (event) => {
-            if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+            micPacketsSent++;
+            if (micPacketsSent <= 5 || micPacketsSent % 50 === 0) {
+              console.log(`[MIC] Sending packet #${micPacketsSent}, size=${event.data.byteLength}`);
+            }
+            if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+              if (micPacketsSent <= 5) {
+                console.error('[MIC] WebSocket not open, cannot send audio');
+              }
+              return;
+            }
             wsRef.current.send(event.data);
           };
           

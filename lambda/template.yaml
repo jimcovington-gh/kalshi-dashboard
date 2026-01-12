@@ -426,6 +426,12 @@ Resources:
             RestApiId: !Ref DashboardApi
             Path: /voice-trader/stop/{session_id}
             Method: POST
+        DialSession:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /voice-trader/dial/{session_id}
+            Method: POST
         RedialSession:
           Type: Api
           Properties:

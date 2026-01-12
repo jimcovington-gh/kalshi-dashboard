@@ -1557,28 +1557,29 @@ export default function VoiceTraderPage() {
                 onClick={async () => {
                   setDialing(true);
                   
-                  // Try WebSocket first (faster)
-                  if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                    console.log('Sending dial via WebSocket');
-                    wsRef.current.send(JSON.stringify({ type: 'dial' }));
-                  } else {
-                    // Fallback to HTTP endpoint
-                    console.log('WebSocket not connected, using HTTP fallback');
-                    try {
-                      const response = await fetch(`${API_BASE}/voice-trader/dial/${sessionId}`, {
-                        method: 'POST',
-                        headers: { Authorization: `Bearer ${authToken}` }
-                      });
-                      if (!response.ok) {
-                        const data = await response.json();
-                        throw new Error(data.error || 'Failed to dial');
-                      }
-                      console.log('Dial request sent via HTTP');
-                    } catch (err: any) {
-                      console.error('Failed to dial:', err);
-                      setError(err.message);
-                      setDialing(false);
+                  // Simple, direct HTTPS POST to container
+                  // No WebSocket needed, no Lambda in the middle, just works
+                  const containerUrl = wsUrl?.replace('wss://', 'https://').replace(':8765', ':8080');
+                  if (!containerUrl) {
+                    setError('Container URL not available');
+                    setDialing(false);
+                    return;
+                  }
+                  
+                  console.log('Sending dial via direct HTTPS to container');
+                  try {
+                    const response = await fetch(`${containerUrl}/dial`, {
+                      method: 'POST'
+                    });
+                    if (!response.ok) {
+                      const data = await response.json();
+                      throw new Error(data.error || 'Failed to dial');
                     }
+                    console.log('Dial request sent directly to container');
+                  } catch (err: any) {
+                    console.error('Failed to dial:', err);
+                    setError(err.message);
+                    setDialing(false);
                   }
                 }}
                 className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded transition-all duration-100 active:scale-95 active:brightness-75"

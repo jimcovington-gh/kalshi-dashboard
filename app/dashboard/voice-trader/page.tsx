@@ -496,7 +496,12 @@ export default function VoiceTraderPage() {
         
         // Handle idle state - no active session on server
         if (data.status === 'idle') {
-          setError('Session ended. Return to events to start a new call.');
+          // Check if there was a recent error (session failed to start)
+          if (data.last_error) {
+            setError(`Session failed: ${data.last_error}`);
+          } else {
+            setError('Session ended. Return to events to start a new call.');
+          }
           setAudioActive(false);
           return;
         }
@@ -1349,10 +1354,12 @@ export default function VoiceTraderPage() {
                     <div className="text-sm text-gray-400">
                       Starts: {new Date(event.start_date).toLocaleString()}
                     </div>
-                    <div className="text-sm text-yellow-400">
-                      {(event.hours_until_start ?? 0) < 1 
-                        ? `${Math.round((event.hours_until_start ?? 0) * 60)} min` 
-                        : `${(event.hours_until_start ?? 0).toFixed(1)} hrs`} until start
+                    <div className={`text-sm ${(event.hours_until_start ?? 0) <= 0 ? 'text-green-400' : 'text-yellow-400'}`}>
+                      {(event.hours_until_start ?? 0) <= 0 
+                        ? `🔴 LIVE - started ${Math.abs(Math.round((event.hours_until_start ?? 0) * 60))} min ago`
+                        : (event.hours_until_start ?? 0) < 1 
+                          ? `${Math.round((event.hours_until_start ?? 0) * 60)} min until start`
+                          : `${(event.hours_until_start ?? 0).toFixed(1)} hrs until start`}
                     </div>
                     <div className="text-sm text-blue-400">
                       {event.word_count} words to track

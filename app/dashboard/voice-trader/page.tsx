@@ -140,6 +140,7 @@ export default function VoiceTraderPage() {
   // Trading parameters state
   const [betSize, setBetSize] = useState<number>(5);  // Current bet size in dollars
   const [betSizeInput, setBetSizeInput] = useState<string>('5');  // Text input value
+  const [betSizeInitialized, setBetSizeInitialized] = useState(false);  // Only set bet size once
   const [cashBalance, setCashBalance] = useState<number>(0);
   const [availableCash, setAvailableCash] = useState<number>(0);
   const [minTrade, setMinTrade] = useState<number>(10);  // Minimum trade size
@@ -417,9 +418,11 @@ export default function VoiceTraderPage() {
             setCashBalance(data.cash_balance || 0);
             setAvailableCash(data.available_cash || 0);
             setMinTrade(data.min_trade || 10);
-            if (data.bet_size !== undefined) {
+            // Only set bet size once on first receive - don't override user edits
+            if (data.bet_size !== undefined && !betSizeInitialized) {
               setBetSize(data.bet_size);
               setBetSizeInput(data.bet_size.toFixed(2));
+              setBetSizeInitialized(true);
             }
           }
         };

@@ -363,6 +363,8 @@ export default function VoiceTraderPage() {
           ws?.send(JSON.stringify({ type: 'enable_audio_stream' }));
           // Request trading parameters
           ws?.send(JSON.stringify({ type: 'get_trading_params' }));
+          // Send current bet size (user-controlled, defaults to $10)
+          ws?.send(JSON.stringify({ type: 'set_bet_size', dollars: betSize }));
         };
         
         ws.onmessage = (event) => {

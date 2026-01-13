@@ -142,6 +142,7 @@ export default function VoiceTraderPage() {
   const [betSizeInput, setBetSizeInput] = useState<string>('5');  // Text input value
   const [cashBalance, setCashBalance] = useState<number>(0);
   const [availableCash, setAvailableCash] = useState<number>(0);
+  const [minTrade, setMinTrade] = useState<number>(10);  // Minimum trade size
   
   // WebSocket connection state
   const [wsConnected, setWsConnected] = useState(false);
@@ -415,9 +416,10 @@ export default function VoiceTraderPage() {
             // Update trading parameters from server
             setCashBalance(data.cash_balance || 0);
             setAvailableCash(data.available_cash || 0);
-            if (data.bet_size && data.bet_size > 0) {
+            setMinTrade(data.min_trade || 10);
+            if (data.bet_size !== undefined) {
               setBetSize(data.bet_size);
-              setBetSizeInput(data.bet_size.toFixed(0));
+              setBetSizeInput(data.bet_size.toFixed(2));
             }
           }
         };
@@ -1798,15 +1800,22 @@ export default function VoiceTraderPage() {
                         // Ensure valid number on blur
                         const val = parseFloat(betSizeInput);
                         if (isNaN(val) || val < 0) {
-                          setBetSizeInput(betSize.toFixed(0));
+                          setBetSizeInput(betSize.toFixed(2));
                         }
                       }}
-                      className="w-16 bg-gray-700 px-2 py-1 rounded text-sm font-mono text-right"
+                      className={`w-20 px-2 py-1 rounded text-sm font-mono text-right ${
+                        betSize < minTrade ? 'bg-red-900 border border-red-500' : 'bg-gray-700'
+                      }`}
                       min="0"
                       step="1"
                     />
                   </div>
                 </div>
+                {betSize < minTrade && (
+                  <div className="text-xs text-red-400 mt-1">
+                    ⚠️ Below min trade (${minTrade}). Trades will be blocked!
+                  </div>
+                )}
               </div>
             </div>
             

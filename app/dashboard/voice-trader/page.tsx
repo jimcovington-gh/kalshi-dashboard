@@ -1026,10 +1026,29 @@ export default function VoiceTraderPage() {
   };
 
   const sendDtmf = (digits: string) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && digits) {
-      wsRef.current.send(JSON.stringify({ type: 'send_dtmf', digits }));
-      setDialpadInput('');
+    console.log('[DTMF] sendDtmf called with:', digits);
+    console.log('[DTMF] wsRef.current:', wsRef.current ? 'exists' : 'null');
+    console.log('[DTMF] readyState:', wsRef.current?.readyState, '(OPEN=1)');
+    
+    if (!digits) {
+      console.error('[DTMF] No digits provided');
+      return;
     }
+    
+    if (!wsRef.current) {
+      console.error('[DTMF] WebSocket not initialized');
+      return;
+    }
+    
+    if (wsRef.current.readyState !== WebSocket.OPEN) {
+      console.error('[DTMF] WebSocket not open, state:', wsRef.current.readyState);
+      return;
+    }
+    
+    const msg = JSON.stringify({ type: 'send_dtmf', digits });
+    console.log('[DTMF] Sending:', msg);
+    wsRef.current.send(msg);
+    setDialpadInput('');
   };
 
   const handleStop = async () => {

@@ -391,8 +391,13 @@ export default function VoiceTraderPage() {
               return [...prev.slice(-99), newSegment];
             });
           } else if (data.type === 'word_triggered') {
-            // Flash animation could go here
-            console.log('Word triggered:', data.word);
+            // Update the words state to mark this word as triggered
+            console.log('[WORD] Triggered:', data.word, data.market_ticker);
+            setWords(prev => prev.map(w => 
+              w.market_ticker === data.market_ticker 
+                ? { ...w, triggered: true, triggered_at: data.timestamp }
+                : w
+            ));
           } else if (data.type === 'disconnect_alert') {
             setError(data.message);
             setAudioActive(false);  // Call disconnected - not active anymore
@@ -1539,6 +1544,29 @@ export default function VoiceTraderPage() {
             </button>
             <h1 className="text-xl font-bold">{selectedEvent.title}</h1>
             <div className={`text-sm ${statusColor}`}>{statusMessage}</div>
+            
+            {/* Q&A Status Indicator */}
+            {isCallActive && (
+              <div className="mt-2 flex items-center gap-2">
+                {containerState?.qa_started ? (
+                  <span className="bg-orange-600 px-2 py-1 rounded text-xs font-medium">
+                    🎤 Q&A Session Active
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (wsRef.current?.readyState === WebSocket.OPEN) {
+                        wsRef.current.send(JSON.stringify({ type: 'set_qa_started' }));
+                      }
+                    }}
+                    className="bg-gray-700 hover:bg-orange-600 px-2 py-1 rounded text-xs"
+                    title="Click to manually mark Q&A as started"
+                  >
+                    Q&A Not Started (click to set)
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           
           {/* ONE button based on state */}

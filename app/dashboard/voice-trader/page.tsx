@@ -137,6 +137,12 @@ export default function VoiceTraderPage() {
   // Dialpad state
   const [dialpadInput, setDialpadInput] = useState('');
   
+  // Trading parameters state
+  const [betSize, setBetSize] = useState<number>(5);  // Current bet size in dollars
+  const [betSizeInput, setBetSizeInput] = useState<string>('5');  // Text input value
+  const [cashBalance, setCashBalance] = useState<number>(0);
+  const [availableCash, setAvailableCash] = useState<number>(0);
+  
   // WebSocket connection state
   const [wsConnected, setWsConnected] = useState(false);
   
@@ -354,6 +360,8 @@ export default function VoiceTraderPage() {
           
           // Request audio streaming
           ws?.send(JSON.stringify({ type: 'enable_audio_stream' }));
+          // Request trading parameters
+          ws?.send(JSON.stringify({ type: 'get_trading_params' }));
         };
         
         ws.onmessage = (event) => {
@@ -403,6 +411,14 @@ export default function VoiceTraderPage() {
             setAudioActive(false);  // Call disconnected - not active anymore
           } else if (data.type === 'audio_active') {
             setAudioActive(data.active);
+          } else if (data.type === 'trading_params') {
+            // Update trading parameters from server
+            setCashBalance(data.cash_balance || 0);
+            setAvailableCash(data.available_cash || 0);
+            if (data.bet_size && data.bet_size > 0) {
+              setBetSize(data.bet_size);
+              setBetSizeInput(data.bet_size.toFixed(0));
+            }
           }
         };
         
@@ -1055,6 +1071,40 @@ export default function VoiceTraderPage() {
     wsRef.current.send(msg);
     setDialpadInput('');
   };
+
+  // Send bet size to server
+  const sendBetSize = (dollars: number) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.error('[BET] WebSocket not connected');
+      return;
+    }
+    const msg = JSON.stringify({ type: 'set_bet_size', dollars });
+    console.log('[BET] Sending:', msg);
+    wsRef.current.send(msg);
+    setBetSize(dollars);
+  };
+
+  // Handle bet size input change
+  const handleBetSizeChange = (value: string) => {
+    setBetSizeInput(value);
+    const dollars = parseFloat(value);
+    if (!isNaN(dollars) && dollars >= 0) {
+      sendBetSize(dollars);
+    }
+  };
+
+  // Periodic trading params refresh
+  useEffect(() => {
+    if (pageState !== 'monitoring' || !wsRef.current) return;
+    
+    const interval = setInterval(() => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'get_trading_params' }));
+      }
+    }, 2000);  // Refresh every 2 seconds
+    
+    return () => clearInterval(interval);
+  }, [pageState]);
 
   const handleStop = async () => {
     // Don't check sessionId - EC2 knows which call to hang up
@@ -1724,15 +1774,47 @@ export default function VoiceTraderPage() {
           
           {/* Right column: P&L + Speakers */}
           <div className="space-y-4">
+            {/* Trading Controls */}
+            <div className="bg-gray-800 rounded-lg p-4">
+              <h2 className="font-semibold mb-2">Trading</h2>
+              <div className="text-sm space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400">Cash Balance:</span>
+                  <span className="font-mono">${cashBalance.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400">Available:</span>
+                  <span className="font-mono">${availableCash.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-gray-400">Bet Size:</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-500">$</span>
+                    <input
+                      type="number"
+                      value={betSizeInput}
+                      onChange={(e) => handleBetSizeChange(e.target.value)}
+                      onBlur={() => {
+                        // Ensure valid number on blur
+                        const val = parseFloat(betSizeInput);
+                        if (isNaN(val) || val < 0) {
+                          setBetSizeInput(betSize.toFixed(0));
+                        }
+                      }}
+                      className="w-16 bg-gray-700 px-2 py-1 rounded text-sm font-mono text-right"
+                      min="0"
+                      step="1"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+            
             {/* P&L */}
             <div className="bg-gray-800 rounded-lg p-4">
               <h2 className="font-semibold mb-2">P&L</h2>
               {pnl && (
                 <div className="text-sm space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Cash:</span>
-                    <span>${(pnl.cash_balance ?? 0).toFixed(2)}</span>
-                  </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Exposure:</span>
                     <span>${(pnl.total_exposure ?? 0).toFixed(2)}</span>

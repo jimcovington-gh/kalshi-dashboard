@@ -136,6 +136,7 @@ export default function VoiceTraderPage() {
   
   // Dialpad state
   const [dialpadInput, setDialpadInput] = useState('');
+  const [dialpadOpen, setDialpadOpen] = useState(false);
   
   // Trading parameters state
   const [betSize, setBetSize] = useState<number>(10);  // Current bet size in dollars - user controlled only
@@ -1773,36 +1774,44 @@ export default function VoiceTraderPage() {
             </div>
           </div>
           
-          {/* Right column: P&L + Speakers */}
-          <div className="space-y-4">
-            {/* Trading Controls */}
-            <div className="bg-gray-800 rounded-lg p-4">
-              <h2 className="font-semibold mb-2">Trading</h2>
-              <div className="text-sm space-y-2">
+          {/* Right column: Trading & P&L (compact) */}
+          <div className="space-y-3">
+            {/* Trading Controls + P&L Combined */}
+            <div className="bg-gray-800 rounded-lg p-3">
+              <div className="flex justify-between items-center mb-2">
+                <h2 className="font-semibold text-sm">Trading</h2>
+                <button
+                  onClick={() => setDialpadOpen(!dialpadOpen)}
+                  className={`px-2 py-1 rounded text-xs ${dialpadOpen ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                  title="Toggle dialpad"
+                >
+                  📞 Dialpad
+                </button>
+              </div>
+              <div className="text-sm space-y-1">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Cash Balance:</span>
-                  <span className="font-mono">${cashBalance.toFixed(2)}</span>
+                  <span className="text-gray-400 text-xs">Balance:</span>
+                  <span className="font-mono text-xs">${cashBalance.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Available:</span>
-                  <span className="font-mono">${availableCash.toFixed(2)}</span>
+                  <span className="text-gray-400 text-xs">Available:</span>
+                  <span className="font-mono text-xs">${availableCash.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between items-center gap-2">
-                  <span className="text-gray-400">Bet Size:</span>
+                  <span className="text-gray-400 text-xs">Bet Size:</span>
                   <div className="flex items-center gap-1">
-                    <span className="text-gray-500">$</span>
+                    <span className="text-gray-500 text-xs">$</span>
                     <input
                       type="number"
                       value={betSizeInput}
                       onChange={(e) => handleBetSizeChange(e.target.value)}
                       onBlur={() => {
-                        // Ensure valid number on blur
                         const val = parseFloat(betSizeInput);
                         if (isNaN(val) || val < 0) {
                           setBetSizeInput(betSize.toFixed(2));
                         }
                       }}
-                      className={`w-20 px-2 py-1 rounded text-sm font-mono text-right ${
+                      className={`w-16 px-1 py-0.5 rounded text-xs font-mono text-right ${
                         betSize < minTrade ? 'bg-red-900 border border-red-500' : 'bg-gray-700'
                       }`}
                       min="0"
@@ -1811,106 +1820,106 @@ export default function VoiceTraderPage() {
                   </div>
                 </div>
                 {betSize < minTrade && (
-                  <div className="text-xs text-red-400 mt-1">
-                    ⚠️ Below min trade (${minTrade}). Trades will be blocked!
+                  <div className="text-xs text-red-400">
+                    ⚠️ Below min (${minTrade})
                   </div>
                 )}
+                <div className="border-t border-gray-700 pt-1 mt-1">
+                  <div className="flex justify-between">
+                    <span className="text-gray-400 text-xs">Exposure:</span>
+                    <span className="text-xs">${(pnl?.total_exposure ?? 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400 text-xs">Trades:</span>
+                    <span className="text-xs">{pnl?.trades_count ?? 0}</span>
+                  </div>
+                </div>
               </div>
             </div>
             
-            {/* P&L */}
-            <div className="bg-gray-800 rounded-lg p-4">
-              <h2 className="font-semibold mb-2">P&L</h2>
-              {pnl && (
-                <div className="text-sm space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Exposure:</span>
-                    <span>${(pnl.total_exposure ?? 0).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Trades:</span>
-                    <span>{pnl.trades_count}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            {/* Dialpad */}
-            <div className="bg-gray-800 rounded-lg p-4">
-              <h2 className="font-semibold mb-2">Dialpad</h2>
-              <div className="space-y-2">
-                <div className="flex gap-1">
-                  <input
-                    type="text"
-                    value={dialpadInput}
-                    onChange={(e) => setDialpadInput(e.target.value.replace(/[^0-9*#]/g, ''))}
-                    onKeyDown={(e) => e.key === 'Enter' && sendDtmf(dialpadInput)}
-                    placeholder="Digits..."
-                    className="flex-1 min-w-0 bg-gray-700 px-2 py-1 rounded text-sm font-mono"
-                    maxLength={20}
-                  />
+            {/* Dialpad Popup */}
+            {dialpadOpen && (
+              <div className="bg-gray-800 rounded-lg p-3 border border-gray-600">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-semibold text-sm">Dialpad</span>
                   <button
-                    onClick={() => sendDtmf(dialpadInput)}
-                    disabled={!dialpadInput}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 px-2 py-1 rounded text-sm transition-all duration-100 active:scale-95 active:brightness-75 shrink-0"
+                    onClick={() => setDialpadOpen(false)}
+                    className="text-gray-400 hover:text-white text-xs"
                   >
-                    ➤
+                    ✕
                   </button>
                 </div>
-                {/* Send PIN button - sends passcode in one burst */}
-                {passcode && (
-                  <button
-                    onClick={() => sendDtmf(passcode)}
-                    className="w-full bg-green-600 hover:bg-green-700 py-2 rounded text-sm font-medium transition-all duration-100 active:scale-95 active:brightness-75"
-                  >
-                    📞 Send PIN ({passcode})
-                  </button>
-                )}
-                <div className="grid grid-cols-3 gap-1">
-                  {['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'].map(d => (
+                <div className="space-y-2">
+                  <div className="flex gap-1">
+                    <input
+                      type="text"
+                      value={dialpadInput}
+                      onChange={(e) => setDialpadInput(e.target.value.replace(/[^0-9*#]/g, ''))}
+                      onKeyDown={(e) => e.key === 'Enter' && sendDtmf(dialpadInput)}
+                      placeholder="Digits..."
+                      className="flex-1 min-w-0 bg-gray-700 px-2 py-1 rounded text-sm font-mono"
+                      maxLength={20}
+                    />
                     <button
-                      key={d}
-                      onClick={() => sendDtmf(d)}
-                      className="bg-gray-700 hover:bg-gray-600 py-2 rounded text-lg font-mono transition-all duration-100 active:scale-95 active:brightness-75"
+                      onClick={() => sendDtmf(dialpadInput)}
+                      disabled={!dialpadInput}
+                      className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 px-2 py-1 rounded text-sm"
                     >
-                      {d}
+                      ➤
                     </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            
-            {/* Speakers */}
-            <div className="bg-gray-800 rounded-lg p-4">
-              <h2 className="font-semibold mb-2">Speakers</h2>
-              {containerState?.speakers && (
-                <div className="text-sm space-y-2">
-                  <div className="flex justify-between text-gray-400">
-                    <span>Valid: {containerState.speakers.valid_count}</span>
-                    <span>Invalid: {containerState.speakers.invalid_count}</span>
                   </div>
-                  <div className="space-y-1">
-                    {containerState.speakers.details.slice(0, 5).map(s => (
-                      <div
-                        key={s.id}
-                        className={`text-xs p-1 rounded ${
-                          s.is_valid ? 'bg-green-900' : 'bg-red-900'
-                        }`}
+                  {passcode && (
+                    <button
+                      onClick={() => sendDtmf(passcode)}
+                      className="w-full bg-green-600 hover:bg-green-700 py-1.5 rounded text-xs font-medium"
+                    >
+                      📞 Send PIN ({passcode})
+                    </button>
+                  )}
+                  <div className="grid grid-cols-3 gap-1">
+                    {['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'].map(d => (
+                      <button
+                        key={d}
+                        onClick={() => sendDtmf(d)}
+                        className="bg-gray-700 hover:bg-gray-600 py-1.5 rounded text-sm font-mono"
                       >
-                        <span className="font-mono">{s.id}</span>: {s.sample}
-                      </div>
+                        {d}
+                      </button>
                     ))}
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+            
+            {/* Speakers (compact) */}
+            {containerState?.speakers && containerState.speakers.details.length > 0 && (
+              <div className="bg-gray-800 rounded-lg p-3">
+                <h2 className="font-semibold text-sm mb-1">Speakers</h2>
+                <div className="text-xs space-y-1">
+                  <div className="flex justify-between text-gray-400">
+                    <span>✓ {containerState.speakers.valid_count}</span>
+                    <span>✗ {containerState.speakers.invalid_count}</span>
+                  </div>
+                  {containerState.speakers.details.slice(0, 3).map(s => (
+                    <div
+                      key={s.id}
+                      className={`text-xs p-1 rounded truncate ${
+                        s.is_valid ? 'bg-green-900/50' : 'bg-red-900/50'
+                      }`}
+                    >
+                      <span className="font-mono">{s.id}</span>: {s.sample}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
         
         {/* Transcript */}
-        <div className="mt-4 bg-gray-800 rounded-lg p-4 max-h-[300px] overflow-y-auto">
-          <h2 className="font-semibold mb-2">Live Transcript</h2>
-          <div className="text-sm space-y-1 font-mono">
+        <div className="mt-3 bg-gray-800 rounded-lg p-3 max-h-[250px] overflow-y-auto">
+          <h2 className="font-semibold text-sm mb-2">Live Transcript</h2>
+          <div className="text-xs space-y-0.5 font-mono">
             {transcript.slice(-30).map((seg, i) => (
               <div key={i} className={seg.is_final ? 'text-white' : 'text-gray-500'}>
                 {seg.speaker_id && (

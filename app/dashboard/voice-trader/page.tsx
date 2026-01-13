@@ -35,6 +35,7 @@ interface ContainerState {
   call_state: string;
   status_message: string;
   qa_started: boolean;
+  detection_paused: boolean;
   speakers: {
     valid_count: number;
     invalid_count: number;
@@ -507,6 +508,7 @@ export default function VoiceTraderPage() {
             call_state: data.call_state || prev?.call_state || 'connecting',
             status_message: data.status_message || prev?.status_message || 'Loading...',
             qa_started: data.qa_started || false,
+            detection_paused: data.detection_paused || false,
             speakers: prev?.speakers || { valid_count: 0, invalid_count: 0, current: '', details: [] },
             transcript_segments: prev?.transcript_segments || 0
           }));
@@ -1597,12 +1599,35 @@ export default function VoiceTraderPage() {
             <h1 className="text-xl font-bold">{selectedEvent.title}</h1>
             <div className={`text-sm ${statusColor}`}>{statusMessage}</div>
             
-            {/* Q&A Status Indicator */}
+            {/* Detection Pause + Q&A Status Indicators */}
             {isCallActive && (
               <div className="mt-2 flex items-center gap-2">
+                {/* Detection Pause Button - prominent toggle */}
+                <button
+                  onClick={() => {
+                    if (wsRef.current?.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({ 
+                        type: 'set_detection_paused',
+                        paused: !containerState?.detection_paused 
+                      }));
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                    containerState?.detection_paused 
+                      ? 'bg-red-600 hover:bg-red-500 ring-2 ring-red-400' 
+                      : 'bg-green-600 hover:bg-green-500'
+                  }`}
+                  title={containerState?.detection_paused 
+                    ? "Detection PAUSED - Click to resume" 
+                    : "Detection ACTIVE - Click to pause"}
+                >
+                  {containerState?.detection_paused ? '⏸️ Paused' : '▶️ Detecting'}
+                </button>
+                
+                {/* Q&A Status */}
                 {containerState?.qa_started ? (
                   <span className="bg-orange-600 px-2 py-1 rounded text-xs font-medium">
-                    🎤 Q&A Session Active
+                    🎤 Q&A Active
                   </span>
                 ) : (
                   <button
@@ -1614,7 +1639,7 @@ export default function VoiceTraderPage() {
                     className="bg-gray-700 hover:bg-orange-600 px-2 py-1 rounded text-xs"
                     title="Click to manually mark Q&A as started"
                   >
-                    Q&A Not Started (click to set)
+                    Q&A Not Started
                   </button>
                 )}
               </div>

@@ -965,11 +965,16 @@ export default function VoiceTraderPage() {
       const body: any = {
         event_ticker: selectedEvent.event_ticker,
         user_name: 'jimc',  // TODO: Get from auth
-        phone_number: phoneNumber,
       };
       
-      if (passcode) {
-        body.passcode = passcode;
+      // Add audio source specific fields
+      if (audioSource === 'phone') {
+        body.phone_number = phoneNumber;
+        if (passcode) {
+          body.passcode = passcode;
+        }
+      } else if (audioSource === 'web') {
+        body.stream_url = webUrl;
       }
       
       const response = await fetch(`${EC2_BASE}/dial`, {

@@ -138,9 +138,8 @@ export default function VoiceTraderPage() {
   const [dialpadInput, setDialpadInput] = useState('');
   
   // Trading parameters state
-  const [betSize, setBetSize] = useState<number>(5);  // Current bet size in dollars
-  const [betSizeInput, setBetSizeInput] = useState<string>('5');  // Text input value
-  const [betSizeInitialized, setBetSizeInitialized] = useState(false);  // Only set bet size once
+  const [betSize, setBetSize] = useState<number>(10);  // Current bet size in dollars - user controlled only
+  const [betSizeInput, setBetSizeInput] = useState<string>('10');  // Text input value
   const [cashBalance, setCashBalance] = useState<number>(0);
   const [availableCash, setAvailableCash] = useState<number>(0);
   const [minTrade, setMinTrade] = useState<number>(10);  // Minimum trade size
@@ -414,16 +413,11 @@ export default function VoiceTraderPage() {
           } else if (data.type === 'audio_active') {
             setAudioActive(data.active);
           } else if (data.type === 'trading_params') {
-            // Update trading parameters from server
+            // Update cash balance from server - bet size is user-controlled only
             setCashBalance(data.cash_balance || 0);
             setAvailableCash(data.available_cash || 0);
             setMinTrade(data.min_trade || 10);
-            // Only set bet size once on first receive - don't override user edits
-            if (data.bet_size !== undefined && !betSizeInitialized) {
-              setBetSize(data.bet_size);
-              setBetSizeInput(data.bet_size.toFixed(2));
-              setBetSizeInitialized(true);
-            }
+            // DO NOT update betSize from server - user controls it entirely
           }
         };
         

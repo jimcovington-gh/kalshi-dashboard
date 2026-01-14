@@ -556,7 +556,7 @@ export default function VoiceTraderDevPage() {
           return;
         }
         
-        // Update state from DynamoDB data (pushed by container)
+        // Update state from status endpoint (includes full state_summary)
         if (data.call_state || data.status_message) {
           setContainerState(prev => ({
             ...prev,
@@ -564,8 +564,9 @@ export default function VoiceTraderDevPage() {
             status_message: data.status_message || prev?.status_message || 'Loading...',
             qa_started: data.qa_started || false,
             detection_paused: data.detection_paused || false,
-            speakers: prev?.speakers || { valid_count: 0, invalid_count: 0, current: '', details: [] },
-            transcript_segments: prev?.transcript_segments || 0
+            // Use speakers from response, fallback to prev if not present
+            speakers: data.speakers || prev?.speakers || { valid_count: 0, invalid_count: 0, current: '', details: [] },
+            transcript_segments: data.transcript_segments || prev?.transcript_segments || 0
           }));
           
           // Reset dialing state when call progresses past connecting
@@ -1992,16 +1993,16 @@ export default function VoiceTraderDevPage() {
               </div>
             )}
             
-            {/* Speakers (compact) */}
-            {containerState?.speakers && containerState.speakers.details.length > 0 && (
-              <div className="bg-gray-800 rounded-lg p-3">
-                <h2 className="font-semibold text-sm mb-1">Speakers</h2>
-                <div className="text-xs space-y-1">
-                  <div className="flex justify-between text-gray-400">
-                    <span>✓ {containerState.speakers.valid_count}</span>
-                    <span>✗ {containerState.speakers.invalid_count}</span>
-                  </div>
-                  {containerState.speakers.details.slice(0, 3).map(s => (
+            {/* Speakers - ALWAYS show section, even when empty */}
+            <div className="bg-gray-800 rounded-lg p-3">
+              <h2 className="font-semibold text-sm mb-1">Speakers</h2>
+              <div className="text-xs space-y-1">
+                <div className="flex justify-between text-gray-400">
+                  <span>✓ {containerState?.speakers?.valid_count ?? 0}</span>
+                  <span>✗ {containerState?.speakers?.invalid_count ?? 0}</span>
+                </div>
+                {containerState?.speakers?.details && containerState.speakers.details.length > 0 ? (
+                  containerState.speakers.details.slice(0, 5).map(s => (
                     <div
                       key={s.id}
                       className={`text-xs p-1 rounded truncate ${
@@ -2010,10 +2011,12 @@ export default function VoiceTraderDevPage() {
                     >
                       <span className="font-mono">{s.id}</span>: {s.sample}
                     </div>
-                  ))}
-                </div>
+                  ))
+                ) : (
+                  <div className="text-gray-500 italic">No speakers detected yet</div>
+                )}
               </div>
-            )}
+            </div>
           </div>
         </div>
         
@@ -2021,23 +2024,36 @@ export default function VoiceTraderDevPage() {
         <div className="mt-3 bg-gray-800 rounded-lg p-3 max-h-[250px] overflow-y-auto">
           <h2 className="font-semibold text-sm mb-2">Live Transcript</h2>
           <div className="text-xs space-y-0.5 font-mono">
-            {transcript.slice(-30).map((seg, i) => {
-              // Event messages (state changes, trades, Q&A, etc.) - green
-              if (seg.is_event) {
-                const time = seg.timestamp ? new Date(seg.timestamp * 1000).toLocaleTimeString() : '';
+            {/* Filter: show only finals, events, and the ONE most recent partial */}
+            {(() => {
+              const recent = transcript.slice(-50);
+              // Find finals and events
+              const finalsAndEvents = recent.filter(seg => seg.is_final || seg.is_event);
+              // Find the most recent partial (if any)
+              const lastPartial = recent.filter(seg => !seg.is_final && !seg.is_event).slice(-1)[0];
+              // Combine and show last 30
+              const toShow = lastPartial 
+                ? [...finalsAndEvents, lastPartial].slice(-30)
+                : finalsAndEvents.slice(-30);
+              
+              return toShow.map((seg, i) => {
+                // Event messages (state changes, trades, Q&A, etc.) - green
+                if (seg.is_event) {
+                  const time = seg.timestamp ? new Date(seg.timestamp * 1000).toLocaleTimeString() : '';
+                  return (
+                    <div key={i} className="text-green-400 py-0.5">
+                      <span className="text-green-600">[{time}]</span> {seg.text}
+                    </div>
+                  );
+                }
+                // Normal transcript - white for finals, gray italic for the current partial
                 return (
-                  <div key={i} className="text-green-400 py-0.5">
-                    <span className="text-green-600">[{time}]</span> {seg.text}
+                  <div key={i} className={seg.is_final ? 'text-white' : 'text-gray-500 italic'}>
+                    {seg.text}
                   </div>
                 );
-              }
-              // Normal transcript - white for finals, gray for partials
-              return (
-                <div key={i} className={seg.is_final ? 'text-white' : 'text-gray-500 italic'}>
-                  {seg.text}
-                </div>
-              );
-            })}
+              });
+            })()}
           </div>
         </div>
       </div>

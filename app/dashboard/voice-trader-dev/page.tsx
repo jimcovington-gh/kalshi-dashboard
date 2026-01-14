@@ -1846,14 +1846,14 @@ export default function VoiceTraderDevPage() {
         </div>
         
         <div className="grid grid-cols-3 gap-4">
-          {/* Left column: Word Grid */}
-          <div className="col-span-2 bg-gray-800 rounded-lg p-4 max-h-[400px] overflow-y-auto">
-            <h2 className="font-semibold mb-3">Word Status</h2>
-            <div className="grid grid-cols-3 gap-2">
+          {/* Left column: Word Grid - 5 columns for density */}
+          <div className="col-span-2 bg-gray-800 rounded-lg p-3 max-h-[350px] overflow-y-auto">
+            <h2 className="font-semibold mb-2 text-sm">Word Status</h2>
+            <div className="grid grid-cols-5 gap-1">
               {words.map(w => (
                 <div
                   key={w.market_ticker}
-                  className={`p-2 rounded text-sm ${
+                  className={`p-1.5 rounded text-xs ${
                     w.triggered
                       ? 'bg-green-900 border border-green-500'
                       : w.no_purchased
@@ -1864,12 +1864,12 @@ export default function VoiceTraderDevPage() {
                   <div className="font-medium truncate" title={w.word}>
                     {w.word}
                   </div>
-                  <div className="text-xs text-gray-400">
+                  <div className="text-[10px] text-gray-400 truncate">
                     {w.triggered
-                      ? `✓ YES @ ${formatTime(w.triggered_at!)}`
+                      ? `✓ ${formatTime(w.triggered_at!)}`
                       : w.no_purchased
-                      ? '✗ NO purchased'
-                      : 'Watching...'}
+                      ? '✗ NO'
+                      : '...'}
                   </div>
                 </div>
               ))}

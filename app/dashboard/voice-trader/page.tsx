@@ -58,6 +58,8 @@ interface TranscriptSegment {
   timestamp: number;
   is_final: boolean;
   speaker_id?: string;
+  is_event?: boolean;  // For state changes, trades, Q&A, etc.
+  event_type?: 'state_change' | 'trade' | 'qa_started' | 'call_end' | 'speaker_change';
 }
 
 interface RunningVoiceContainer {
@@ -394,14 +396,33 @@ export default function VoiceTraderPage() {
           } else if (data.type === 'transcript') {
             // Real-time transcript segment from voice trader
             setTranscript(prev => {
-              // Limit to last 100 segments
-              const newSegment = {
+              const newSegment: TranscriptSegment = {
                 text: data.text,
                 is_final: data.is_final,
                 speaker_id: data.speaker_id,
                 timestamp: data.timestamp
               };
-              return [...prev.slice(-99), newSegment];
+              
+              // Option B: Replace partials with finals, keep evolving sentence
+              if (data.is_final) {
+                // Final: remove recent partials and add this final
+                const withoutRecentPartials = prev.filter((seg, idx) => {
+                  // Keep all finals and events
+                  if (seg.is_final || seg.is_event) return true;
+                  // Keep partials older than 5 seconds
+                  if (seg.timestamp && data.timestamp - seg.timestamp > 5) return true;
+                  return false;
+                });
+                return [...withoutRecentPartials.slice(-99), newSegment];
+              } else {
+                // Partial: replace the last partial (if any) with this one
+                const lastIdx = prev.length - 1;
+                if (lastIdx >= 0 && !prev[lastIdx].is_final && !prev[lastIdx].is_event) {
+                  // Replace last partial
+                  return [...prev.slice(0, lastIdx), newSegment];
+                }
+                return [...prev.slice(-99), newSegment];
+              }
             });
           } else if (data.type === 'word_triggered') {
             // Update the words state to mark this word as triggered
@@ -411,6 +432,31 @@ export default function VoiceTraderPage() {
                 ? { ...w, triggered: true, triggered_at: data.timestamp }
                 : w
             ));
+          } else if (data.type === 'event') {
+            // Add event to transcript log (state changes, trades, Q&A, etc.)
+            setTranscript(prev => {
+              const eventSegment: TranscriptSegment = {
+                text: data.message,
+                timestamp: data.timestamp,
+                is_final: true,
+                is_event: true,
+                event_type: data.event_type
+              };
+              return [...prev.slice(-99), eventSegment];
+            });
+          } else if (data.type === 'speaker_change') {
+            // Add speaker change marker to transcript
+            setTranscript(prev => {
+              const speakerEvent: TranscriptSegment = {
+                text: `── Speaker: ${data.speaker_name || data.speaker_id} ──`,
+                timestamp: data.timestamp,
+                is_final: true,
+                is_event: true,
+                event_type: 'speaker_change',
+                speaker_id: data.speaker_id
+              };
+              return [...prev.slice(-99), speakerEvent];
+            });
           } else if (data.type === 'disconnect_alert') {
             setError(data.message);
             setAudioActive(false);  // Call disconnected - not active anymore
@@ -1957,14 +2003,23 @@ export default function VoiceTraderPage() {
         <div className="mt-3 bg-gray-800 rounded-lg p-3 max-h-[250px] overflow-y-auto">
           <h2 className="font-semibold text-sm mb-2">Live Transcript</h2>
           <div className="text-xs space-y-0.5 font-mono">
-            {transcript.slice(-30).map((seg, i) => (
-              <div key={i} className={seg.is_final ? 'text-white' : 'text-gray-500'}>
-                {seg.speaker_id && (
-                  <span className="text-blue-400">[{seg.speaker_id}] </span>
-                )}
-                {seg.text}
-              </div>
-            ))}
+            {transcript.slice(-30).map((seg, i) => {
+              // Event messages (state changes, trades, Q&A, etc.) - green
+              if (seg.is_event) {
+                const time = seg.timestamp ? new Date(seg.timestamp * 1000).toLocaleTimeString() : '';
+                return (
+                  <div key={i} className="text-green-400 py-0.5">
+                    <span className="text-green-600">[{time}]</span> {seg.text}
+                  </div>
+                );
+              }
+              // Normal transcript - white for finals, gray for partials
+              return (
+                <div key={i} className={seg.is_final ? 'text-white' : 'text-gray-500 italic'}>
+                  {seg.text}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

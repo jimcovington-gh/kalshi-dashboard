@@ -1926,15 +1926,19 @@ export default function VoiceTraderDevPage() {
                     ⚠️ Below min (${minTrade})
                   </div>
                 )}
-                <div className="border-t border-gray-700 pt-1 mt-1">
-                  <div className="flex justify-between">
-                    <span className="text-gray-400 text-xs">Exposure:</span>
-                    <span className="text-xs">${(pnl?.total_exposure ?? 0).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400 text-xs">Trades:</span>
-                    <span className="text-xs">{pnl?.trades_count ?? 0}</span>
-                  </div>
+                {/* Manual Call End Button */}
+                <div className="border-t border-gray-700 pt-2 mt-2">
+                  <button
+                    onClick={() => {
+                      if (wsRef.current?.readyState === WebSocket.OPEN) {
+                        wsRef.current.send(JSON.stringify({ type: 'force_call_end' }));
+                      }
+                    }}
+                    className="w-full bg-red-700 hover:bg-red-600 px-2 py-1.5 rounded text-xs font-medium"
+                    title="Manually trigger NO sweep on all untriggered markets"
+                  >
+                    🛑 End Call (Sweep NO)
+                  </button>
                 </div>
               </div>
             </div>

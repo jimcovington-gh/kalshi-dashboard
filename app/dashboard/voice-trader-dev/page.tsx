@@ -918,7 +918,7 @@ export default function VoiceTraderDevPage() {
     setEc2Loading(true);
     setEc2Error(null);
     try {
-      const response = await fetch(`${API_BASE}/voice-trader/ec2/start`, {
+      const response = await fetch(`${API_BASE}/voice-trader/ec2/start?env=dev`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${authToken}` }
       });
@@ -944,7 +944,7 @@ export default function VoiceTraderDevPage() {
     setEc2Loading(true);
     setEc2Error(null);
     try {
-      const response = await fetch(`${API_BASE}/voice-trader/ec2/stop`, {
+      const response = await fetch(`${API_BASE}/voice-trader/ec2/stop?env=dev`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${authToken}` }
       });
@@ -970,7 +970,7 @@ export default function VoiceTraderDevPage() {
     setEc2Loading(true);
     setEc2Error(null);
     try {
-      const response = await fetch(`${API_BASE}/voice-trader/ec2/reboot`, {
+      const response = await fetch(`${API_BASE}/voice-trader/ec2/reboot?env=dev`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${authToken}` }
       });

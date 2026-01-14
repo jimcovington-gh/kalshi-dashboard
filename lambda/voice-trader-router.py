@@ -34,9 +34,13 @@ MARKET_METADATA_TABLE = os.environ.get('MARKET_METADATA_TABLE', 'production-kals
 MENTION_EVENTS_TABLE = os.environ.get('MENTION_EVENTS_TABLE', 'production-kalshi-mention-events')
 VOICE_TRADER_STATE_TABLE = os.environ.get('VOICE_TRADER_STATE_TABLE', 'production-kalshi-voice-trader-state')
 
-# EC2 Configuration
+# EC2 Configuration - Production
 VOICE_TRADER_EC2_INSTANCE_ID = os.environ.get('VOICE_TRADER_EC2_INSTANCE_ID', 'i-0ae0218a057e5b4c3')
 VOICE_TRADER_EC2_DOMAIN = os.environ.get('VOICE_TRADER_EC2_DOMAIN', 'voice.apexmarkets.us')
+
+# EC2 Configuration - Dev
+VOICE_TRADER_EC2_INSTANCE_ID_DEV = os.environ.get('VOICE_TRADER_EC2_INSTANCE_ID_DEV', 'i-04d29cacb3c2d76a6')
+VOICE_TRADER_EC2_DOMAIN_DEV = os.environ.get('VOICE_TRADER_EC2_DOMAIN_DEV', 'dev-voice.apexmarkets.us')
 
 
 class DecimalEncoder(json.JSONEncoder):
@@ -44,6 +48,25 @@ class DecimalEncoder(json.JSONEncoder):
         if isinstance(obj, Decimal):
             return float(obj)
         return super().default(obj)
+
+
+def get_ec2_config(event):
+    """Get EC2 instance ID and domain based on env query param.
+    
+    Args:
+        event: Lambda event dict
+    
+    Returns:
+        tuple: (instance_id, domain, env_name)
+    """
+    # Check query params for env=dev
+    query_params = event.get('queryStringParameters') or {}
+    env = query_params.get('env', 'prod')
+    
+    if env == 'dev':
+        return (VOICE_TRADER_EC2_INSTANCE_ID_DEV, VOICE_TRADER_EC2_DOMAIN_DEV, 'dev')
+    else:
+        return (VOICE_TRADER_EC2_INSTANCE_ID, VOICE_TRADER_EC2_DOMAIN, 'prod')
 
 
 def lambda_handler(event, context):
@@ -55,15 +78,15 @@ def lambda_handler(event, context):
     path_parts = path.strip('/').split('/')
     
     try:
-        # EC2 control endpoints
+        # EC2 control endpoints - pass event for env detection
         if '/ec2/status' in path and http_method == 'GET':
-            return get_ec2_status()
+            return get_ec2_status(event)
         elif '/ec2/start' in path and http_method == 'POST':
-            return start_ec2()
+            return start_ec2(event)
         elif '/ec2/stop' in path and http_method == 'POST':
-            return stop_ec2()
+            return stop_ec2(event)
         elif '/ec2/reboot' in path and http_method == 'POST':
-            return reboot_ec2()
+            return reboot_ec2(event)
         elif '/ec2/launch' in path and http_method == 'POST':
             return launch_ec2_session(event)
         elif '/ec2/stop-session/' in path and http_method == 'POST':
@@ -271,10 +294,12 @@ pkill -9 -f "{kill_pattern}" || echo "No process found"
 # EC2 Control Functions
 # ============================================================================
 
-def get_ec2_status():
+def get_ec2_status(event):
     """Get Voice Trader EC2 instance status."""
+    instance_id, domain, env_name = get_ec2_config(event)
+    
     try:
-        result = ec2.describe_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        result = ec2.describe_instances(InstanceIds=[instance_id])
         
         if not result.get('Reservations') or not result['Reservations'][0].get('Instances'):
             return response(404, {'error': 'EC2 instance not found'})
@@ -290,71 +315,78 @@ def get_ec2_status():
             uptime_hours = round(uptime_seconds / 3600, 2)
         
         return response(200, {
-            'instance_id': VOICE_TRADER_EC2_INSTANCE_ID,
+            'instance_id': instance_id,
             'status': state,
             'public_ip': public_ip,
-            'domain': VOICE_TRADER_EC2_DOMAIN,
+            'domain': domain,
+            'env': env_name,
             'launch_time': launch_time.isoformat() if launch_time else None,
             'uptime_hours': uptime_hours,
-            'websocket_url': f'wss://{VOICE_TRADER_EC2_DOMAIN}:8765' if state == 'running' else None
+            'websocket_url': f'wss://{domain}:8765' if state == 'running' else None
         })
         
     except Exception as e:
         return response(500, {'error': f'Failed to get EC2 status: {str(e)}'})
 
 
-def start_ec2():
+def start_ec2(event):
     """Start the Voice Trader EC2 instance."""
+    instance_id, domain, env_name = get_ec2_config(event)
+    
     try:
-        result = ec2.describe_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        result = ec2.describe_instances(InstanceIds=[instance_id])
         instance = result['Reservations'][0]['Instances'][0]
         current_state = instance['State']['Name']
         
         if current_state == 'running':
-            return response(200, {'success': True, 'message': 'Already running', 'status': 'running'})
+            return response(200, {'success': True, 'message': 'Already running', 'status': 'running', 'env': env_name})
         
         if current_state != 'stopped':
             return response(400, {'error': f'Cannot start from state: {current_state}'})
         
-        ec2.start_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
-        return response(200, {'success': True, 'message': 'Starting', 'status': 'pending'})
+        ec2.start_instances(InstanceIds=[instance_id])
+        return response(200, {'success': True, 'message': 'Starting', 'status': 'pending', 'env': env_name})
         
     except Exception as e:
         return response(500, {'error': f'Failed to start: {str(e)}'})
 
 
-def stop_ec2():
+def stop_ec2(event):
     """Stop the Voice Trader EC2 instance."""
+    instance_id, domain, env_name = get_ec2_config(event)
+    
     try:
-        result = ec2.describe_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        result = ec2.describe_instances(InstanceIds=[instance_id])
         instance = result['Reservations'][0]['Instances'][0]
         current_state = instance['State']['Name']
         
         if current_state == 'stopped':
-            return response(200, {'success': True, 'message': 'Already stopped', 'status': 'stopped'})
+            return response(200, {'success': True, 'message': 'Already stopped', 'status': 'stopped', 'env': env_name})
         
         if current_state != 'running':
             return response(400, {'error': f'Cannot stop from state: {current_state}'})
         
-        ec2.stop_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
-        return response(200, {'success': True, 'message': 'Stopping', 'status': 'stopping'})
+        ec2.stop_instances(InstanceIds=[instance_id])
+        return response(200, {'success': True, 'message': 'Stopping', 'status': 'stopping', 'env': env_name})
         
     except Exception as e:
         return response(500, {'error': f'Failed to stop: {str(e)}'})
 
 
-def reboot_ec2():
+def reboot_ec2(event):
     """Reboot the Voice Trader EC2 instance."""
+    instance_id, domain, env_name = get_ec2_config(event)
+    
     try:
-        result = ec2.describe_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        result = ec2.describe_instances(InstanceIds=[instance_id])
         instance = result['Reservations'][0]['Instances'][0]
         current_state = instance['State']['Name']
         
         if current_state != 'running':
             return response(400, {'error': f'Cannot reboot from state: {current_state}'})
         
-        ec2.reboot_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
-        return response(200, {'success': True, 'message': 'Rebooting', 'status': 'rebooting'})
+        ec2.reboot_instances(InstanceIds=[instance_id])
+        return response(200, {'success': True, 'message': 'Rebooting', 'status': 'rebooting', 'env': env_name})
         
     except Exception as e:
         return response(500, {'error': f'Failed to reboot: {str(e)}'})
@@ -362,6 +394,8 @@ def reboot_ec2():
 
 def launch_ec2_session(event):
     """Launch a voice trader session on EC2 via SSM."""
+    instance_id, domain, env_name = get_ec2_config(event)
+    
     body = json.loads(event.get('body', '{}'))
     
     event_ticker = body.get('event_ticker')
@@ -383,10 +417,10 @@ def launch_ec2_session(event):
     
     # Check EC2 is running
     try:
-        result = ec2.describe_instances(InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID])
+        result = ec2.describe_instances(InstanceIds=[instance_id])
         instance = result['Reservations'][0]['Instances'][0]
         if instance['State']['Name'] != 'running':
-            return response(400, {'error': 'EC2 instance not running. Start it first.'})
+            return response(400, {'error': f'EC2 instance ({env_name}) not running. Start it first.'})
         public_ip = instance.get('PublicIpAddress')
     except Exception as e:
         return response(500, {'error': f'Failed to check EC2: {str(e)}'})
@@ -399,10 +433,14 @@ def launch_ec2_session(event):
         'EVENT_TICKER': event_ticker,
         'USER_NAME': user_name,
         'AUDIO_SOURCE': audio_source,
-        'ENVIRONMENT': 'production',
+        'ENVIRONMENT': 'dev' if env_name == 'dev' else 'production',
         'AWS_DEFAULT_REGION': 'us-east-1',
         'PHONE_PROVIDER': 'telnyx',
     }
+    
+    # Dev always runs in DRY_RUN mode unless explicitly overridden
+    if env_name == 'dev':
+        env_vars['DRY_RUN'] = 'true'
     
     if audio_source == 'phone':
         env_vars['PHONE_NUMBER'] = phone_number
@@ -440,7 +478,7 @@ echo $!
     
     try:
         ssm_response = ssm.send_command(
-            InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID],
+            InstanceIds=[instance_id],
             DocumentName='AWS-RunShellScript',
             Parameters={'commands': [command]},
             TimeoutSeconds=60
@@ -454,13 +492,14 @@ echo $!
     state_table.put_item(Item={
         'session_id': session_id,
         'event_ticker': event_ticker,
-        'instance_id': VOICE_TRADER_EC2_INSTANCE_ID,
+        'instance_id': instance_id,
         'ssm_command_id': command_id,
         'status': 'launching',
         'audio_source': audio_source,
         'user_name': user_name,
         'phone_number': phone_number if audio_source == 'phone' else None,
         'public_ip': public_ip,
+        'env': env_name,
         'started_at': datetime.now(timezone.utc).isoformat(),
         'ttl': int(datetime.now(timezone.utc).timestamp()) + (7 * 24 * 60 * 60)
     })
@@ -469,8 +508,9 @@ echo $!
         'success': True,
         'session_id': session_id,
         'event_ticker': event_ticker,
-        'domain': VOICE_TRADER_EC2_DOMAIN,
-        'websocket_url': f'wss://{VOICE_TRADER_EC2_DOMAIN}:8765',
+        'env': env_name,
+        'domain': domain,
+        'websocket_url': f'wss://{domain}:8765',
         'message': 'Session launching'
     })
 

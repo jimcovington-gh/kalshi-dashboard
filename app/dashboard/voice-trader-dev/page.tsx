@@ -88,13 +88,12 @@ type PageState = 'loading' | 'events' | 'setup' | 'monitoring';
 
 const API_BASE = 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod';
 
-// Voice Trader backend URLs - use env vars for dev/prod switching
-// For local dev: create .env.local with NEXT_PUBLIC_VOICE_TRADER_HOST=dev-voice.apexmarkets.us
-const VOICE_TRADER_HOST = process.env.NEXT_PUBLIC_VOICE_TRADER_HOST || 'voice.apexmarkets.us';
-const EC2_BASE = `https://${VOICE_TRADER_HOST}:8080`;  // Direct EC2 endpoint
-const WS_BASE = `wss://${VOICE_TRADER_HOST}:8765`;  // WebSocket endpoint
+// DEV Voice Trader - hardcoded to dev backend
+const VOICE_TRADER_HOST = 'dev-voice.apexmarkets.us';
+const EC2_BASE = `https://${VOICE_TRADER_HOST}:8080`;  // Dev EC2 endpoint
+const WS_BASE = `wss://${VOICE_TRADER_HOST}:8765`;  // Dev WebSocket endpoint
 
-export default function VoiceTraderPage() {
+export default function VoiceTraderDevPage() {
   const router = useRouter();
   const [pageState, setPageState] = useState<PageState>('loading');
   const [events, setEvents] = useState<MentionEvent[]>([]);
@@ -1221,7 +1220,14 @@ export default function VoiceTraderPage() {
   if (pageState === 'events') {
     return (
       <div className="min-h-screen bg-gray-900 text-white p-6">
-        <h1 className="text-3xl font-bold mb-6">Voice Mention Trader</h1>
+        {/* DEV ENVIRONMENT BANNER */}
+        <div className="bg-yellow-600 text-yellow-900 px-4 py-2 rounded-lg mb-4 flex items-center gap-2">
+          <span className="text-xl">🧪</span>
+          <span className="font-bold">DEV ENVIRONMENT</span>
+          <span className="text-sm">— Connected to dev-voice.apexmarkets.us (DRY_RUN mode by default)</span>
+        </div>
+        
+        <h1 className="text-3xl font-bold mb-6">Voice Mention Trader <span className="text-yellow-500 text-xl">(DEV)</span></h1>
         <p className="text-gray-400 mb-6">
           Select an upcoming mention event to trade. The system will dial into the earnings call,
           transcribe in real-time, and automatically trade when target words are spoken.
@@ -1636,6 +1642,13 @@ export default function VoiceTraderPage() {
     
     return (
       <div className="min-h-screen bg-gray-900 text-white p-4">
+        {/* DEV ENVIRONMENT BANNER */}
+        <div className="bg-yellow-600 text-yellow-900 px-3 py-1 rounded-lg mb-2 flex items-center gap-2 text-sm">
+          <span>🧪</span>
+          <span className="font-bold">DEV</span>
+          <span>— dev-voice.apexmarkets.us</span>
+        </div>
+        
         {/* Header - SIMPLIFIED */}
         <div className="flex justify-between items-center mb-4">
           <div>
@@ -1659,7 +1672,7 @@ export default function VoiceTraderPage() {
             >
               ← Back to Lobby
             </button>
-            <h1 className="text-xl font-bold">{selectedEvent.title}</h1>
+            <h1 className="text-xl font-bold">{selectedEvent.title} <span className="text-yellow-500 text-base">(DEV)</span></h1>
             <div className={`text-sm ${statusColor}`}>{statusMessage}</div>
             
             {/* Detection Pause + Q&A Status Indicators */}

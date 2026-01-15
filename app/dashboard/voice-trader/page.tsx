@@ -38,6 +38,7 @@ interface ContainerState {
   audio_source: string;  // 'phone' or 'web'/'stream'
   qa_started: boolean;
   detection_paused: boolean;
+  dry_run: boolean;
   speakers: {
     valid_count: number;
     invalid_count: number;
@@ -579,6 +580,7 @@ export default function VoiceTraderPage() {
             audio_source: data.audio_source || prev?.audio_source || 'phone',
             qa_started: data.qa_started || false,
             detection_paused: data.detection_paused || false,
+            dry_run: data.dry_run ?? prev?.dry_run ?? false,
             // Use speakers from response, fallback to prev if not present
             speakers: data.speakers || prev?.speakers || { valid_count: 0, invalid_count: 0, current: '', details: [] },
             transcript_segments: data.transcript_segments || prev?.transcript_segments || 0
@@ -1717,6 +1719,28 @@ export default function VoiceTraderPage() {
                     : "Detection ACTIVE - Click to pause"}
                 >
                   {containerState?.detection_paused ? '⏸️ Paused' : '▶️ Detecting'}
+                </button>
+                
+                {/* Suspend Trading Button - Emergency stop */}
+                <button
+                  onClick={() => {
+                    if (wsRef.current?.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({ 
+                        type: 'set_dry_run',
+                        dry_run: !containerState?.dry_run 
+                      }));
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                    containerState?.dry_run 
+                      ? 'bg-yellow-600 hover:bg-yellow-500 ring-2 ring-yellow-400' 
+                      : 'bg-blue-600 hover:bg-blue-500'
+                  }`}
+                  title={containerState?.dry_run 
+                    ? "TRADING SUSPENDED (dry run) - Click to enable live trading" 
+                    : "Live trading enabled - Click to suspend"}
+                >
+                  {containerState?.dry_run ? '🚫 Trading Off' : '💰 Trading On'}
                 </button>
                 
                 {/* Q&A Status - only show for phone/dial-in (earnings calls have Q&A) */}

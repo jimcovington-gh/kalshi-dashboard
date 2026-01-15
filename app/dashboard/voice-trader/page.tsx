@@ -23,6 +23,7 @@ interface WordStatus {
   triggered_at?: number;
   no_purchased: boolean;
   trade_result?: any;
+  status?: 'pending' | 'success' | 'no_fill' | 'failed' | 'skipped';
 }
 
 interface Speaker {
@@ -431,11 +432,19 @@ export default function VoiceTraderPage() {
               }
             });
           } else if (data.type === 'word_triggered') {
-            // Update the words state to mark this word as triggered
-            console.log('[WORD] Triggered:', data.word, data.market_ticker);
+            // Update the words state based on status
+            // pending = yellow (trade in progress)
+            // success = green (got fills)
+            // no_fill/failed/skipped = gray (revert to untriggered look)
+            console.log('[WORD] Status:', data.word, data.market_ticker, data.status || 'triggered');
             setWords(prev => prev.map(w => 
               w.market_ticker === data.market_ticker 
-                ? { ...w, triggered: true, triggered_at: data.timestamp }
+                ? { 
+                    ...w, 
+                    triggered: data.status === 'success',  // Only green on success
+                    triggered_at: data.timestamp,
+                    status: data.status || 'pending'
+                  }
                 : w
             ));
           } else if (data.type === 'event') {
@@ -474,6 +483,9 @@ export default function VoiceTraderPage() {
             setAvailableCash(data.available_cash || 0);
             setMinTrade(data.min_trade || 10);
             // DO NOT update betSize from server - user controls it entirely
+          } else if (data.type === 'speakers') {
+            // Update speakers from server
+            setContainerState(prev => prev ? {...prev, speakers: data.speakers} : prev);
           }
         };
         
@@ -1849,29 +1861,51 @@ export default function VoiceTraderPage() {
           <div className="col-span-2 bg-gray-800 rounded-lg p-3 max-h-[350px] overflow-y-auto">
             <h2 className="font-semibold mb-2 text-sm">Word Status</h2>
             <div className="grid grid-cols-5 gap-1">
-              {words.map(w => (
-                <div
-                  key={w.market_ticker}
-                  className={`p-1.5 rounded text-xs ${
-                    w.triggered
-                      ? 'bg-green-900 border border-green-500'
-                      : w.no_purchased
-                      ? 'bg-red-900 border border-red-500'
-                      : 'bg-gray-700'
-                  }`}
-                >
-                  <div className="font-medium truncate" title={w.word}>
-                    {w.word}
+              {words.map(w => {
+                // Color based on status:
+                // pending = yellow (trade in progress)
+                // success = green (got fills)
+                // no_fill/failed/skipped = gray (no trade executed)
+                const bgClass = w.status === 'pending'
+                  ? 'bg-yellow-900 border border-yellow-500'
+                  : w.status === 'success'
+                  ? 'bg-green-900 border border-green-500'
+                  : w.no_purchased
+                  ? 'bg-red-900 border border-red-500'
+                  : 'bg-gray-700';
+                
+                const statusIcon = w.status === 'pending'
+                  ? '⏳'
+                  : w.status === 'success'
+                  ? '✓'
+                  : w.status === 'no_fill'
+                  ? '⚡'
+                  : w.status === 'skipped'
+                  ? '⏸'
+                  : w.status === 'failed'
+                  ? '✗'
+                  : w.no_purchased
+                  ? '✗ NO'
+                  : '...';
+                
+                return (
+                  <div
+                    key={w.market_ticker}
+                    className={`p-1.5 rounded text-xs ${bgClass}`}
+                  >
+                    <div className="font-medium truncate" title={w.word}>
+                      {w.word}
+                    </div>
+                    <div className="text-[10px] text-gray-400 truncate">
+                      {w.status && w.triggered_at
+                        ? `${statusIcon} ${formatTime(w.triggered_at)}`
+                        : w.no_purchased
+                        ? '✗ NO'
+                        : '...'}
+                    </div>
                   </div>
-                  <div className="text-[10px] text-gray-400 truncate">
-                    {w.triggered
-                      ? `✓ ${formatTime(w.triggered_at!)}`
-                      : w.no_purchased
-                      ? '✗ NO'
-                      : '...'}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
           

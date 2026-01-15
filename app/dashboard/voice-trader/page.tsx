@@ -1432,7 +1432,7 @@ export default function VoiceTraderPage() {
                 </div>
                 
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {event.words.slice(0, 10).map(w => (
+                  {(event.words || []).slice(0, 10).map(w => (
                     <span
                       key={w.market_ticker}
                       className="bg-gray-700 px-2 py-1 rounded text-xs"
@@ -1440,9 +1440,9 @@ export default function VoiceTraderPage() {
                       {w.word}
                     </span>
                   ))}
-                  {event.words.length > 10 && (
+                  {(event.words?.length ?? 0) > 10 && (
                     <span className="text-gray-500 text-xs">
-                      +{event.words.length - 10} more
+                      +{(event.words?.length ?? 0) - 10} more
                     </span>
                   )}
                 </div>
@@ -1615,9 +1615,9 @@ export default function VoiceTraderPage() {
         </div>
         
         <div className="mt-6 bg-gray-800 rounded-lg p-4">
-          <h3 className="font-semibold mb-2">Words to Track ({selectedEvent.words.length})</h3>
+          <h3 className="font-semibold mb-2">Words to Track ({selectedEvent.words?.length ?? 0})</h3>
           <div className="flex flex-wrap gap-2">
-            {selectedEvent.words.map(w => (
+            {(selectedEvent.words || []).map(w => (
               <span
                 key={w.market_ticker}
                 className="bg-gray-700 px-2 py-1 rounded text-sm"

@@ -109,6 +109,7 @@ export default function VoiceTraderPage() {
   const [webUrl, setWebUrl] = useState('');
   const [scheduledStart, setScheduledStart] = useState('');
   const [qaDetectionEnabled, setQaDetectionEnabled] = useState(true);
+  const [dryRun, setDryRun] = useState(false);  // Dry run mode - no real trades
   
   // Launch state
   const [launching, setLaunching] = useState(false);
@@ -1034,6 +1035,11 @@ export default function VoiceTraderPage() {
         body.stream_url = webUrl;
       }
       
+      // Add dry_run flag
+      if (dryRun) {
+        body.dry_run = true;
+      }
+      
       const response = await fetch(`${EC2_BASE}/dial`, {
         method: 'POST',
         headers: {
@@ -1571,6 +1577,24 @@ export default function VoiceTraderPage() {
             </p>
           </div>
           
+          <div className="mt-6">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={dryRun}
+                onChange={e => setDryRun(e.target.checked)}
+                className="w-4 h-4 accent-yellow-500"
+              />
+              <span className={dryRun ? 'text-yellow-400 font-semibold' : ''}>
+                🧪 Dry Run Mode {dryRun && '(ENABLED)'}
+              </span>
+            </label>
+            <p className="text-xs text-gray-500 mt-1">
+              When enabled, all trading actions are simulated. No real orders will be placed.
+              Use this for testing the system without risking real money.
+            </p>
+          </div>
+          
           <div className="mt-8">
             <button
               onClick={handleLaunch}
@@ -1637,6 +1661,15 @@ export default function VoiceTraderPage() {
     
     return (
       <div className="min-h-screen bg-gray-900 text-white p-4">
+        {/* DRY RUN BANNER - show when in dry run mode */}
+        {dryRun && (
+          <div className="bg-yellow-600 text-yellow-900 px-3 py-1 rounded-lg mb-2 flex items-center gap-2 text-sm">
+            <span>🧪</span>
+            <span className="font-bold">DRY RUN MODE</span>
+            <span>— No real trades will be executed</span>
+          </div>
+        )}
+        
         {/* Header - SIMPLIFIED */}
         <div className="flex justify-between items-center mb-4">
           <div>
@@ -1833,14 +1866,14 @@ export default function VoiceTraderPage() {
         </div>
         
         <div className="grid grid-cols-3 gap-4">
-          {/* Left column: Word Grid */}
-          <div className="col-span-2 bg-gray-800 rounded-lg p-4 max-h-[400px] overflow-y-auto">
-            <h2 className="font-semibold mb-3">Word Status</h2>
-            <div className="grid grid-cols-3 gap-2">
+          {/* Left column: Word Grid - 5 columns for density */}
+          <div className="col-span-2 bg-gray-800 rounded-lg p-3 max-h-[350px] overflow-y-auto">
+            <h2 className="font-semibold mb-2 text-sm">Word Status</h2>
+            <div className="grid grid-cols-5 gap-1">
               {words.map(w => (
                 <div
                   key={w.market_ticker}
-                  className={`p-2 rounded text-sm ${
+                  className={`p-1.5 rounded text-xs ${
                     w.triggered
                       ? 'bg-green-900 border border-green-500'
                       : w.no_purchased
@@ -1851,12 +1884,12 @@ export default function VoiceTraderPage() {
                   <div className="font-medium truncate" title={w.word}>
                     {w.word}
                   </div>
-                  <div className="text-xs text-gray-400">
+                  <div className="text-[10px] text-gray-400 truncate">
                     {w.triggered
-                      ? `✓ YES @ ${formatTime(w.triggered_at!)}`
+                      ? `✓ ${formatTime(w.triggered_at!)}`
                       : w.no_purchased
-                      ? '✗ NO purchased'
-                      : 'Watching...'}
+                      ? '✗ NO'
+                      : '...'}
                   </div>
                 </div>
               ))}
@@ -1913,15 +1946,19 @@ export default function VoiceTraderPage() {
                     ⚠️ Below min (${minTrade})
                   </div>
                 )}
-                <div className="border-t border-gray-700 pt-1 mt-1">
-                  <div className="flex justify-between">
-                    <span className="text-gray-400 text-xs">Exposure:</span>
-                    <span className="text-xs">${(pnl?.total_exposure ?? 0).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400 text-xs">Trades:</span>
-                    <span className="text-xs">{pnl?.trades_count ?? 0}</span>
-                  </div>
+                {/* Manual Call End Button */}
+                <div className="border-t border-gray-700 pt-2 mt-2">
+                  <button
+                    onClick={() => {
+                      if (wsRef.current?.readyState === WebSocket.OPEN) {
+                        wsRef.current.send(JSON.stringify({ type: 'force_call_end' }));
+                      }
+                    }}
+                    className="w-full bg-red-700 hover:bg-red-600 px-2 py-1.5 rounded text-xs font-medium"
+                    title="Manually trigger NO sweep on all untriggered markets"
+                  >
+                    🛑 End Call (Sweep NO)
+                  </button>
                 </div>
               </div>
             </div>
@@ -1980,16 +2017,16 @@ export default function VoiceTraderPage() {
               </div>
             )}
             
-            {/* Speakers (compact) */}
-            {containerState?.speakers && containerState.speakers.details.length > 0 && (
-              <div className="bg-gray-800 rounded-lg p-3">
-                <h2 className="font-semibold text-sm mb-1">Speakers</h2>
-                <div className="text-xs space-y-1">
-                  <div className="flex justify-between text-gray-400">
-                    <span>✓ {containerState.speakers.valid_count}</span>
-                    <span>✗ {containerState.speakers.invalid_count}</span>
-                  </div>
-                  {containerState.speakers.details.slice(0, 3).map(s => (
+            {/* Speakers - ALWAYS show section, even when empty */}
+            <div className="bg-gray-800 rounded-lg p-3">
+              <h2 className="font-semibold text-sm mb-1">Speakers</h2>
+              <div className="text-xs space-y-1">
+                <div className="flex justify-between text-gray-400">
+                  <span>✓ {containerState?.speakers?.valid_count ?? 0}</span>
+                  <span>✗ {containerState?.speakers?.invalid_count ?? 0}</span>
+                </div>
+                {containerState?.speakers?.details && containerState.speakers.details.length > 0 ? (
+                  containerState.speakers.details.slice(0, 5).map(s => (
                     <div
                       key={s.id}
                       className={`text-xs p-1 rounded truncate ${
@@ -1998,10 +2035,12 @@ export default function VoiceTraderPage() {
                     >
                       <span className="font-mono">{s.id}</span>: {s.sample}
                     </div>
-                  ))}
-                </div>
+                  ))
+                ) : (
+                  <div className="text-gray-500 italic">No speakers detected yet</div>
+                )}
               </div>
-            )}
+            </div>
           </div>
         </div>
         

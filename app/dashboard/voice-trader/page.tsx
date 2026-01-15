@@ -1738,20 +1738,11 @@ export default function VoiceTraderPage() {
                 onClick={async () => {
                   setDialing(true);
                   setError(null);
-                  const containerUrl = wsUrl?.replace('wss://', 'https://').replace(':8765', ':8080');
-                  if (!containerUrl) {
-                    setError('Container URL not available');
-                    setDialing(false);
-                    return;
-                  }
-                  try {
-                    const response = await fetch(`${containerUrl}/connect`, { method: 'POST' });
-                    if (!response.ok) {
-                      const data = await response.json();
-                      throw new Error(data.error || 'Failed to connect');
-                    }
-                  } catch (err: any) {
-                    setError(err.message);
+                  // Send dial command via WebSocket to worker
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'dial' }));
+                  } else {
+                    setError('WebSocket not connected');
                     setDialing(false);
                   }
                 }}

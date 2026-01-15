@@ -545,73 +545,86 @@ def compare_portfolios_log_diff(api_portfolio: Dict[str, Any], live_comparison: 
 
 
 def get_portfolio_history(api_key_id: str, period: str = '24h') -> List[Dict[str, Any]]:
-    """Get portfolio snapshot history with downsampling"""
+    """Get portfolio snapshot history with efficient time-bucket sampling.
+    
+    Instead of fetching all records and downsampling (slow for large datasets),
+    we query one record per time bucket directly from DynamoDB.
+    """
     
     now = datetime.now(timezone.utc)
     
+    # Define time buckets based on period
     if period == '7d':
         start_time = now - timedelta(days=7)
-        resolution = 'hour'
+        bucket_delta = timedelta(hours=1)  # ~168 buckets
     elif period == '30d':
         start_time = now - timedelta(days=30)
-        resolution = 'day'
+        bucket_delta = timedelta(hours=6)  # ~120 buckets (every 6 hours)
     elif period == 'all':
-        start_time = now - timedelta(days=365) # Cap at 1 year for now
-        resolution = 'day'
-    else: # Default to 24h
+        start_time = now - timedelta(days=365)
+        bucket_delta = timedelta(days=1)  # ~365 buckets
+    else:  # Default to 24h
         start_time = now - timedelta(hours=24)
-        resolution = '15min'
+        bucket_delta = timedelta(minutes=15)  # ~96 buckets
 
-    start_ts = int(start_time.timestamp() * 1000)
+    # Generate time bucket boundaries
+    buckets = []
+    bucket_end = start_time + bucket_delta
+    while bucket_end <= now:
+        buckets.append(bucket_end)
+        bucket_end += bucket_delta
+    # Always include "now" as the last bucket
+    if not buckets or buckets[-1] < now - timedelta(minutes=5):
+        buckets.append(now)
     
-    # Query DynamoDB
+    logger.info(f"Portfolio history: period={period}, buckets={len(buckets)}")
+    
+    # Query one record per bucket (the latest record before each bucket boundary)
+    # Use batched queries for efficiency
     items = []
-    last_evaluated_key = None
     
-    query_params = {
-        'KeyConditionExpression': 'api_key_id = :api_key AND snapshot_ts >= :start_ts',
-        'ExpressionAttributeValues': {
-            ':api_key': api_key_id,
-            ':start_ts': start_ts
-        }
-    }
-    
-    # Fetch all items in range (pagination)
-    while True:
-        if last_evaluated_key:
-            query_params['ExclusiveStartKey'] = last_evaluated_key
-            
-        response = portfolio_table.query(**query_params)
-        items.extend(response.get('Items', []))
+    for bucket_time in buckets:
+        bucket_ts = int(bucket_time.timestamp() * 1000)
+        prev_bucket_ts = int((bucket_time - bucket_delta).timestamp() * 1000)
         
-        last_evaluated_key = response.get('LastEvaluatedKey')
-        if not last_evaluated_key:
-            break
+        try:
+            # Query for the latest record in this bucket (scan backwards, limit 1)
+            response = portfolio_table.query(
+                KeyConditionExpression='api_key_id = :api_key AND snapshot_ts BETWEEN :start_ts AND :end_ts',
+                ExpressionAttributeValues={
+                    ':api_key': api_key_id,
+                    ':start_ts': prev_bucket_ts,
+                    ':end_ts': bucket_ts
+                },
+                ScanIndexForward=False,  # Newest first
+                Limit=1
+            )
             
+            if response.get('Items'):
+                items.append(response['Items'][0])
+        except Exception as e:
+            logger.warning(f"Error querying bucket {bucket_time}: {e}")
+            continue
+    
     if not items:
-        return []
-        
+        # Fallback: try a simple limited query if bucket queries returned nothing
+        logger.info("Bucket queries returned no results, trying fallback")
+        start_ts = int(start_time.timestamp() * 1000)
+        response = portfolio_table.query(
+            KeyConditionExpression='api_key_id = :api_key AND snapshot_ts >= :start_ts',
+            ExpressionAttributeValues={
+                ':api_key': api_key_id,
+                ':start_ts': start_ts
+            },
+            Limit=200  # Cap at 200 records for fallback
+        )
+        items = response.get('Items', [])
+    
     # Sort by timestamp ascending
     items.sort(key=lambda x: int(x['snapshot_ts']))
     
-    # Downsample logic: Keep the LAST snapshot of each bucket
-    buckets = {}
-    for item in items:
-        ts = int(item['snapshot_ts']) / 1000
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-        
-        if resolution == 'day':
-            key = dt.strftime('%Y-%m-%d')
-        elif resolution == 'hour':
-            key = dt.strftime('%Y-%m-%d %H')
-        else: # 15min
-            minute = (dt.minute // 15) * 15
-            key = dt.strftime(f'%Y-%m-%d %H:{minute:02d}')
-            
-        buckets[key] = item
-        
-    # Return sorted values
-    return sorted(list(buckets.values()), key=lambda x: int(x['snapshot_ts']))
+    logger.info(f"Portfolio history returning {len(items)} records")
+    return items
 
 def lambda_handler(event, context):
     """

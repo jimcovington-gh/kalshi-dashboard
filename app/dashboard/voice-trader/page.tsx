@@ -1621,7 +1621,7 @@ export default function VoiceTraderPage() {
     const isCallActive = containerState?.call_state === 'in_progress' || containerState?.call_state === 'qa_session';
     const isConnecting = containerState?.call_state === 'connecting' || dialing;
     const isDisconnected = containerState?.call_state === 'disconnected' || containerState?.call_state === 'completed';
-    const isReadyToDial = containerState?.status_message?.toLowerCase().includes('ready to dial');
+    const isReadyToConnect = containerState?.status_message?.toLowerCase().includes('ready to connect');
     
     // Single status message
     let statusMessage = 'Connecting...';
@@ -1638,8 +1638,8 @@ export default function VoiceTraderPage() {
     } else if (isDisconnected) {
       statusMessage = '🔴 Call Ended';
       statusColor = 'text-red-400';
-    } else if (isReadyToDial) {
-      statusMessage = '⏳ Ready to Dial';
+    } else if (isReadyToConnect) {
+      statusMessage = '⏳ Ready to Connect';
       statusColor = 'text-blue-400';
     } else if (containerState?.status_message) {
       statusMessage = containerState.status_message;
@@ -1733,14 +1733,14 @@ export default function VoiceTraderPage() {
           
           {/* ONE button based on state */}
           <div>
-            {isReadyToDial && !dialing && (
+            {isReadyToConnect && !dialing && (
               <button
                 onClick={async () => {
                   setDialing(true);
                   setError(null);
-                  // Send dial command via WebSocket to worker
+                  // Send connect command via WebSocket to worker
                   if (wsRef.current?.readyState === WebSocket.OPEN) {
-                    wsRef.current.send(JSON.stringify({ type: 'dial' }));
+                    wsRef.current.send(JSON.stringify({ type: 'connect' }));
                   } else {
                     setError('WebSocket not connected');
                     setDialing(false);

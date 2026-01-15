@@ -1041,7 +1041,7 @@ export default function VoiceTraderPage() {
         body.dry_run = true;
       }
       
-      const response = await fetch(`${EC2_BASE}/dial`, {
+      const response = await fetch(`${EC2_BASE}/connect`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1744,10 +1744,10 @@ export default function VoiceTraderPage() {
                     return;
                   }
                   try {
-                    const response = await fetch(`${containerUrl}/dial`, { method: 'POST' });
+                    const response = await fetch(`${containerUrl}/connect`, { method: 'POST' });
                     if (!response.ok) {
                       const data = await response.json();
-                      throw new Error(data.error || 'Failed to dial');
+                      throw new Error(data.error || 'Failed to connect');
                     }
                   } catch (err: any) {
                     setError(err.message);

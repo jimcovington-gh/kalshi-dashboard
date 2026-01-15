@@ -34,8 +34,8 @@ interface Speaker {
 interface ContainerState {
   call_state: string;
   status_message: string;
+  audio_source: string;  // 'phone' or 'web'/'stream'
   qa_started: boolean;
-  qa_detection_enabled?: boolean;  // Whether Q&A detection is enabled for this session
   detection_paused: boolean;
   speakers: {
     valid_count: number;
@@ -109,7 +109,6 @@ export default function VoiceTraderPage() {
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
   const [scheduledStart, setScheduledStart] = useState('');
-  const [qaDetectionEnabled, setQaDetectionEnabled] = useState(true);
   const [dryRun, setDryRun] = useState(false);  // Dry run mode - no real trades
   
   // Launch state
@@ -565,6 +564,7 @@ export default function VoiceTraderPage() {
             ...prev,
             call_state: data.call_state || prev?.call_state || 'connecting',
             status_message: data.status_message || prev?.status_message || 'Loading...',
+            audio_source: data.audio_source || prev?.audio_source || 'phone',
             qa_started: data.qa_started || false,
             detection_paused: data.detection_paused || false,
             // Use speakers from response, fallback to prev if not present
@@ -1566,22 +1566,6 @@ export default function VoiceTraderPage() {
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
-                checked={qaDetectionEnabled}
-                onChange={e => setQaDetectionEnabled(e.target.checked)}
-                className="w-4 h-4"
-              />
-              <span>Enable Q&A Detection</span>
-            </label>
-            <p className="text-xs text-gray-500 mt-1">
-              When enabled, words from Q&A participants (shareholders/analysts) will be ignored.
-              Disable this if all speakers' words count.
-            </p>
-          </div>
-          
-          <div className="mt-6">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
                 checked={dryRun}
                 onChange={e => setDryRun(e.target.checked)}
                 className="w-4 h-4 accent-yellow-500"
@@ -1722,8 +1706,8 @@ export default function VoiceTraderPage() {
                   {containerState?.detection_paused ? '⏸️ Paused' : '▶️ Detecting'}
                 </button>
                 
-                {/* Q&A Status - only show if Q&A detection is enabled for this session */}
-                {(containerState?.qa_detection_enabled !== false) && (
+                {/* Q&A Status - only show for phone/dial-in (earnings calls have Q&A) */}
+                {containerState?.audio_source === 'phone' && (
                   containerState?.qa_started ? (
                     <span className="bg-orange-600 px-2 py-1 rounded text-xs font-medium">
                       🎤 Q&A Active

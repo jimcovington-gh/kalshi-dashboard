@@ -67,13 +67,13 @@ export default function AnalyticsPage() {
   const currentPortfolio = portfolios.find(p => p.user_name === selectedUser);
   const historyData = currentPortfolio?.history || [];
 
-  // Format data for chart
+  // Format data for chart - values are already in dollars
   const chartData = historyData.map(item => ({
     timestamp: item.snapshot_ts,
     date: new Date(Number(item.snapshot_ts)),
-    value: Number(item.total_value) / 100, // Convert cents to dollars
-    cash: Number(item.cash) / 100,
-    invested: (Number(item.total_value) - Number(item.cash)) / 100
+    value: Number(item.total_value),
+    cash: Number(item.cash),
+    invested: Number(item.total_value) - Number(item.cash)
   }));
 
   const formatXAxis = (tickItem: number) => {

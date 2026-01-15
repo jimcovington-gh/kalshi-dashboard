@@ -377,10 +377,10 @@ export default function QuickBetsPage() {
 
       case 'buy_result':
         if (data.success) {
-          // Show fill price without fees, then fees separately (always 1 decimal place)
-          const buyFillPrice = (data.fill_price ?? data.avg_price).toFixed(1);
-          const buyFees = (data.fees ?? 0).toFixed(1);
-          if (data.fees > 0) {
+          // Prices now in dollars - convert to cents for display (1 decimal place)
+          const buyFillPrice = ((data.fill_price_dollars ?? data.avg_price_dollars ?? 0) * 100).toFixed(1);
+          const buyFees = ((data.fees_dollars ?? 0) * 100).toFixed(1);
+          if (data.fees_dollars > 0) {
             addLog(`✅ BUY SUCCESS: ${data.team} @ ${buyFillPrice}¢ + ${buyFees}¢ fee x${data.filled_count}`, 'success');
           } else {
             addLog(`✅ BUY SUCCESS: ${data.team} @ ${buyFillPrice}¢ x${data.filled_count}`, 'success');
@@ -391,11 +391,13 @@ export default function QuickBetsPage() {
         break;
 
       case 'sell_result':
-        const pnl = data.net_pnl >= 0 ? `+${data.net_pnl}` : data.net_pnl;
+        // Prices now in dollars - convert to cents for display
+        const pnlCents = (data.net_pnl_dollars ?? 0) * 100;
+        const pnl = pnlCents >= 0 ? `+${pnlCents.toFixed(1)}` : pnlCents.toFixed(1);
         // Show fill price without fees, then fees separately (always 1 decimal place)
-        const sellFillPrice = (data.fill_price ?? data.avg_price).toFixed(1);
-        const sellFees = (data.fees ?? 0).toFixed(1);
-        if (data.fees > 0) {
+        const sellFillPrice = ((data.fill_price_dollars ?? data.avg_price_dollars ?? 0) * 100).toFixed(1);
+        const sellFees = ((data.fees_dollars ?? 0) * 100).toFixed(1);
+        if (data.fees_dollars > 0) {
           addLog(`💰 SELL: ${data.team} @ ${sellFillPrice}¢ - ${sellFees}¢ fee, P&L: ${pnl}¢`, 'success');
         } else {
           addLog(`💰 SELL: ${data.team} @ ${sellFillPrice}¢, P&L: ${pnl}¢`, 'success');

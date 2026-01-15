@@ -35,6 +35,7 @@ interface ContainerState {
   call_state: string;
   status_message: string;
   qa_started: boolean;
+  qa_detection_enabled?: boolean;  // Whether Q&A detection is enabled for this session
   detection_paused: boolean;
   speakers: {
     valid_count: number;
@@ -1721,23 +1722,25 @@ export default function VoiceTraderPage() {
                   {containerState?.detection_paused ? '⏸️ Paused' : '▶️ Detecting'}
                 </button>
                 
-                {/* Q&A Status */}
-                {containerState?.qa_started ? (
-                  <span className="bg-orange-600 px-2 py-1 rounded text-xs font-medium">
-                    🎤 Q&A Active
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => {
-                      if (wsRef.current?.readyState === WebSocket.OPEN) {
-                        wsRef.current.send(JSON.stringify({ type: 'set_qa_started' }));
-                      }
-                    }}
-                    className="bg-gray-700 hover:bg-orange-600 px-2 py-1 rounded text-xs"
-                    title="Click to manually mark Q&A as started"
-                  >
-                    Q&A Not Started
-                  </button>
+                {/* Q&A Status - only show if Q&A detection is enabled for this session */}
+                {(containerState?.qa_detection_enabled !== false) && (
+                  containerState?.qa_started ? (
+                    <span className="bg-orange-600 px-2 py-1 rounded text-xs font-medium">
+                      🎤 Q&A Active
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        if (wsRef.current?.readyState === WebSocket.OPEN) {
+                          wsRef.current.send(JSON.stringify({ type: 'set_qa_started' }));
+                        }
+                      }}
+                      className="bg-gray-700 hover:bg-orange-600 px-2 py-1 rounded text-xs"
+                      title="Click to manually mark Q&A as started"
+                    >
+                      Q&A Not Started
+                    </button>
+                  )
                 )}
               </div>
             )}

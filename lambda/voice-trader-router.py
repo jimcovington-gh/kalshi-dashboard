@@ -251,7 +251,10 @@ def get_status(session_id: str):
 
 
 def stop_session(session_id: str):
-    """Stop a voice trader session by killing the process."""
+    """Stop a voice trader session via HTTP API."""
+    import urllib.request
+    import ssl
+    
     state_table = dynamodb.Table(VOICE_TRADER_STATE_TABLE)
     
     item = state_table.get_item(Key={'session_id': session_id}).get('Item', {})
@@ -259,19 +262,26 @@ def stop_session(session_id: str):
     if not item:
         return response(404, {'error': 'Session not found'})
     
-    # Kill the process via SSM
-    kill_pattern = "/opt/voice-trader/fargate-voice-mention-trader/venv/bin/python main.py"
-    command = f'''#!/bin/bash
-pkill -9 -f "{kill_pattern}" || echo "No process found"
-'''
+    # Get the domain from the session's env
+    env_name = item.get('env', 'prod')
+    if env_name == 'dev':
+        domain = VOICE_TRADER_EC2_DOMAIN_DEV
+    else:
+        domain = VOICE_TRADER_EC2_DOMAIN
+    
+    api_url = f'https://{domain}:8080'
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
     
     try:
-        ssm.send_command(
-            InstanceIds=[VOICE_TRADER_EC2_INSTANCE_ID],
-            DocumentName='AWS-RunShellScript',
-            Parameters={'commands': [command]},
-            TimeoutSeconds=30
+        # Call the /stop endpoint
+        stop_req = urllib.request.Request(
+            f'{api_url}/stop',
+            method='POST'
         )
+        with urllib.request.urlopen(stop_req, timeout=10, context=ssl_ctx) as resp:
+            result = json.loads(resp.read().decode())
         
         # Update state
         state_table.update_item(
@@ -284,7 +294,7 @@ pkill -9 -f "{kill_pattern}" || echo "No process found"
             }
         )
         
-        return response(200, {'success': True, 'message': 'Session stopped'})
+        return response(200, {'success': True, 'message': result.get('message', 'Session stopped')})
         
     except Exception as e:
         return response(500, {'error': f'Failed to stop session: {str(e)}'})
@@ -393,7 +403,12 @@ def reboot_ec2(event):
 
 
 def launch_ec2_session(event):
-    """Launch a voice trader session on EC2 via SSM."""
+    """Launch a voice trader session via HTTP API on EC2.
+    
+    Uses the new two-process architecture:
+    - API server (always running) on :8080
+    - Worker process spawned on demand via POST /connect
+    """
     instance_id, domain, env_name = get_ec2_config(event)
     
     body = json.loads(event.get('body', '{}'))
@@ -415,104 +430,90 @@ def launch_ec2_session(event):
     if audio_source == 'web' and not web_url:
         return response(400, {'error': 'web_url required for web audio'})
     
-    # Check EC2 is running
+    # Check EC2 health via HTTP API (fast, no SSM)
+    import urllib.request
+    import ssl
+    
+    api_url = f'https://{domain}:8080'
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+    
     try:
-        result = ec2.describe_instances(InstanceIds=[instance_id])
-        instance = result['Reservations'][0]['Instances'][0]
-        if instance['State']['Name'] != 'running':
-            return response(400, {'error': f'EC2 instance ({env_name}) not running. Start it first.'})
-        public_ip = instance.get('PublicIpAddress')
+        health_req = urllib.request.Request(f'{api_url}/health')
+        with urllib.request.urlopen(health_req, timeout=5, context=ssl_ctx) as resp:
+            health_data = json.loads(resp.read().decode())
+            if health_data.get('status') != 'healthy':
+                return response(400, {'error': f'API server not healthy: {health_data}'})
     except Exception as e:
-        return response(500, {'error': f'Failed to check EC2: {str(e)}'})
+        return response(400, {'error': f'EC2 API not reachable ({env_name}). Is the instance running? Error: {str(e)}'})
     
-    session_id = str(uuid.uuid4())[:8]
-    
-    # Build environment
-    env_vars = {
-        'SESSION_ID': session_id,
-        'EVENT_TICKER': event_ticker,
-        'USER_NAME': user_name,
-        'AUDIO_SOURCE': audio_source,
-        'ENVIRONMENT': 'dev' if env_name == 'dev' else 'production',
-        'AWS_DEFAULT_REGION': 'us-east-1',
-        'PHONE_PROVIDER': 'telnyx',
+    # Build connect request
+    connect_body = {
+        'event_ticker': event_ticker,
+        'user_name': user_name,
+        'audio_source': audio_source,
+        'dry_run': env_name == 'dev',  # Dev always uses dry run
     }
     
-    # Dev always runs in DRY_RUN mode unless explicitly overridden
-    if env_name == 'dev':
-        env_vars['DRY_RUN'] = 'true'
-    
     if audio_source == 'phone':
-        env_vars['PHONE_NUMBER'] = phone_number
+        connect_body['phone_number'] = phone_number
         if passcode:
-            env_vars['PASSCODE'] = passcode
+            connect_body['passcode'] = passcode
     else:
-        env_vars['WEB_URL'] = web_url
+        connect_body['web_url'] = web_url
     
     if scheduled_start:
         if isinstance(scheduled_start, str):
             dt = datetime.fromisoformat(scheduled_start.replace('Z', '+00:00'))
-            env_vars['SCHEDULED_START_TS'] = str(int(dt.timestamp()))
+            connect_body['scheduled_start'] = int(dt.timestamp())
         else:
-            env_vars['SCHEDULED_START_TS'] = str(int(scheduled_start))
-        env_vars['AUTO_DIAL'] = 'true'
-    else:
-        env_vars['AUTO_DIAL'] = 'false'
+            connect_body['scheduled_start'] = int(scheduled_start)
     
-    # Build command
-    env_exports = ' '.join([f'{k}="{v}"' for k, v in env_vars.items()])
-    kill_pattern = "/opt/voice-trader/fargate-voice-mention-trader/venv/bin/python main.py"
-    command = f'''#!/bin/bash
-set -e
-
-# Kill existing process
-if pgrep -f "{kill_pattern}" > /dev/null 2>&1; then
-    pkill -9 -f "{kill_pattern}" || true
-    sleep 1
-fi
-
-cd /opt/voice-trader/fargate-voice-mention-trader
-{env_exports} nohup /opt/voice-trader/fargate-voice-mention-trader/venv/bin/python main.py > /tmp/voice-trader-{session_id}.log 2>&1 &
-echo $!
-'''
-    
+    # Call the API server's /connect endpoint
     try:
-        ssm_response = ssm.send_command(
-            InstanceIds=[instance_id],
-            DocumentName='AWS-RunShellScript',
-            Parameters={'commands': [command]},
-            TimeoutSeconds=60
+        connect_data = json.dumps(connect_body).encode('utf-8')
+        connect_req = urllib.request.Request(
+            f'{api_url}/connect',
+            data=connect_data,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
         )
-        command_id = ssm_response['Command']['CommandId']
+        with urllib.request.urlopen(connect_req, timeout=30, context=ssl_ctx) as resp:
+            result = json.loads(resp.read().decode())
+            
+        session_id = result.get('session_id', 'unknown')
+        
+        # Save state (for session tracking)
+        state_table = dynamodb.Table(VOICE_TRADER_STATE_TABLE)
+        state_table.put_item(Item={
+            'session_id': session_id,
+            'event_ticker': event_ticker,
+            'instance_id': instance_id,
+            'status': result.get('status', 'connecting'),
+            'audio_source': audio_source,
+            'user_name': user_name,
+            'phone_number': phone_number if audio_source == 'phone' else None,
+            'env': env_name,
+            'started_at': datetime.now(timezone.utc).isoformat(),
+            'ttl': int(datetime.now(timezone.utc).timestamp()) + (7 * 24 * 60 * 60)
+        })
+        
+        return response(200, {
+            'success': True,
+            'session_id': session_id,
+            'event_ticker': event_ticker,
+            'env': env_name,
+            'domain': domain,
+            'websocket_url': f'wss://{domain}:8765',
+            'message': result.get('message', 'Session started')
+        })
+        
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.read else str(e)
+        return response(e.code, {'error': f'Failed to connect: {error_body}'})
     except Exception as e:
         return response(500, {'error': f'Failed to launch: {str(e)}'})
-    
-    # Save state
-    state_table = dynamodb.Table(VOICE_TRADER_STATE_TABLE)
-    state_table.put_item(Item={
-        'session_id': session_id,
-        'event_ticker': event_ticker,
-        'instance_id': instance_id,
-        'ssm_command_id': command_id,
-        'status': 'launching',
-        'audio_source': audio_source,
-        'user_name': user_name,
-        'phone_number': phone_number if audio_source == 'phone' else None,
-        'public_ip': public_ip,
-        'env': env_name,
-        'started_at': datetime.now(timezone.utc).isoformat(),
-        'ttl': int(datetime.now(timezone.utc).timestamp()) + (7 * 24 * 60 * 60)
-    })
-    
-    return response(200, {
-        'success': True,
-        'session_id': session_id,
-        'event_ticker': event_ticker,
-        'env': env_name,
-        'domain': domain,
-        'websocket_url': f'wss://{domain}:8765',
-        'message': 'Session launching'
-    })
 
 
 def response(status_code: int, body: dict) -> dict:

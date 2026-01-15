@@ -1024,6 +1024,7 @@ export default function VoiceTraderPage() {
       const body: any = {
         event_ticker: selectedEvent.event_ticker,
         user_name: 'jimc',  // TODO: Get from auth
+        audio_source: audioSource,  // Required by server
       };
       
       // Add audio source specific fields

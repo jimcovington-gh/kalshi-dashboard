@@ -100,6 +100,14 @@ export default function DashboardLayout({
                 >
                   🧪 Voice Dev
                 </Link>
+                <a
+                  href="https://voice.apexmarkets.us:8080/test"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-purple-600 hover:text-purple-800 hover:bg-purple-50"
+                >
+                  🔬 Test Bench
+                </a>
                 {isAdminUser && (
                   <Link
                     href="/dashboard/admin"

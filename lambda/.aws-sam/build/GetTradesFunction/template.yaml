@@ -280,6 +280,39 @@ Resources:
             Path: /volatile-watchlist
             Method: GET
 
+  # Lambda: Volatile Orders (high-confidence dip-buy order history)
+  VolatileOrdersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-volatile-orders
+      CodeUri: ./
+      Handler: get-volatile-orders.handler
+      Description: Get volatile dip-buy orders from last 24h (admin only)
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Layers:
+        - !Ref SharedCodeLayer
+      Environment:
+        Variables:
+          TRADES_TABLE: production-kalshi-trades-v2
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: production-kalshi-trades-v2
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-trades-v2/index/*
+      Events:
+        GetVolatileOrders:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /volatile-orders
+            Method: GET
+
   # Lambda: Mention Monitors (get/clear mention monitor status)
   MentionMonitorsFunction:
     Type: AWS::Serverless::Function

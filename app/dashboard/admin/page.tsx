@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { isAdmin, getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent, getVolatileWatchlist, VolatileWatchlistResponse, getRunningVoiceContainers, stopVoiceContainer, RunningVoiceContainer, RunningVoiceContainersResponse } from '@/lib/api';
+import { isAdmin, getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent, getVolatileWatchlist, VolatileWatchlistResponse, getVolatileOrders, VolatileOrdersResponse, getRunningVoiceContainers, stopVoiceContainer, RunningVoiceContainer, RunningVoiceContainersResponse } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
@@ -25,6 +25,10 @@ export default function AdminPage() {
   // Volatile watchlist state
   const [volatileWatchlist, setVolatileWatchlist] = useState<VolatileWatchlistResponse | null>(null);
   const [volatileWatchlistLoading, setVolatileWatchlistLoading] = useState(false);
+  
+  // Volatile orders state
+  const [volatileOrders, setVolatileOrders] = useState<VolatileOrdersResponse | null>(null);
+  const [volatileOrdersLoading, setVolatileOrdersLoading] = useState(false);
   
   // Voice trader containers state
   const [voiceContainers, setVoiceContainers] = useState<RunningVoiceContainersResponse | null>(null);
@@ -53,6 +57,7 @@ export default function AdminPage() {
         loadMentionMonitors(),
         loadAdminStats(),
         loadVolatileWatchlist(),
+        loadVolatileOrders(),
         loadVoiceContainers()
       ]);
     } catch (err: any) {
@@ -82,6 +87,18 @@ export default function AdminPage() {
       console.error('Failed to load volatile watchlist:', err);
     } finally {
       setVolatileWatchlistLoading(false);
+    }
+  }
+
+  async function loadVolatileOrders() {
+    setVolatileOrdersLoading(true);
+    try {
+      const data = await getVolatileOrders(24);
+      setVolatileOrders(data);
+    } catch (err: any) {
+      console.error('Failed to load volatile orders:', err);
+    } finally {
+      setVolatileOrdersLoading(false);
     }
   }
 
@@ -980,6 +997,90 @@ export default function AdminPage() {
           </div>
         ) : volatileWatchlist ? (
           <div className="text-center py-4 text-gray-500 text-sm">No active watchlist entries</div>
+        ) : (
+          <div className="text-center py-4 text-gray-400 text-sm">Loading...</div>
+        )}
+      </div>
+
+      {/* Volatile Orders Section - Recent Dip-Buy Attempts */}
+      <div className="bg-white rounded-lg shadow p-4">
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            🎯 Volatile Dip-Buy Orders (24h)
+          </h2>
+          <button onClick={loadVolatileOrders} disabled={volatileOrdersLoading}
+            className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50">🔄</button>
+        </div>
+
+        {volatileOrders && volatileOrders.orders.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-1.5 py-1 text-left font-medium text-gray-500 whitespace-nowrap">Time</th>
+                  <th className="px-1.5 py-1 text-left font-medium text-gray-500 whitespace-nowrap">Market</th>
+                  <th className="px-1.5 py-1 text-center font-medium text-gray-500 whitespace-nowrap">User</th>
+                  <th className="px-1.5 py-1 text-center font-medium text-gray-500 whitespace-nowrap">Side</th>
+                  <th className="px-1.5 py-1 text-center font-medium text-gray-500 whitespace-nowrap">Status</th>
+                  <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap">Filled</th>
+                  <th className="px-1.5 py-1 text-right font-medium text-gray-500 whitespace-nowrap">Avg Price</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {volatileOrders.orders.map((order) => {
+                  const placedDate = new Date(order.placed_at_iso);
+                  const now = new Date();
+                  const diffMs = now.getTime() - placedDate.getTime();
+                  const diffMin = Math.floor(diffMs / 60000);
+                  const hours = Math.floor(diffMin / 60);
+                  const mins = diffMin % 60;
+                  const ageStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+                  
+                  const sideColor = order.side === 'yes' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700';
+                  const statusColor = order.order_status === 'executed' 
+                    ? 'bg-green-100 text-green-700'
+                    : order.order_status === 'cancelled' || order.order_status === 'expired'
+                    ? 'bg-gray-100 text-gray-600'
+                    : 'bg-yellow-100 text-yellow-700';
+                  
+                  return (
+                    <tr key={order.order_id}>
+                      <td className="px-1.5 py-1 whitespace-nowrap text-gray-600">{ageStr} ago</td>
+                      <td className="px-1.5 py-1 whitespace-nowrap font-mono text-xs">
+                        <a href={buildMarketUrlFromTicker(order.market_ticker)}
+                          target="_blank" rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline">
+                          {order.market_ticker}
+                        </a>
+                      </td>
+                      <td className="px-1.5 py-1 text-center text-gray-700">{order.user_name}</td>
+                      <td className="px-1.5 py-1 text-center">
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${sideColor}`}>
+                          {order.side.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-1.5 py-1 text-center">
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${statusColor}`}>
+                          {order.order_status}
+                        </span>
+                      </td>
+                      <td className="px-1.5 py-1 text-right font-mono font-semibold text-gray-900">
+                        {order.filled_count > 0 ? order.filled_count : '—'}
+                      </td>
+                      <td className="px-1.5 py-1 text-right font-mono font-semibold text-gray-900">
+                        {order.avg_fill_price > 0 ? `$${order.avg_fill_price.toFixed(2)}` : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div className="text-xs text-gray-500 mt-2">
+              {volatileOrders.count} order{volatileOrders.count !== 1 ? 's' : ''} in last {volatileOrders.hours} hours
+            </div>
+          </div>
+        ) : volatileOrders ? (
+          <div className="text-center py-4 text-gray-500 text-sm">No volatile orders in last 24 hours</div>
         ) : (
           <div className="text-center py-4 text-gray-400 text-sm">Loading...</div>
         )}

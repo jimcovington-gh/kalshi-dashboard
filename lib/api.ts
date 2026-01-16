@@ -572,6 +572,54 @@ export async function getVolatileWatchlist(): Promise<VolatileWatchlistResponse>
   }
 }
 
+// Volatile Orders Types and Functions
+export interface VolatileOrder {
+  order_id: string;
+  market_ticker: string;
+  user_name: string;
+  side: 'yes' | 'no';
+  action: 'buy' | 'sell';
+  order_status: string;
+  filled_count: number;
+  avg_fill_price: number;
+  placed_at: number;
+  placed_at_iso: string;
+  idea_version: string;
+  idea_parameters: Record<string, any>;
+}
+
+export interface VolatileOrdersResponse {
+  orders: VolatileOrder[];
+  count: number;
+  hours: number;
+  timestamp: string;
+}
+
+export async function getVolatileOrders(hours: number = 24): Promise<VolatileOrdersResponse> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: `/volatile-orders?hours=${hours}`,
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as unknown as VolatileOrdersResponse;
+  } catch (error) {
+    console.error('Error fetching volatile orders:', error);
+    throw error;
+  }
+}
+
 // Voice Trader Types and Functions
 export interface RunningVoiceContainer {
   session_id: string;

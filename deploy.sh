@@ -127,7 +127,7 @@ echo ""
 
 # Step 6: Poll for completion
 echo "Step 6: Waiting for Amplify build to complete..."
-MAX_WAIT=300  # 5 minutes
+MAX_WAIT=480  # 8 minutes (Amplify builds typically take 3-5 min)
 WAITED=0
 POLL_INTERVAL=10
 

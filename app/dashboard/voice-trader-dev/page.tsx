@@ -90,9 +90,9 @@ type PageState = 'loading' | 'events' | 'setup' | 'monitoring';
 const API_BASE = 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod';
 
 // DEV Voice Trader - hardcoded to dev backend
-const VOICE_TRADER_HOST = 'dev-voice.apexmarkets.us';
-const EC2_BASE = `https://${VOICE_TRADER_HOST}:8080`;  // Dev EC2 endpoint
-const WS_BASE = `wss://${VOICE_TRADER_HOST}:8765`;  // Dev WebSocket endpoint
+const VOICE_TRADER_HOST = 'voice.apexmarkets.us';  // Same as prod - no separate dev server yet
+const EC2_BASE = `https://${VOICE_TRADER_HOST}:8080`;  // EC2 endpoint
+const WS_BASE = `wss://${VOICE_TRADER_HOST}:8765`;  // WebSocket endpoint
 
 export default function VoiceTraderDevPage() {
   const router = useRouter();

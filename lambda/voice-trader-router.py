@@ -121,7 +121,7 @@ def lambda_handler(event, context):
 
 
 def get_upcoming_events(event):
-    """Get mention events starting within the next 24 hours."""
+    """Get mention events starting within the next 24 hours or started within the last hour."""
     events_table = dynamodb.Table(MENTION_EVENTS_TABLE)
     market_table = dynamodb.Table(MARKET_METADATA_TABLE)
     
@@ -144,9 +144,9 @@ def get_upcoming_events(event):
                 # Parse ISO format
                 start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00'))
                 
-                # Include events starting within 24 hours OR already in progress (started within last 3 hours)
-                three_hours_ago = now - timedelta(hours=3)
-                if three_hours_ago <= start_date <= cutoff:
+                # Include events starting within 24 hours OR already in progress (started within last hour)
+                one_hour_ago = now - timedelta(hours=1)
+                if one_hour_ago <= start_date <= cutoff:
                     hours_until = (start_date - now).total_seconds() / 3600
                     
                     # Get associated markets (words)
@@ -459,7 +459,10 @@ def launch_ec2_session(event):
         return response(400, {'error': f'EC2 API not reachable ({env_name}). Is the instance running? Error: {str(e)}'})
     
     # Build connect request
+    # Note: EC2 API expects session_id and stream_url (not web_url)
+    session_id = event_ticker or f"session_{int(datetime.now(timezone.utc).timestamp())}"
     connect_body = {
+        'session_id': session_id,
         'event_ticker': event_ticker,
         'user_name': user_name,
         'audio_source': audio_source,
@@ -471,7 +474,8 @@ def launch_ec2_session(event):
         if passcode:
             connect_body['passcode'] = passcode
     else:
-        connect_body['web_url'] = web_url
+        # EC2 API expects stream_url, not web_url
+        connect_body['stream_url'] = web_url
     
     if scheduled_start:
         if isinstance(scheduled_start, str):

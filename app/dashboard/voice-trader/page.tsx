@@ -1192,6 +1192,7 @@ export default function VoiceTraderPage() {
     try {
       // Call EC2 directly - no Lambda needed!
       const body: any = {
+        session_id: selectedEvent.event_ticker,  // Required by EC2 API
         event_ticker: selectedEvent.event_ticker,
         user_name: 'jimc',  // TODO: Get from auth
         audio_source: audioSource,  // Required by server

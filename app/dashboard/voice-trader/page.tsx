@@ -87,6 +87,28 @@ interface EC2Status {
   websocket_url?: string;
 }
 
+interface RivaStatus {
+  endpoint: string;
+  status: 'healthy' | 'unhealthy' | 'unknown';
+  port_open: boolean;
+  riva_client: boolean;
+  health_check_ms?: number;
+  connection_ms?: number;
+  timestamp: string;
+  error?: string;
+}
+
+interface QueuedEvent {
+  event_ticker: string;
+  scheduled_time: string;
+  scheduled_timestamp: number;
+  phone_number: string;
+  user_name: string;
+  status: 'pending' | 'started' | 'completed' | 'cancelled';
+  created_at: string;
+  config?: Record<string, unknown>;
+}
+
 type PageState = 'loading' | 'events' | 'setup' | 'monitoring';
 
 const API_BASE = 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod';
@@ -179,6 +201,20 @@ export default function VoiceTraderPage() {
   const [ec2Status, setEc2Status] = useState<EC2Status | null>(null);
   const [ec2Loading, setEc2Loading] = useState(false);
   const [ec2Error, setEc2Error] = useState<string | null>(null);
+
+  // Riva STT server state
+  const [rivaStatus, setRivaStatus] = useState<RivaStatus | null>(null);
+  
+  // Scheduled events queue state
+  const [queuedEvents, setQueuedEvents] = useState<QueuedEvent[]>([]);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [showQueueForm, setShowQueueForm] = useState(false);
+  const [newQueueEvent, setNewQueueEvent] = useState({
+    event_ticker: '',
+    scheduled_time: '',
+    phone_number: ''
+  });
 
   // Check for cert_accepted param on load (redirect back from cert page)
   // Fetch auth token on mount
@@ -333,17 +369,62 @@ export default function VoiceTraderPage() {
         setEc2Error('Voice server not responding');
       }
     }
+
+    async function fetchRivaStatus() {
+      // Only fetch Riva status if EC2 is running
+      try {
+        const response = await fetch(`${EC2_BASE}/riva/status`);
+        if (response.ok) {
+          const data = await response.json();
+          setRivaStatus(data);
+        } else {
+          setRivaStatus({
+            endpoint: 'localhost:50051',
+            status: 'unknown',
+            port_open: false,
+            riva_client: false,
+            timestamp: new Date().toISOString()
+          });
+        }
+      } catch (err) {
+        // EC2 not reachable, Riva status unknown
+        setRivaStatus(null);
+      }
+    }
+
+    async function fetchQueuedEvents() {
+      try {
+        const response = await fetch(`${EC2_BASE}/queue`);
+        if (response.ok) {
+          const data = await response.json();
+          setQueuedEvents(data.events || []);
+          setQueueError(null);
+        } else {
+          // EC2 running but queue endpoint failed
+          setQueueError('Failed to fetch queue');
+        }
+      } catch (err) {
+        // EC2 not reachable
+        setQueuedEvents([]);
+      }
+    }
     
     fetchEvents();
     fetchRunningContainers();
     fetchEC2Status();
+    fetchRivaStatus();
+    fetchQueuedEvents();
     const eventsInterval = setInterval(fetchEvents, 30000); // Refresh every 30s
     const containersInterval = setInterval(fetchRunningContainers, 10000); // Refresh every 10s
     const ec2Interval = setInterval(fetchEC2Status, 5000); // Refresh EC2 status every 5s
+    const rivaInterval = setInterval(fetchRivaStatus, 10000); // Refresh Riva status every 10s
+    const queueInterval = setInterval(fetchQueuedEvents, 30000); // Refresh queue every 30s
     return () => {
       clearInterval(eventsInterval);
       clearInterval(containersInterval);
       clearInterval(ec2Interval);
+      clearInterval(rivaInterval);
+      clearInterval(queueInterval);
     };
   }, [pageState, authToken]);
 
@@ -1005,6 +1086,81 @@ export default function VoiceTraderPage() {
     }
   };
 
+  // Queue management handlers
+  const handleAddToQueue = async () => {
+    if (!authToken || !newQueueEvent.event_ticker || !newQueueEvent.scheduled_time) {
+      setQueueError('Event ticker and scheduled time are required');
+      return;
+    }
+    setQueueLoading(true);
+    setQueueError(null);
+    try {
+      const response = await fetch(`${API_BASE}/voice-trader/ec2/queue/add`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          event_ticker: newQueueEvent.event_ticker,
+          scheduled_time: newQueueEvent.scheduled_time,
+          phone_number: newQueueEvent.phone_number || undefined
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setQueueError(data.error || 'Failed to add event to queue');
+      } else {
+        // Refresh queue list
+        const queueRes = await fetch(`${EC2_BASE}/queue`);
+        if (queueRes.ok) {
+          const queueData = await queueRes.json();
+          setQueuedEvents(queueData.events || []);
+        }
+        // Clear form
+        setNewQueueEvent({ event_ticker: '', scheduled_time: '', phone_number: '' });
+        setShowQueueForm(false);
+      }
+    } catch (err) {
+      setQueueError('Failed to add event to queue');
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  const handleRemoveFromQueue = async (eventTicker: string) => {
+    if (!authToken) return;
+    if (!confirm(`Remove ${eventTicker} from the queue?`)) return;
+    
+    setQueueLoading(true);
+    setQueueError(null);
+    try {
+      const response = await fetch(`${API_BASE}/voice-trader/ec2/queue/remove`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ event_ticker: eventTicker })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setQueueError(data.error || 'Failed to remove event from queue');
+      } else {
+        // Refresh queue list
+        const queueRes = await fetch(`${EC2_BASE}/queue`);
+        if (queueRes.ok) {
+          const queueData = await queueRes.json();
+          setQueuedEvents(queueData.events || []);
+        }
+      }
+    } catch (err) {
+      setQueueError('Failed to remove event from queue');
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
   const handleSelectEvent = (event: MentionEvent) => {
     setSelectedEvent(event);
     setPageState('setup');
@@ -1315,6 +1471,34 @@ export default function VoiceTraderPage() {
                   </div>
                 )}
               </div>
+
+              {/* Riva STT Status */}
+              {ec2Status.status === 'running' && rivaStatus && (
+                <div className="flex flex-wrap gap-4 text-sm border-t border-gray-700 pt-3 mt-3">
+                  <div>
+                    <span className="text-gray-400">Riva STT:</span>{' '}
+                    <span className={rivaStatus.status === 'healthy' ? 'text-green-400' : 'text-red-400'}>
+                      {rivaStatus.status === 'healthy' ? '● ' : '○ '}
+                      {rivaStatus.status}
+                    </span>
+                  </div>
+                  {rivaStatus.health_check_ms !== undefined && (
+                    <div>
+                      <span className="text-gray-400">Latency:</span>{' '}
+                      <span className="text-cyan-400">{rivaStatus.health_check_ms.toFixed(1)}ms</span>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-gray-400">Endpoint:</span>{' '}
+                    <span className="font-mono text-gray-300 text-xs">{rivaStatus.endpoint}</span>
+                  </div>
+                  {rivaStatus.error && (
+                    <div className="text-red-400 text-xs">
+                      Error: {rivaStatus.error}
+                    </div>
+                  )}
+                </div>
+              )}
               
               <div className="flex gap-2">
                 {ec2Status.status === 'stopped' && (
@@ -1406,6 +1590,128 @@ export default function VoiceTraderPage() {
             </div>
           </div>
         )}
+
+        {/* Scheduled Events Queue Section */}
+        <div className="mb-8 bg-gray-800 rounded-lg p-4">
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              <span>⏰</span>
+              <span>Scheduled Events</span>
+              <span className="ml-2 px-2 py-0.5 rounded text-xs font-medium bg-blue-700 text-blue-200">
+                {queuedEvents.length}
+              </span>
+            </h2>
+            <button
+              onClick={() => setShowQueueForm(!showQueueForm)}
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium transition"
+            >
+              {showQueueForm ? '✕ Cancel' : '+ Schedule Event'}
+            </button>
+          </div>
+
+          {queueError && (
+            <div className="bg-red-900/50 border border-red-700 text-red-200 px-3 py-2 rounded mb-3 text-sm">
+              {queueError}
+            </div>
+          )}
+
+          {/* Add Event Form */}
+          {showQueueForm && (
+            <div className="bg-gray-700/50 rounded p-4 mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Event Ticker</label>
+                  <select
+                    value={newQueueEvent.event_ticker}
+                    onChange={(e) => setNewQueueEvent(prev => ({ ...prev, event_ticker: e.target.value }))}
+                    className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white text-sm"
+                  >
+                    <option value="">Select event...</option>
+                    {events.map(event => (
+                      <option key={event.event_ticker} value={event.event_ticker}>
+                        {event.title} ({event.event_ticker})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Scheduled Time (UTC)</label>
+                  <input
+                    type="datetime-local"
+                    value={newQueueEvent.scheduled_time}
+                    onChange={(e) => setNewQueueEvent(prev => ({ ...prev, scheduled_time: e.target.value }))}
+                    className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Phone Number (optional)</label>
+                  <input
+                    type="tel"
+                    value={newQueueEvent.phone_number}
+                    onChange={(e) => setNewQueueEvent(prev => ({ ...prev, phone_number: e.target.value }))}
+                    placeholder="+15551234567"
+                    className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white text-sm"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAddToQueue}
+                  disabled={queueLoading || !newQueueEvent.event_ticker || !newQueueEvent.scheduled_time}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-500 disabled:bg-gray-600 rounded text-sm font-medium transition"
+                >
+                  {queueLoading ? 'Adding...' : '✓ Add to Queue'}
+                </button>
+                <p className="text-gray-400 text-xs self-center">
+                  EC2 will auto-start 15 minutes before scheduled time
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Queued Events List */}
+          {queuedEvents.length === 0 ? (
+            <p className="text-gray-400 text-sm">
+              No scheduled events. Add events to auto-start EC2 before trading sessions.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {queuedEvents.map(event => (
+                <div
+                  key={event.event_ticker}
+                  className="flex justify-between items-center bg-gray-700/50 rounded p-3"
+                >
+                  <div>
+                    <div className="font-medium text-blue-300">{event.event_ticker}</div>
+                    <div className="text-sm text-gray-400">
+                      {new Date(event.scheduled_time).toLocaleString()} UTC
+                    </div>
+                    {event.phone_number && (
+                      <div className="text-xs text-gray-500">📞 {event.phone_number}</div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      event.status === 'pending' ? 'bg-yellow-700 text-yellow-200' :
+                      event.status === 'started' ? 'bg-green-700 text-green-200' :
+                      event.status === 'completed' ? 'bg-gray-600 text-gray-300' :
+                      'bg-red-700 text-red-200'
+                    }`}>
+                      {event.status}
+                    </span>
+                    <button
+                      onClick={() => handleRemoveFromQueue(event.event_ticker)}
+                      disabled={queueLoading}
+                      className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:bg-gray-600 rounded text-xs font-medium transition"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         
         {/* Upcoming Events Section */}
         <h2 className="text-xl font-bold mb-4">📅 Upcoming Events</h2>

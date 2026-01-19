@@ -372,6 +372,7 @@ Resources:
           ECS_CLUSTER: production-kalshi-fargate-cluster
           TASK_FAMILY: production-voice-mention-trader
           VOICE_TRADER_STATE_TABLE: production-kalshi-voice-trader-state
+          VOICE_TRADER_QUEUE_TABLE: production-kalshi-voice-trader-queue
           MENTION_EVENTS_TABLE: production-kalshi-mention-events
           MARKET_METADATA_TABLE: production-kalshi-market-metadata
           SUBNETS: subnet-0ba02a0291289ed61
@@ -380,6 +381,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: production-kalshi-voice-trader-state
+        - DynamoDBCrudPolicy:
+            TableName: production-kalshi-voice-trader-queue
         - DynamoDBReadPolicy:
             TableName: production-kalshi-mention-events
         - DynamoDBReadPolicy:
@@ -500,6 +503,18 @@ Resources:
           Properties:
             RestApiId: !Ref DashboardApi
             Path: /voice-trader/ec2/launch
+            Method: POST
+        QueueAdd:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /voice-trader/ec2/queue/add
+            Method: POST
+        QueueRemove:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /voice-trader/ec2/queue/remove
             Method: POST
 
   # Lambda Layer: Shared code (s3_config_loader)

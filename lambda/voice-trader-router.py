@@ -15,6 +15,10 @@ EC2 Control:
 - POST /voice-trader/ec2/reboot - Reboot EC2 instance
 - POST /voice-trader/ec2/launch - Launch voice trader session
 - POST /voice-trader/ec2/stop-session/{session_id} - Stop a session
+
+Queue Management:
+- POST /voice-trader/ec2/queue/add - Add event to scheduled queue
+- POST /voice-trader/ec2/queue/remove - Remove event from queue
 """
 
 import json
@@ -33,6 +37,7 @@ ssm = boto3.client('ssm', region_name='us-east-1')
 MARKET_METADATA_TABLE = os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata')
 MENTION_EVENTS_TABLE = os.environ.get('MENTION_EVENTS_TABLE', 'production-kalshi-mention-events')
 VOICE_TRADER_STATE_TABLE = os.environ.get('VOICE_TRADER_STATE_TABLE', 'production-kalshi-voice-trader-state')
+VOICE_TRADER_QUEUE_TABLE = os.environ.get('VOICE_TRADER_QUEUE_TABLE', 'production-kalshi-voice-trader-queue')
 
 # EC2 Configuration - Production
 VOICE_TRADER_EC2_INSTANCE_ID = os.environ.get('VOICE_TRADER_EC2_INSTANCE_ID', 'i-0ae0218a057e5b4c3')
@@ -92,6 +97,11 @@ def lambda_handler(event, context):
         elif '/ec2/stop-session/' in path and http_method == 'POST':
             session_id = path_parts[-1]
             return stop_session(session_id)
+        # Queue management endpoints
+        elif '/ec2/queue/add' in path and http_method == 'POST':
+            return add_to_queue(event)
+        elif '/ec2/queue/remove' in path and http_method == 'POST':
+            return remove_from_queue(event)
         # Query endpoints
         elif path.endswith('/events') and http_method == 'GET':
             return get_upcoming_events(event)
@@ -514,6 +524,81 @@ def launch_ec2_session(event):
         return response(e.code, {'error': f'Failed to connect: {error_body}'})
     except Exception as e:
         return response(500, {'error': f'Failed to launch: {str(e)}'})
+
+
+def add_to_queue(event):
+    """Add an event to the scheduled queue."""
+    try:
+        body = json.loads(event.get('body', '{}'))
+    except json.JSONDecodeError:
+        return response(400, {'error': 'Invalid JSON body'})
+    
+    event_ticker = body.get('event_ticker')
+    scheduled_time = body.get('scheduled_time')
+    phone_number = body.get('phone_number', '')
+    
+    if not event_ticker or not scheduled_time:
+        return response(400, {'error': 'event_ticker and scheduled_time are required'})
+    
+    # Parse scheduled_time to timestamp
+    try:
+        # Handle datetime-local format (no timezone) - assume UTC
+        if 'T' in scheduled_time and not scheduled_time.endswith('Z') and '+' not in scheduled_time:
+            scheduled_time = scheduled_time + ':00Z'
+        scheduled_dt = datetime.fromisoformat(scheduled_time.replace('Z', '+00:00'))
+        scheduled_timestamp = scheduled_dt.timestamp()
+    except ValueError as e:
+        return response(400, {'error': f'Invalid scheduled_time format: {str(e)}'})
+    
+    # Get username from auth context
+    user_name = 'jimc'  # Default, should come from auth
+    request_context = event.get('requestContext', {})
+    authorizer = request_context.get('authorizer', {})
+    if authorizer.get('claims'):
+        user_name = authorizer['claims'].get('cognito:username', user_name)
+    
+    # Add to queue table
+    queue_table = dynamodb.Table(VOICE_TRADER_QUEUE_TABLE)
+    item = {
+        'event_ticker': event_ticker,
+        'scheduled_time': scheduled_time,
+        'scheduled_timestamp': Decimal(str(scheduled_timestamp)),
+        'phone_number': phone_number,
+        'user_name': user_name,
+        'status': 'pending',
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'config': {},
+        'ttl': int(scheduled_timestamp) + 86400  # Expire 24h after scheduled time
+    }
+    queue_table.put_item(Item=item)
+    
+    return response(200, {
+        'success': True,
+        'event_ticker': event_ticker,
+        'scheduled_time': scheduled_time
+    })
+
+
+def remove_from_queue(event):
+    """Remove an event from the scheduled queue."""
+    try:
+        body = json.loads(event.get('body', '{}'))
+    except json.JSONDecodeError:
+        return response(400, {'error': 'Invalid JSON body'})
+    
+    event_ticker = body.get('event_ticker')
+    if not event_ticker:
+        return response(400, {'error': 'event_ticker is required'})
+    
+    # Remove from queue table
+    queue_table = dynamodb.Table(VOICE_TRADER_QUEUE_TABLE)
+    queue_table.delete_item(Key={'event_ticker': event_ticker})
+    
+    return response(200, {
+        'success': True,
+        'event_ticker': event_ticker,
+        'removed': True
+    })
 
 
 def response(status_code: int, body: dict) -> dict:

@@ -377,7 +377,7 @@ Resources:
           MARKET_METADATA_TABLE: production-kalshi-market-metadata
           SUBNETS: subnet-0ba02a0291289ed61
           SECURITY_GROUPS: sg-056792d76ef21c4c5
-          VOICE_TRADER_EC2_INSTANCE_ID: i-0ae0218a057e5b4c3
+          VOICE_TRADER_EC2_INSTANCE_ID: i-007fa64f2c29180ec
       Policies:
         - DynamoDBCrudPolicy:
             TableName: production-kalshi-voice-trader-state
@@ -423,7 +423,7 @@ Resources:
                 - ec2:StartInstances
                 - ec2:StopInstances
                 - ec2:RebootInstances
-              Resource: !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0ae0218a057e5b4c3'
+              Resource: !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-007fa64f2c29180ec'
         - Statement:
             - Effect: Allow
               Action:
@@ -436,7 +436,7 @@ Resources:
                 - ssm:GetCommandInvocation
               Resource:
                 - !Sub 'arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript'
-                - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0ae0218a057e5b4c3'
+                - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-007fa64f2c29180ec'
       Events:
         GetEvents:
           Type: Api
@@ -516,6 +516,55 @@ Resources:
             RestApiId: !Ref DashboardApi
             Path: /voice-trader/ec2/queue/remove
             Method: POST
+        QueueList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /voice-trader/ec2/queue/list
+            Method: GET
+        QueueCleanStale:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /voice-trader/ec2/queue/clean-stale
+            Method: POST
+        GetWorkers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /voice-trader/ec2/workers
+            Method: GET
+
+  # Voice Trader Scheduler - Auto-start EC2 before scheduled events
+  VoiceTraderSchedulerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-voice-trader-scheduler
+      CodeUri: ./
+      Handler: voice-trader-scheduler.lambda_handler
+      Description: Auto-start Voice Trader EC2 before scheduled events
+      Timeout: 30
+      Environment:
+        Variables:
+          VOICE_TRADER_QUEUE_TABLE: production-kalshi-voice-trader-queue
+          VOICE_TRADER_EC2_INSTANCE_ID: i-007fa64f2c29180ec
+          START_BEFORE_MINUTES: '15'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: production-kalshi-voice-trader-queue
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ec2:DescribeInstances
+                - ec2:StartInstances
+              Resource: '*'
+      Events:
+        ScheduleRule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Description: Check for upcoming voice trader events and start EC2
+            Enabled: true
 
   # Lambda Layer: Shared code (s3_config_loader)
   SharedCodeLayer:

@@ -96,8 +96,92 @@ def sign_kalshi_request(private_key_pem: str, timestamp: str, method: str, path:
     return base64.b64encode(signature).decode('utf-8')
 
 
+def fetch_all_milestones() -> list:
+    """Fetch all milestones from Kalshi API.
+    
+    Returns:
+        List of milestone dicts
+    """
+    api_key, private_key = get_kalshi_credentials()
+    if not api_key or not private_key:
+        return []
+    
+    timestamp = str(int(time.time() * 1000))
+    path = '/trade-api/v2/milestones?limit=1000'
+    
+    signature = sign_kalshi_request(private_key, timestamp, 'GET', path)
+    
+    headers = {
+        'KALSHI-ACCESS-KEY': api_key,
+        'KALSHI-ACCESS-SIGNATURE': signature,
+        'KALSHI-ACCESS-TIMESTAMP': timestamp,
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        resp = http.request('GET', f'{KALSHI_API_BASE}{path}', headers=headers, timeout=10.0)
+        
+        if resp.status != 200:
+            print(f"Milestones API returned {resp.status}")
+            return []
+        
+        data = json.loads(resp.data.decode('utf-8'))
+        return data.get('milestones', [])
+        
+    except Exception as e:
+        print(f"Error fetching milestones: {e}")
+        return []
+
+
+def find_milestone_for_event(event_ticker: str, milestones: list, now_ts: int) -> dict | None:
+    """Find a matching milestone for an event ticker.
+    
+    Matches by checking primary_event_tickers and related_event_tickers.
+    Filters out milestones with start_date in the past.
+    
+    Args:
+        event_ticker: The event ticker to find a milestone for
+        milestones: List of milestone dicts from API
+        now_ts: Current timestamp for filtering past milestones
+        
+    Returns:
+        Dict with start_timestamp if found, None otherwise
+    """
+    for m in milestones:
+        # Check if event_ticker is in primary or related tickers
+        primary = m.get('primary_event_tickers', [])
+        related = m.get('related_event_tickers', [])
+        
+        if event_ticker not in primary and event_ticker not in related:
+            continue
+        
+        # Found a matching milestone - check if start_date is in the future
+        start_date_str = m.get('start_date')
+        if not start_date_str:
+            continue
+            
+        try:
+            start_dt = datetime.fromisoformat(start_date_str.replace('Z', '+00:00'))
+            start_ts = int(start_dt.timestamp())
+            
+            # Filter out past milestones (more than 1 hour ago)
+            if start_ts < now_ts - 3600:
+                print(f"Skipping past milestone for {event_ticker}: {start_date_str}")
+                continue
+            
+            return {
+                'start_timestamp': start_ts,
+                'title': m.get('title', ''),
+            }
+        except Exception as e:
+            print(f"Error parsing milestone start_date for {event_ticker}: {e}")
+            continue
+    
+    return None
+
+
 def update_event_start_date(event_ticker: str, start_timestamp: int) -> bool:
-    """Cache the start_date back to DynamoDB event metadata table.
+    """Cache the start_date to DynamoDB event metadata table.
     
     This prevents repeated API calls for the same event's milestone data.
     """
@@ -114,77 +198,6 @@ def update_event_start_date(event_ticker: str, start_timestamp: int) -> bool:
     except Exception as e:
         print(f"Failed to cache start_date for {event_ticker}: {e}")
         return False
-
-
-def fetch_milestone_for_event(event_ticker: str, cache_result: bool = True) -> dict | None:
-    """Fetch milestone data from Kalshi API for a single event.
-    
-    Args:
-        event_ticker: The event ticker to fetch milestones for
-        cache_result: If True, save start_date to DynamoDB for future requests
-    
-    Returns:
-        Dict with start_timestamp and details, or None if not found
-    """
-    api_key, private_key = get_kalshi_credentials()
-    if not api_key or not private_key:
-        return None
-    
-    timestamp = str(int(time.time() * 1000))
-    path = f'/trade-api/v2/milestones?event_ticker={event_ticker}&limit=200'
-    
-    signature = sign_kalshi_request(private_key, timestamp, 'GET', path)
-    
-    headers = {
-        'KALSHI-ACCESS-KEY': api_key,
-        'KALSHI-ACCESS-SIGNATURE': signature,
-        'KALSHI-ACCESS-TIMESTAMP': timestamp,
-        'Content-Type': 'application/json'
-    }
-    
-    try:
-        resp = http.request('GET', f'{KALSHI_API_BASE}{path}', headers=headers, timeout=5.0)
-        
-        if resp.status != 200:
-            print(f"Milestones API returned {resp.status} for {event_ticker}")
-            return None
-        
-        data = json.loads(resp.data.decode('utf-8'))
-        milestones = data.get('milestones', [])
-        
-        if not milestones:
-            return None
-        
-        # Find the main game milestone (type containing 'game')
-        game_milestone = None
-        for m in milestones:
-            if 'game' in m.get('type', '').lower():
-                game_milestone = m
-                break
-        
-        if not game_milestone:
-            game_milestone = milestones[0]
-        
-        start_date_str = game_milestone.get('start_date')
-        if start_date_str:
-            start_dt = datetime.fromisoformat(start_date_str.replace('Z', '+00:00'))
-            start_ts = int(start_dt.timestamp())
-            
-            # Cache to DynamoDB so we don't need to fetch again
-            if cache_result:
-                update_event_start_date(event_ticker, start_ts)
-            
-            return {
-                'start_timestamp': start_ts,
-                'title': game_milestone.get('title', ''),
-                'details': game_milestone.get('details', {}),
-            }
-        
-        return None
-        
-    except Exception as e:
-        print(f"Error fetching milestone for {event_ticker}: {e}")
-        return None
 
 
 def get_series_titles(series_tickers: list) -> dict:
@@ -225,12 +238,17 @@ def get_available_games():
     """Fetch available sports events for supported leagues (NFL, NCAA BB, NBA).
     
     Returns events from 5 hours ago (in progress) to 24 hours ahead.
+    Uses milestones API to get accurate start times when available,
+    falls back to strike_date - 3 hours estimation.
     """
     events = []
+    events_needing_milestones = []
     now = datetime.now(timezone.utc)
     now_ts = int(now.timestamp())
     max_ts = int((now + timedelta(hours=24)).timestamp())  # 24 hours ahead
     min_ts = int((now - timedelta(hours=5)).timestamp())  # 5 hours ago (in progress)
+    
+    print(f"DEBUG get_available_games: now_ts={now_ts}, min_ts={min_ts}, max_ts={max_ts}")
     
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table(EVENT_METADATA_TABLE)
@@ -261,9 +279,9 @@ def get_available_games():
             )
             items.extend(response.get('Items', []))
         
-        # Filter to supported series and fetch milestones for accurate start times
-        events_needing_milestones = []
+        print(f"DEBUG get_available_games: found {len(items)} sports events in time window")
         
+        # Filter to supported series
         for item in items:
             event_ticker = item.get('event_ticker', '')
             series_ticker = item.get('series_ticker', '')
@@ -273,19 +291,27 @@ def get_available_games():
             if series_ticker not in SUPPORTED_SERIES:
                 continue
             
+            print(f"DEBUG: Processing event {event_ticker}, series={series_ticker}, strike_date={strike_date}")
+            
             # Only include main game events
             if not series_ticker.endswith('GAME'):
                 continue
             
-            # Use start_date from DynamoDB if available
+            # Check for cached start_date in DynamoDB
             start_date_from_db = item.get('start_date')
             if start_date_from_db:
                 start_timestamp = int(start_date_from_db)
-                needs_fetch = False
+                # Validate it's not in the distant past (bad cached data)
+                if start_timestamp > now_ts - (24 * 3600):  # Within last 24 hours is OK
+                    needs_milestone = False
+                else:
+                    # Bad cached data - re-estimate and mark for milestone lookup
+                    start_timestamp = strike_date - (3 * 3600)
+                    needs_milestone = True
             else:
-                # Estimate game start time
+                # Estimate start time from strike_date - 3 hours
                 start_timestamp = strike_date - (3 * 3600)
-                needs_fetch = True
+                needs_milestone = True
             
             start_datetime = datetime.fromtimestamp(start_timestamp, tz=timezone.utc)
             
@@ -316,70 +342,72 @@ def get_available_games():
                 'event_timestamp': start_timestamp,
                 'time_display': time_display,
                 'has_started': has_started,
-                '_needs_milestone_fetch': needs_fetch
             }
             events.append(event_data)
+            print(f"DEBUG: Added event {event_ticker} with timestamp={start_timestamp}")
             
-            if needs_fetch:
+            # Track events that need milestone lookup
+            if needs_milestone:
                 events_needing_milestones.append(event_data)
         
-        # Fetch milestones in PARALLEL for events missing start_date (limit to 10)
-        if events_needing_milestones:
-            print(f"Fetching milestones for {len(events_needing_milestones)} events (parallel)")
-            events_to_fetch = events_needing_milestones[:10]
-            
-            # Parallel milestone fetches
-            milestone_results = {}
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                future_to_ticker = {
-                    executor.submit(fetch_milestone_for_event, evt['event_ticker']): evt['event_ticker']
-                    for evt in events_to_fetch
-                }
-                for future in as_completed(future_to_ticker):
-                    ticker = future_to_ticker[future]
-                    try:
-                        milestone_results[ticker] = future.result()
-                    except Exception as e:
-                        print(f"Error fetching milestone for {ticker}: {e}")
-                        milestone_results[ticker] = None
-            
-            # Apply results
-            for evt in events_to_fetch:
-                milestone_data = milestone_results.get(evt['event_ticker'])
-                if milestone_data:
-                    start_ts = milestone_data['start_timestamp']
-                    evt['event_timestamp'] = start_ts
-                    start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc)
-                    est_time = start_dt - timedelta(hours=5)
-                    evt['event_time'] = est_time.strftime('%a %b %-d @ %-I:%M %p EST')
-                    
-                    # Recalculate time display
-                    seconds_until = start_ts - now_ts
-                    if seconds_until < 0:
-                        evt['time_display'] = f"Started {abs(seconds_until) // 3600}h {(abs(seconds_until) % 3600) // 60}m ago"
-                        evt['has_started'] = True
-                    else:
-                        hours = seconds_until // 3600
-                        minutes = (seconds_until % 3600) // 60
-                        if hours > 0:
-                            evt['time_display'] = f"Starts in {hours}h {minutes}m"
-                        else:
-                            evt['time_display'] = f"Starts in {minutes}m"
-                        evt['has_started'] = False
-        
-        # Clean up internal flag
-        for evt in events:
-            evt.pop('_needs_milestone_fetch', None)
-        
+        print(f"DEBUG: Before filter - {len(events)} events")
         # Filter by actual event_timestamp
         events = [e for e in events if min_ts <= e.get('event_timestamp', 0) <= max_ts]
+        print(f"DEBUG: After filter - {len(events)} events (min_ts={min_ts}, max_ts={max_ts})")
+        
+        # Try to get accurate start times from milestones API for events that need it
+        if events_needing_milestones:
+            try:
+                all_milestones = fetch_all_milestones()
+                print(f"Fetched {len(all_milestones)} milestones for matching")
+                
+                for evt in events_needing_milestones:
+                    event_ticker = evt['event_ticker']
+                    milestone = find_milestone_for_event(event_ticker, all_milestones, now_ts)
+                    
+                    if milestone:
+                        # Parse milestone start time
+                        start_str = milestone.get('start_date', '')
+                        if start_str:
+                            try:
+                                start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+                                start_timestamp = int(start_dt.timestamp())
+                                
+                                # Update event with accurate time
+                                evt['event_timestamp'] = start_timestamp
+                                est_time = start_dt - timedelta(hours=5)
+                                evt['event_time'] = est_time.strftime('%a %b %-d @ %-I:%M %p EST')
+                                
+                                # Recalculate time display
+                                seconds_until = start_timestamp - now_ts
+                                if seconds_until < 0:
+                                    evt['time_display'] = f"Started {abs(seconds_until) // 3600}h {(abs(seconds_until) % 3600) // 60}m ago"
+                                    evt['has_started'] = True
+                                else:
+                                    hours = seconds_until // 3600
+                                    minutes = (seconds_until % 3600) // 60
+                                    if hours > 0:
+                                        evt['time_display'] = f"Starts in {hours}h {minutes}m"
+                                    else:
+                                        evt['time_display'] = f"Starts in {minutes}m"
+                                    evt['has_started'] = False
+                                
+                                # Cache to DynamoDB
+                                update_event_start_date(event_ticker, start_timestamp)
+                                print(f"Updated {event_ticker} with milestone start time: {start_str}")
+                            except Exception as e:
+                                print(f"Error parsing milestone start_date '{start_str}': {e}")
+            except Exception as e:
+                print(f"Error fetching milestones (will use estimates): {e}")
+                import traceback
+                traceback.print_exc()
         
     except Exception as e:
         print(f"Error fetching sports events: {e}")
         import traceback
         traceback.print_exc()
     
-    # Sort by start time
+    # Sort by start time (may have changed after milestone updates)
     events.sort(key=lambda x: x.get('event_timestamp', 0))
     
     # Fetch series titles

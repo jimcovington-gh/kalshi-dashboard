@@ -39,8 +39,8 @@ MENTION_EVENTS_TABLE = os.environ.get('MENTION_EVENTS_TABLE', 'production-kalshi
 VOICE_TRADER_STATE_TABLE = os.environ.get('VOICE_TRADER_STATE_TABLE', 'production-kalshi-voice-trader-state')
 VOICE_TRADER_QUEUE_TABLE = os.environ.get('VOICE_TRADER_QUEUE_TABLE', 'production-kalshi-voice-trader-queue')
 
-# EC2 Configuration - Production
-VOICE_TRADER_EC2_INSTANCE_ID = os.environ.get('VOICE_TRADER_EC2_INSTANCE_ID', 'i-0ae0218a057e5b4c3')
+# EC2 Configuration - Production (GPU instance: g4dn.xlarge)
+VOICE_TRADER_EC2_INSTANCE_ID = os.environ.get('VOICE_TRADER_EC2_INSTANCE_ID', 'i-007fa64f2c29180ec')
 VOICE_TRADER_EC2_DOMAIN = os.environ.get('VOICE_TRADER_EC2_DOMAIN', 'voice.apexmarkets.us')
 
 # EC2 Configuration - Dev
@@ -98,10 +98,17 @@ def lambda_handler(event, context):
             session_id = path_parts[-1]
             return stop_session(session_id)
         # Queue management endpoints
+        elif '/ec2/queue/list' in path and http_method == 'GET':
+            return get_queue_list(event)
         elif '/ec2/queue/add' in path and http_method == 'POST':
             return add_to_queue(event)
         elif '/ec2/queue/remove' in path and http_method == 'POST':
             return remove_from_queue(event)
+        elif '/ec2/queue/clean-stale' in path and http_method == 'POST':
+            return clean_stale_queue_events(event)
+        # Worker/session endpoints  
+        elif '/ec2/workers' in path and http_method == 'GET':
+            return get_active_workers(event)
         # Query endpoints
         elif path.endswith('/events') and http_method == 'GET':
             return get_upcoming_events(event)
@@ -603,6 +610,182 @@ def remove_from_queue(event):
         'event_ticker': event_ticker,
         'removed': True
     })
+
+
+def get_queue_list(event):
+    """Get all queued events with stale detection.
+    
+    Returns events with 'is_stale' flag for events whose scheduled_time has passed.
+    """
+    queue_table = dynamodb.Table(VOICE_TRADER_QUEUE_TABLE)
+    
+    try:
+        scan_result = queue_table.scan()
+        items = scan_result.get('Items', [])
+        
+        now = datetime.now(timezone.utc)
+        now_ts = now.timestamp()
+        
+        events = []
+        stale_count = 0
+        
+        for item in items:
+            scheduled_timestamp = float(item.get('scheduled_timestamp', 0))
+            
+            # Event is stale if scheduled time was more than 3 hours ago
+            is_stale = scheduled_timestamp < (now_ts - 3 * 3600)
+            
+            # Calculate hours until/since scheduled time
+            hours_diff = (scheduled_timestamp - now_ts) / 3600
+            
+            if is_stale:
+                stale_count += 1
+            
+            events.append({
+                'event_ticker': item.get('event_ticker'),
+                'scheduled_time': item.get('scheduled_time'),
+                'scheduled_timestamp': scheduled_timestamp,
+                'phone_number': item.get('phone_number', ''),
+                'user_name': item.get('user_name', ''),
+                'status': item.get('status', 'pending'),
+                'created_at': item.get('created_at'),
+                'is_stale': is_stale,
+                'hours_until_start': round(hours_diff, 2) if not is_stale else None,
+                'hours_since_scheduled': round(-hours_diff, 2) if is_stale else None
+            })
+        
+        # Sort by scheduled time (upcoming first, then stale)
+        events.sort(key=lambda x: (x['is_stale'], x['scheduled_timestamp']))
+        
+        return response(200, {
+            'events': events,
+            'count': len(events),
+            'stale_count': stale_count,
+            'as_of': now.isoformat()
+        })
+        
+    except Exception as e:
+        return response(500, {'error': f'Failed to fetch queue: {str(e)}'})
+
+
+def clean_stale_queue_events(event):
+    """Remove stale events from the queue.
+    
+    An event is stale if its scheduled_time was more than 3 hours ago.
+    """
+    queue_table = dynamodb.Table(VOICE_TRADER_QUEUE_TABLE)
+    
+    try:
+        scan_result = queue_table.scan()
+        items = scan_result.get('Items', [])
+        
+        now_ts = datetime.now(timezone.utc).timestamp()
+        stale_cutoff = now_ts - 3 * 3600  # 3 hours ago
+        
+        removed = []
+        for item in items:
+            scheduled_timestamp = float(item.get('scheduled_timestamp', 0))
+            
+            if scheduled_timestamp < stale_cutoff:
+                event_ticker = item.get('event_ticker')
+                queue_table.delete_item(Key={'event_ticker': event_ticker})
+                removed.append(event_ticker)
+        
+        return response(200, {
+            'success': True,
+            'removed': removed,
+            'removed_count': len(removed)
+        })
+        
+    except Exception as e:
+        return response(500, {'error': f'Failed to clean stale events: {str(e)}'})
+
+
+def get_active_workers(event):
+    """Get active workers from EC2 instance.
+    
+    Returns list of workers/sessions currently running on EC2.
+    """
+    instance_id, domain, env_name = get_ec2_config(event)
+    
+    # First check if EC2 is running
+    try:
+        result = ec2.describe_instances(InstanceIds=[instance_id])
+        instance = result['Reservations'][0]['Instances'][0]
+        state = instance['State']['Name']
+        
+        if state != 'running':
+            return response(200, {
+                'ec2_status': state,
+                'workers': [],
+                'count': 0,
+                'message': 'EC2 instance not running'
+            })
+    except Exception as e:
+        return response(500, {'error': f'Failed to check EC2 status: {str(e)}'})
+    
+    # Call EC2 API to get active sessions
+    import urllib.request
+    import ssl
+    
+    api_url = f'https://{domain}:8080'
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+    
+    try:
+        status_req = urllib.request.Request(f'{api_url}/status')
+        with urllib.request.urlopen(status_req, timeout=10, context=ssl_ctx) as resp:
+            status_data = json.loads(resp.read().decode())
+        
+        workers = []
+        
+        # Single worker case (current architecture)
+        if status_data.get('status') != 'idle':
+            workers.append({
+                'session_id': status_data.get('session_id', 'current'),
+                'event_ticker': status_data.get('event_ticker'),
+                'user_name': status_data.get('user_name'),
+                'call_state': status_data.get('call_state'),
+                'started_at': status_data.get('started_at'),
+                'transcript_segments': status_data.get('transcript_segments', 0),
+                'domain': domain,
+                'websocket_url': f'wss://{domain}:8765'
+            })
+        
+        # Also check /pool for multi-session info
+        try:
+            pool_req = urllib.request.Request(f'{api_url}/pool')
+            with urllib.request.urlopen(pool_req, timeout=5, context=ssl_ctx) as resp:
+                pool_data = json.loads(resp.read().decode())
+                
+            # Add active sessions from pool
+            for sid, info in pool_data.get('sessions', {}).items():
+                if info.get('status') != 'stopped':
+                    # Don't duplicate the main session
+                    if not any(w['session_id'] == sid for w in workers):
+                        workers.append({
+                            'session_id': sid,
+                            'event_ticker': info.get('event_ticker'),
+                            'user_name': info.get('user_name'),
+                            'call_state': info.get('status'),
+                            'started_at': info.get('started_at'),
+                            'domain': domain,
+                            'websocket_url': f'wss://{domain}:8765'
+                        })
+        except:
+            pass  # Pool endpoint might not exist
+        
+        return response(200, {
+            'ec2_status': 'running',
+            'workers': workers,
+            'count': len(workers),
+            'domain': domain,
+            'env': env_name
+        })
+        
+    except Exception as e:
+        return response(500, {'error': f'Failed to get workers: {str(e)}'})
 
 
 def response(status_code: int, body: dict) -> dict:

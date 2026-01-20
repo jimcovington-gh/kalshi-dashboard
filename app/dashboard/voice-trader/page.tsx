@@ -107,6 +107,9 @@ interface QueuedEvent {
   status: 'pending' | 'started' | 'completed' | 'cancelled';
   created_at: string;
   config?: Record<string, unknown>;
+  is_stale?: boolean;  // True if scheduled time passed more than 3 hours ago
+  hours_until_start?: number;  // Hours until scheduled start (if not stale)
+  hours_since_scheduled?: number;  // Hours since scheduled time (if stale)
 }
 
 type PageState = 'loading' | 'events' | 'setup' | 'monitoring';
@@ -393,6 +396,22 @@ export default function VoiceTraderPage() {
     }
 
     async function fetchQueuedEvents() {
+      // First try Lambda API (has stale detection)
+      try {
+        const response = await fetch(`${API_BASE}/voice-trader/ec2/queue/list`, {
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setQueuedEvents(data.events || []);
+          setQueueError(null);
+          return;
+        }
+      } catch (err) {
+        console.log('Lambda queue failed, falling back to EC2');
+      }
+      
+      // Fallback to EC2 direct
       try {
         const response = await fetch(`${EC2_BASE}/queue`);
         if (response.ok) {
@@ -400,11 +419,9 @@ export default function VoiceTraderPage() {
           setQueuedEvents(data.events || []);
           setQueueError(null);
         } else {
-          // EC2 running but queue endpoint failed
           setQueueError('Failed to fetch queue');
         }
       } catch (err) {
-        // EC2 not reachable
         setQueuedEvents([]);
       }
     }
@@ -1720,15 +1737,73 @@ export default function VoiceTraderPage() {
             </p>
           ) : (
             <div className="space-y-2">
+              {/* Stale events warning */}
+              {queuedEvents.some(e => e.is_stale) && (
+                <div className="flex items-center justify-between bg-orange-900/30 border border-orange-700 rounded p-3 mb-3">
+                  <span className="text-orange-300 text-sm">
+                    ⚠️ {queuedEvents.filter(e => e.is_stale).length} stale event(s) found (scheduled time passed 3+ hours ago)
+                  </span>
+                  <button
+                    onClick={async () => {
+                      setQueueLoading(true);
+                      try {
+                        const response = await fetch(`${API_BASE}/voice-trader/ec2/queue/clean-stale`, {
+                          method: 'POST',
+                          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}
+                        });
+                        if (response.ok) {
+                          // Refresh queue list
+                          const queueResponse = await fetch(`${API_BASE}/voice-trader/ec2/queue/list`, {
+                            headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}
+                          });
+                          if (queueResponse.ok) {
+                            const data = await queueResponse.json();
+                            setQueuedEvents(data.events || []);
+                          }
+                        }
+                      } catch (err) {
+                        console.error('Failed to clean stale events:', err);
+                      } finally {
+                        setQueueLoading(false);
+                      }
+                    }}
+                    disabled={queueLoading}
+                    className="px-3 py-1 bg-orange-600 hover:bg-orange-500 disabled:bg-gray-600 rounded text-xs font-medium transition"
+                  >
+                    🗑️ Clean Stale
+                  </button>
+                </div>
+              )}
+              
               {queuedEvents.map(event => (
                 <div
                   key={event.event_ticker}
-                  className="flex justify-between items-center bg-gray-700/50 rounded p-3"
+                  className={`flex justify-between items-center rounded p-3 ${
+                    event.is_stale 
+                      ? 'bg-red-900/30 border border-red-800' 
+                      : 'bg-gray-700/50'
+                  }`}
                 >
                   <div>
-                    <div className="font-medium text-blue-300">{event.event_ticker}</div>
+                    <div className={`font-medium ${event.is_stale ? 'text-red-300' : 'text-blue-300'}`}>
+                      {event.is_stale && '⚠️ '}{event.event_ticker}
+                    </div>
                     <div className="text-sm text-gray-400">
                       {new Date(event.scheduled_time).toLocaleString()} UTC
+                      {event.is_stale && event.hours_since_scheduled && (
+                        <span className="text-red-400 ml-2">
+                          ({event.hours_since_scheduled.toFixed(1)}h ago - STALE)
+                        </span>
+                      )}
+                      {!event.is_stale && event.hours_until_start !== undefined && (
+                        <span className={`ml-2 ${event.hours_until_start <= 0.5 ? 'text-green-400' : 'text-yellow-400'}`}>
+                          ({event.hours_until_start <= 0 
+                            ? 'NOW' 
+                            : event.hours_until_start < 1 
+                              ? `${Math.round(event.hours_until_start * 60)}m` 
+                              : `${event.hours_until_start.toFixed(1)}h`})
+                        </span>
+                      )}
                     </div>
                     {event.phone_number && (
                       <div className="text-xs text-gray-500">📞 {event.phone_number}</div>
@@ -1736,12 +1811,13 @@ export default function VoiceTraderPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      event.is_stale ? 'bg-red-700 text-red-200' :
                       event.status === 'pending' ? 'bg-yellow-700 text-yellow-200' :
                       event.status === 'started' ? 'bg-green-700 text-green-200' :
                       event.status === 'completed' ? 'bg-gray-600 text-gray-300' :
                       'bg-red-700 text-red-200'
                     }`}>
-                      {event.status}
+                      {event.is_stale ? 'stale' : event.status}
                     </span>
                     <button
                       onClick={() => handleRemoveFromQueue(event.event_ticker)}

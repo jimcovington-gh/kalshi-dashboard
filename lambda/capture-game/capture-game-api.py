@@ -18,6 +18,7 @@ import urllib3
 from decimal import Decimal
 from datetime import datetime, timezone, timedelta
 from botocore.exceptions import ClientError
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -95,8 +96,32 @@ def sign_kalshi_request(private_key_pem: str, timestamp: str, method: str, path:
     return base64.b64encode(signature).decode('utf-8')
 
 
-def fetch_milestone_for_event(event_ticker: str) -> dict | None:
+def update_event_start_date(event_ticker: str, start_timestamp: int) -> bool:
+    """Cache the start_date back to DynamoDB event metadata table.
+    
+    This prevents repeated API calls for the same event's milestone data.
+    """
+    try:
+        dynamodb = boto3.resource('dynamodb')
+        table = dynamodb.Table(EVENT_METADATA_TABLE)
+        table.update_item(
+            Key={'event_ticker': event_ticker},
+            UpdateExpression='SET start_date = :sd',
+            ExpressionAttributeValues={':sd': start_timestamp}
+        )
+        print(f"Cached start_date={start_timestamp} for {event_ticker}")
+        return True
+    except Exception as e:
+        print(f"Failed to cache start_date for {event_ticker}: {e}")
+        return False
+
+
+def fetch_milestone_for_event(event_ticker: str, cache_result: bool = True) -> dict | None:
     """Fetch milestone data from Kalshi API for a single event.
+    
+    Args:
+        event_ticker: The event ticker to fetch milestones for
+        cache_result: If True, save start_date to DynamoDB for future requests
     
     Returns:
         Dict with start_timestamp and details, or None if not found
@@ -143,8 +168,14 @@ def fetch_milestone_for_event(event_ticker: str) -> dict | None:
         start_date_str = game_milestone.get('start_date')
         if start_date_str:
             start_dt = datetime.fromisoformat(start_date_str.replace('Z', '+00:00'))
+            start_ts = int(start_dt.timestamp())
+            
+            # Cache to DynamoDB so we don't need to fetch again
+            if cache_result:
+                update_event_start_date(event_ticker, start_ts)
+            
             return {
-                'start_timestamp': int(start_dt.timestamp()),
+                'start_timestamp': start_ts,
                 'title': game_milestone.get('title', ''),
                 'details': game_milestone.get('details', {}),
             }
@@ -292,11 +323,29 @@ def get_available_games():
             if needs_fetch:
                 events_needing_milestones.append(event_data)
         
-        # Fetch milestones for events missing start_date (limit to avoid timeout)
+        # Fetch milestones in PARALLEL for events missing start_date (limit to 10)
         if events_needing_milestones:
-            print(f"Fetching milestones for {len(events_needing_milestones)} events")
-            for evt in events_needing_milestones[:10]:
-                milestone_data = fetch_milestone_for_event(evt['event_ticker'])
+            print(f"Fetching milestones for {len(events_needing_milestones)} events (parallel)")
+            events_to_fetch = events_needing_milestones[:10]
+            
+            # Parallel milestone fetches
+            milestone_results = {}
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                future_to_ticker = {
+                    executor.submit(fetch_milestone_for_event, evt['event_ticker']): evt['event_ticker']
+                    for evt in events_to_fetch
+                }
+                for future in as_completed(future_to_ticker):
+                    ticker = future_to_ticker[future]
+                    try:
+                        milestone_results[ticker] = future.result()
+                    except Exception as e:
+                        print(f"Error fetching milestone for {ticker}: {e}")
+                        milestone_results[ticker] = None
+            
+            # Apply results
+            for evt in events_to_fetch:
+                milestone_data = milestone_results.get(evt['event_ticker'])
                 if milestone_data:
                     start_ts = milestone_data['start_timestamp']
                     evt['event_timestamp'] = start_ts
@@ -418,8 +467,13 @@ def get_capture_s3_stats(event_ticker: str) -> dict:
         return {'file_count': 0, 'total_bytes': 0, 'total_mb': 0, 'display': '-'}
 
 
-def get_capture_queue():
-    """Get all queued and active captures from DynamoDB."""
+def get_capture_queue(include_s3_stats: bool = False):
+    """Get all queued and active captures from DynamoDB.
+    
+    Args:
+        include_s3_stats: If True, fetch S3 file sizes (slower, adds ~100ms per capture).
+                         Default False for fast response.
+    """
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table(CAPTURE_TABLE)
     
@@ -446,14 +500,10 @@ def get_capture_queue():
             )
             items.extend(response.get('Items', []))
         
+        # Build capture list without S3 stats first
         for item in items:
             event_ticker = item.get('event_ticker', '')
             status = item.get('status', 'queued')
-            
-            # Get S3 stats for capturing/completed captures
-            s3_stats = None
-            if status in ('capturing', 'completed'):
-                s3_stats = get_capture_s3_stats(event_ticker)
             
             captures.append({
                 'event_ticker': event_ticker,
@@ -467,8 +517,36 @@ def get_capture_queue():
                 'data_points': int(item.get('data_points', 0)),
                 's3_path': item.get('s3_path', ''),
                 'feeder_url': f'ws://{feeder_ip}:8080' if feeder_ip else None,
-                's3_stats': s3_stats,
+                's3_stats': None,
             })
+        
+        # Fetch S3 stats in parallel if requested
+        if include_s3_stats:
+            tickers_needing_stats = [
+                c['event_ticker'] for c in captures 
+                if c['status'] in ('capturing', 'completed')
+            ]
+            
+            if tickers_needing_stats:
+                # Parallel S3 stats fetch (max 10 concurrent)
+                s3_stats_map = {}
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    future_to_ticker = {
+                        executor.submit(get_capture_s3_stats, ticker): ticker 
+                        for ticker in tickers_needing_stats
+                    }
+                    for future in as_completed(future_to_ticker):
+                        ticker = future_to_ticker[future]
+                        try:
+                            s3_stats_map[ticker] = future.result()
+                        except Exception as e:
+                            print(f"Error getting S3 stats for {ticker}: {e}")
+                            s3_stats_map[ticker] = None
+                
+                # Apply stats to captures
+                for capture in captures:
+                    if capture['event_ticker'] in s3_stats_map:
+                        capture['s3_stats'] = s3_stats_map[capture['event_ticker']]
         
     except Exception as e:
         print(f"Error fetching capture queue: {e}")
@@ -565,8 +643,8 @@ def lambda_handler(event, context):
         if path == '/capture/games' and http_method == 'GET':
             games = get_available_games()
             
-            # Get queue to filter out already-queued games
-            queue = get_capture_queue()
+            # Get queue to filter out already-queued games (no S3 stats needed)
+            queue = get_capture_queue(include_s3_stats=False)
             queued_tickers = {c['event_ticker'] for c in queue}
             
             # Filter out games already in queue
@@ -584,7 +662,11 @@ def lambda_handler(event, context):
         
         # GET /capture/queue - List queued captures
         elif path == '/capture/queue' and http_method == 'GET':
-            queue = get_capture_queue()
+            # Check for ?include_stats=true query param
+            query_params = event.get('queryStringParameters') or {}
+            include_stats = query_params.get('include_stats', '').lower() == 'true'
+            
+            queue = get_capture_queue(include_s3_stats=include_stats)
             return {
                 'statusCode': 200,
                 'headers': headers,

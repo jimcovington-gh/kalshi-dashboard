@@ -568,6 +568,49 @@ export default function VoiceTraderPage() {
           } else if (data.type === 'speakers') {
             // Update speakers from server
             setContainerState(prev => prev ? {...prev, speakers: data.speakers} : prev);
+          } else if (data.type === 'ai_event') {
+            // AI detected significant event (Q&A start, call ending)
+            let emoji = '🤖';
+            let eventText = data.event;
+            
+            if (data.event === 'qa_started') {
+              emoji = '❓';
+              eventText = 'Q&A Session Detected';
+              // Update qa_started in container state
+              setContainerState(prev => prev ? {...prev, qa_started: true} : prev);
+            } else if (data.event === 'call_ending') {
+              emoji = '🔔';
+              eventText = 'Call Ending - Sweeping NO';
+            }
+            
+            // Add to transcript as an event
+            setTranscript(prev => {
+              const aiEventSegment: TranscriptSegment = {
+                text: `${emoji} AI: ${eventText} (${data.reason || 'detected'})`,
+                timestamp: Date.now() / 1000,
+                is_final: true,
+                is_event: true,
+                event_type: data.event === 'qa_started' ? 'qa_started' : 'call_end'
+              };
+              return [...prev.slice(-99), aiEventSegment];
+            });
+          } else if (data.type === 'trade_executed') {
+            // Trade executed (YES buy or NO sweep)
+            const emoji = data.side === 'no' ? '🔴' : '🎯';
+            const action = data.action === 'buy' ? 'Bought' : 'Sold';
+            const sideLabel = data.side?.toUpperCase() || 'YES';
+            const reason = data.reason === 'sweep_no' ? ' (sweep)' : '';
+            
+            setTranscript(prev => {
+              const tradeSegment: TranscriptSegment = {
+                text: `${emoji} ${action} ${sideLabel} on ${data.market_ticker}: ${data.contracts_filled || 0} contracts @ $${(data.price || 0).toFixed(2)}${reason}`,
+                timestamp: Date.now() / 1000,
+                is_final: true,
+                is_event: true,
+                event_type: 'trade'
+              };
+              return [...prev.slice(-99), tradeSegment];
+            });
           }
         };
         

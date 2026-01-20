@@ -1830,7 +1830,14 @@ export default function VoiceTraderPage() {
         </button>
         
         <h1 className="text-2xl font-bold mb-2">{selectedEvent.title}</h1>
-        <p className="text-gray-400 mb-6">{selectedEvent.event_ticker}</p>
+        <a 
+          href={`https://kalshi.com/events/${selectedEvent.event_ticker}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 hover:text-blue-300 hover:underline mb-6 inline-block"
+        >
+          {selectedEvent.event_ticker} ↗
+        </a>
         
         {error && (
           <div className="bg-red-900 border border-red-500 text-red-200 px-4 py-3 rounded mb-4">
@@ -2044,6 +2051,14 @@ export default function VoiceTraderPage() {
               ← Back to Lobby
             </button>
             <h1 className="text-xl font-bold">{selectedEvent.title}</h1>
+            <a 
+              href={`https://kalshi.com/events/${selectedEvent.event_ticker}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:text-blue-300 hover:underline text-sm"
+            >
+              {selectedEvent.event_ticker} ↗
+            </a>
             <div className={`text-sm ${statusColor}`}>{statusMessage}</div>
             
             {/* Detection Pause + Q&A Status Indicators */}

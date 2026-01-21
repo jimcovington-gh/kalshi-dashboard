@@ -37,6 +37,8 @@ interface ContainerState {
   status_message: string;
   audio_source: string;  // 'phone' or 'web'/'stream'
   qa_started: boolean;
+  qa_detection_enabled: boolean;
+  call_end_detection_enabled: boolean;
   detection_paused: boolean;
   dry_run: boolean;
   speakers: {
@@ -61,8 +63,16 @@ interface TranscriptSegment {
   timestamp: number;
   is_final: boolean;
   speaker_id?: string;
-  is_event?: boolean;  // For state changes, trades, Q&A, etc.
-  event_type?: 'state_change' | 'trade' | 'qa_started' | 'call_end' | 'speaker_change';
+  show_speaker?: boolean;  // Show speaker ID prefix for this segment
+  show_timestamp?: boolean;  // Show timestamp prefix for this segment
+}
+
+// System log entry - for events, trades, status changes (never truncated)
+interface SystemLogEntry {
+  timestamp: number;
+  message: string;
+  level: 'info' | 'trade' | 'warning' | 'error' | 'ai';
+  details?: string;
 }
 
 interface RunningVoiceContainer {
@@ -147,9 +157,11 @@ export default function VoiceTraderPage() {
   const [words, setWords] = useState<WordStatus[]>([]);
   const [pnl, setPnl] = useState<PnLSummary | null>(null);
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
+  const [systemLog, setSystemLog] = useState<SystemLogEntry[]>([]);  // System log - never truncated
+  const [lastSpeakerId, setLastSpeakerId] = useState<string | null>(null);  // Track speaker changes
   const [wsUrl, setWsUrl] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  
+  const systemLogRef = useRef<HTMLDivElement | null>(null);  // For auto-scroll  
   // Audio playback state
   const [audioMuted, setAudioMuted] = useState(false);
   const [audioVolume, setAudioVolume] = useState(0.7);
@@ -289,6 +301,13 @@ export default function VoiceTraderPage() {
       }
     };
   }, [pageState]);
+
+  // Auto-scroll system log to bottom when new entries are added
+  useEffect(() => {
+    if (systemLogRef.current) {
+      systemLogRef.current.scrollTop = systemLogRef.current.scrollHeight;
+    }
+  }, [systemLog]);
 
   // Fetch events and running containers
   useEffect(() => {
@@ -469,6 +488,13 @@ export default function VoiceTraderPage() {
           setWsConnected(true);
           retryCount = 0;  // Reset retry count on success
           
+          // Log connection to system log
+          setSystemLog(prev => [...prev, {
+            timestamp: Date.now() / 1000,
+            message: 'Connected to Voice Trader',
+            level: 'info'
+          }]);
+          
           // Request audio streaming
           ws?.send(JSON.stringify({ type: 'enable_audio_stream' }));
           // Request trading parameters
@@ -487,7 +513,20 @@ export default function VoiceTraderPage() {
           const data = JSON.parse(event.data);
           
           if (data.type === 'full_state') {
-            setContainerState(data.call);
+            // Log status_message changes to System Log
+            const newStatus = data.call?.status_message;
+            setContainerState(prevState => {
+              // Only log if status_message actually changed
+              if (newStatus && newStatus !== prevState?.status_message) {
+                setSystemLog(prev => [...prev, {
+                  timestamp: Date.now() / 1000,
+                  message: newStatus,
+                  level: newStatus.toLowerCase().includes('error') ? 'error' : 
+                         newStatus.toLowerCase().includes('wait') ? 'warning' : 'info'
+                }]);
+              }
+              return data.call;
+            });
             setWords(data.words || []);
             setPnl(data.pnl);
             setTranscript(data.transcript || []);
@@ -501,34 +540,46 @@ export default function VoiceTraderPage() {
             }
           } else if (data.type === 'transcript') {
             // Real-time transcript segment from voice trader
-            setTranscript(prev => {
-              const newSegment: TranscriptSegment = {
-                text: data.text,
-                is_final: data.is_final,
-                speaker_id: data.speaker_id,
-                timestamp: data.timestamp
-              };
+            const speakerId = data.speaker_id || 'unknown';
+            const timestamp = data.timestamp || Date.now() / 1000;
+            
+            // Check if speaker changed
+            setLastSpeakerId(prevSpeaker => {
+              const speakerChanged = prevSpeaker !== null && prevSpeaker !== speakerId;
               
-              // Option B: Replace partials with finals, keep evolving sentence
-              if (data.is_final) {
-                // Final: remove recent partials and add this final
-                const withoutRecentPartials = prev.filter((seg, idx) => {
-                  // Keep all finals and events
-                  if (seg.is_final || seg.is_event) return true;
-                  // Keep partials older than 5 seconds
-                  if (seg.timestamp && data.timestamp - seg.timestamp > 5) return true;
-                  return false;
-                });
-                return [...withoutRecentPartials.slice(-99), newSegment];
-              } else {
-                // Partial: replace the last partial (if any) with this one
-                const lastIdx = prev.length - 1;
-                if (lastIdx >= 0 && !prev[lastIdx].is_final && !prev[lastIdx].is_event) {
-                  // Replace last partial
-                  return [...prev.slice(0, lastIdx), newSegment];
+              setTranscript(prev => {
+                const newSegment: TranscriptSegment = {
+                  text: data.text,
+                  is_final: data.is_final,
+                  speaker_id: speakerId,
+                  timestamp: timestamp,
+                  show_speaker: speakerChanged || prev.length === 0,  // Show speaker on change or first segment
+                  show_timestamp: speakerChanged || prev.length === 0  // Show timestamp on speaker change
+                };
+                
+                // Replace partials with finals, keep evolving sentence
+                if (data.is_final) {
+                  // Final: remove recent partials and add this final
+                  const withoutRecentPartials = prev.filter((seg) => {
+                    // Keep all finals
+                    if (seg.is_final) return true;
+                    // Keep partials older than 5 seconds
+                    if (seg.timestamp && timestamp - seg.timestamp > 5) return true;
+                    return false;
+                  });
+                  return [...withoutRecentPartials.slice(-200), newSegment];
+                } else {
+                  // Partial: replace the last partial (if any) with this one
+                  const lastIdx = prev.length - 1;
+                  if (lastIdx >= 0 && !prev[lastIdx].is_final) {
+                    // Replace last partial
+                    return [...prev.slice(0, lastIdx), newSegment];
+                  }
+                  return [...prev.slice(-200), newSegment];
                 }
-                return [...prev.slice(-99), newSegment];
-              }
+              });
+              
+              return speakerId;  // Update lastSpeakerId
             });
           } else if (data.type === 'word_triggered') {
             // Update the words state based on status
@@ -546,34 +597,38 @@ export default function VoiceTraderPage() {
                   }
                 : w
             ));
+            // Also log to system log
+            setSystemLog(prev => [...prev, {
+              timestamp: data.timestamp || Date.now() / 1000,
+              message: `Word triggered: ${data.word} (${data.market_ticker})`,
+              level: 'info',
+              details: data.status || 'pending'
+            }]);
           } else if (data.type === 'event') {
-            // Add event to transcript log (state changes, trades, Q&A, etc.)
-            setTranscript(prev => {
-              const eventSegment: TranscriptSegment = {
-                text: data.message,
-                timestamp: data.timestamp,
-                is_final: true,
-                is_event: true,
-                event_type: data.event_type
-              };
-              return [...prev.slice(-99), eventSegment];
-            });
+            // Add event to system log (state changes, Q&A, etc.)
+            setSystemLog(prev => [...prev, {
+              timestamp: data.timestamp || Date.now() / 1000,
+              message: data.message,
+              level: 'info',
+              details: data.event_type
+            }]);
           } else if (data.type === 'speaker_change') {
-            // Add speaker change marker to transcript
-            setTranscript(prev => {
-              const speakerEvent: TranscriptSegment = {
-                text: `── Speaker: ${data.speaker_name || data.speaker_id} ──`,
-                timestamp: data.timestamp,
-                is_final: true,
-                is_event: true,
-                event_type: 'speaker_change',
-                speaker_id: data.speaker_id
-              };
-              return [...prev.slice(-99), speakerEvent];
-            });
+            // Log speaker change to system log
+            setSystemLog(prev => [...prev, {
+              timestamp: data.timestamp || Date.now() / 1000,
+              message: `Speaker changed: ${data.speaker_name || data.speaker_id}`,
+              level: 'info'
+            }]);
+            // Also update lastSpeakerId to trigger speaker label in transcript
+            setLastSpeakerId(data.speaker_id);
           } else if (data.type === 'disconnect_alert') {
             setError(data.message);
             setAudioActive(false);  // Call disconnected - not active anymore
+            setSystemLog(prev => [...prev, {
+              timestamp: Date.now() / 1000,
+              message: `Disconnected: ${data.message}`,
+              level: 'warning'
+            }]);
           } else if (data.type === 'audio_active') {
             setAudioActive(data.active);
           } else if (data.type === 'trading_params') {
@@ -589,28 +644,27 @@ export default function VoiceTraderPage() {
             // AI detected significant event (Q&A start, call ending)
             let emoji = '🤖';
             let eventText = data.event;
+            let level: 'ai' | 'warning' = 'ai';
             
             if (data.event === 'qa_started') {
               emoji = '❓';
               eventText = 'Q&A Session Detected';
+              level = 'warning';
               // Update qa_started in container state
               setContainerState(prev => prev ? {...prev, qa_started: true} : prev);
             } else if (data.event === 'call_ending') {
               emoji = '🔔';
               eventText = 'Call Ending - Sweeping NO';
+              level = 'warning';
             }
             
-            // Add to transcript as an event
-            setTranscript(prev => {
-              const aiEventSegment: TranscriptSegment = {
-                text: `${emoji} AI: ${eventText} (${data.reason || 'detected'})`,
-                timestamp: Date.now() / 1000,
-                is_final: true,
-                is_event: true,
-                event_type: data.event === 'qa_started' ? 'qa_started' : 'call_end'
-              };
-              return [...prev.slice(-99), aiEventSegment];
-            });
+            // Add to system log
+            setSystemLog(prev => [...prev, {
+              timestamp: Date.now() / 1000,
+              message: `${emoji} AI: ${eventText}`,
+              level: level,
+              details: data.reason || 'detected'
+            }]);
           } else if (data.type === 'trade_executed') {
             // Trade executed (YES buy or NO sweep)
             const emoji = data.side === 'no' ? '🔴' : '🎯';
@@ -618,16 +672,12 @@ export default function VoiceTraderPage() {
             const sideLabel = data.side?.toUpperCase() || 'YES';
             const reason = data.reason === 'sweep_no' ? ' (sweep)' : '';
             
-            setTranscript(prev => {
-              const tradeSegment: TranscriptSegment = {
-                text: `${emoji} ${action} ${sideLabel} on ${data.market_ticker}: ${data.contracts_filled || 0} contracts @ $${(data.price || 0).toFixed(2)}${reason}`,
-                timestamp: Date.now() / 1000,
-                is_final: true,
-                is_event: true,
-                event_type: 'trade'
-              };
-              return [...prev.slice(-99), tradeSegment];
-            });
+            // Add to system log as trade
+            setSystemLog(prev => [...prev, {
+              timestamp: Date.now() / 1000,
+              message: `${emoji} ${action} ${sideLabel} on ${data.market_ticker}: ${data.contracts_filled || 0} @ $${(data.price || 0).toFixed(2)}${reason}`,
+              level: 'trade'
+            }]);
           }
         };
         
@@ -720,6 +770,8 @@ export default function VoiceTraderPage() {
             status_message: data.status_message || prev?.status_message || 'Loading...',
             audio_source: data.audio_source || prev?.audio_source || 'phone',
             qa_started: data.qa_started || false,
+            qa_detection_enabled: data.qa_detection_enabled ?? prev?.qa_detection_enabled ?? false,
+            call_end_detection_enabled: data.call_end_detection_enabled ?? prev?.call_end_detection_enabled ?? false,
             detection_paused: data.detection_paused || false,
             dry_run: data.dry_run ?? prev?.dry_run ?? false,
             // Use speakers from response, fallback to prev if not present
@@ -2117,6 +2169,8 @@ export default function VoiceTraderPage() {
                 setContainerState(null);  // Clear container state
                 setWords([]);  // Clear word grid
                 setTranscript([]);  // Clear transcript
+                setSystemLog([]);  // Clear system log
+                setLastSpeakerId(null);  // Reset speaker tracking
                 if (wsRef.current) {
                   wsRef.current.close();
                   wsRef.current = null;
@@ -2139,7 +2193,7 @@ export default function VoiceTraderPage() {
             
             {/* Detection Pause + Q&A Status Indicators */}
             {isCallActive && (
-              <div className="mt-2 flex items-center gap-2">
+              <div className="mt-2 flex items-center gap-2 flex-wrap">
                 {/* Detection Pause Button - prominent toggle */}
                 <button
                   onClick={() => {
@@ -2156,10 +2210,10 @@ export default function VoiceTraderPage() {
                       : 'bg-green-600 hover:bg-green-500'
                   }`}
                   title={containerState?.detection_paused 
-                    ? "Detection PAUSED - Click to resume" 
-                    : "Detection ACTIVE - Click to pause"}
+                    ? "Detection PAUSED - Click to resume word detection" 
+                    : "Word detection ACTIVE - Click to pause"}
                 >
-                  {containerState?.detection_paused ? '⏸️ Paused' : '▶️ Detecting'}
+                  {containerState?.detection_paused ? '⏸️ Detection Paused' : '▶️ Detecting'}
                 </button>
                 
                 {/* Suspend Trading Button - Emergency stop */}
@@ -2184,25 +2238,55 @@ export default function VoiceTraderPage() {
                   {containerState?.dry_run ? '🚫 Trading Off' : '💰 Trading On'}
                 </button>
                 
-                {/* Q&A Status - only show for phone/dial-in (earnings calls have Q&A) */}
-                {containerState?.audio_source === 'phone' && (
-                  containerState?.qa_started ? (
-                    <span className="bg-orange-600 px-2 py-1 rounded text-xs font-medium">
-                      🎤 Q&A Active
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        if (wsRef.current?.readyState === WebSocket.OPEN) {
-                          wsRef.current.send(JSON.stringify({ type: 'set_qa_started' }));
-                        }
-                      }}
-                      className="bg-gray-700 hover:bg-orange-600 px-2 py-1 rounded text-xs"
-                      title="Click to manually mark Q&A as started"
-                    >
-                      Q&A Not Started
-                    </button>
-                  )
+                {/* Q&A Detection Toggle - show current state and allow toggle */}
+                <button
+                  onClick={() => {
+                    if (wsRef.current?.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({ 
+                        type: 'set_qa_detection_enabled',
+                        enabled: !containerState?.qa_detection_enabled 
+                      }));
+                    }
+                  }}
+                  className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                    containerState?.qa_detection_enabled 
+                      ? 'bg-purple-600 hover:bg-purple-500' 
+                      : 'bg-gray-600 hover:bg-gray-500'
+                  }`}
+                  title={containerState?.qa_detection_enabled 
+                    ? "Q&A detection ON - AI will auto-pause on Q&A. Click to disable" 
+                    : "Q&A detection OFF - Click to enable AI Q&A detection"}
+                >
+                  {containerState?.qa_detection_enabled ? '🤖 Q&A Detect: ON' : '🤖 Q&A Detect: OFF'}
+                </button>
+                
+                {/* Call-End Detection Toggle */}
+                <button
+                  onClick={() => {
+                    if (wsRef.current?.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({ 
+                        type: 'set_call_end_detection_enabled',
+                        enabled: !containerState?.call_end_detection_enabled 
+                      }));
+                    }
+                  }}
+                  className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                    containerState?.call_end_detection_enabled 
+                      ? 'bg-red-600 hover:bg-red-500' 
+                      : 'bg-gray-600 hover:bg-gray-500'
+                  }`}
+                  title={containerState?.call_end_detection_enabled 
+                    ? "End-of-call detection ON - AI will sweep NO on call end. Click to disable" 
+                    : "End-of-call detection OFF - Click to enable"}
+                >
+                  {containerState?.call_end_detection_enabled ? '🔔 End Detect: ON' : '🔔 End Detect: OFF'}
+                </button>
+                
+                {/* Q&A Triggered Status - show if Q&A has been triggered */}
+                {containerState?.qa_started && (
+                  <span className="bg-orange-600 px-2 py-1 rounded text-xs font-medium ring-2 ring-orange-400">
+                    🎤 Q&A Triggered
+                  </span>
                 )}
               </div>
             )}
@@ -2522,40 +2606,65 @@ export default function VoiceTraderPage() {
           </div>
         </div>
         
-        {/* Transcript */}
-        <div className="mt-3 bg-gray-800 rounded-lg p-3 max-h-[250px] overflow-y-auto">
-          <h2 className="font-semibold text-sm mb-2">Live Transcript</h2>
-          <div className="text-xs space-y-0.5 font-mono">
-            {/* Filter: show only finals, events, and the ONE most recent partial */}
-            {(() => {
-              const recent = transcript.slice(-50);
-              // Find finals and events
-              const finalsAndEvents = recent.filter(seg => seg.is_final || seg.is_event);
-              // Find the most recent partial (if any)
-              const lastPartial = recent.filter(seg => !seg.is_final && !seg.is_event).slice(-1)[0];
-              // Combine and show last 30
-              const toShow = lastPartial 
-                ? [...finalsAndEvents, lastPartial].slice(-30)
-                : finalsAndEvents.slice(-30);
-              
-              return toShow.map((seg, i) => {
-                // Event messages (state changes, trades, Q&A, etc.) - green
-                if (seg.is_event) {
-                  const time = seg.timestamp ? new Date(seg.timestamp * 1000).toLocaleTimeString() : '';
+        {/* Split view: System Log and Transcript */}
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          {/* System/Execution Log - left panel, scrollable, never truncated */}
+          <div className="bg-gray-800 rounded-lg p-3 max-h-[300px] overflow-y-auto" ref={systemLogRef}>
+            <h2 className="font-semibold text-sm mb-2 sticky top-0 bg-gray-800 pb-1">📋 Execution Log</h2>
+            <div className="text-xs space-y-0.5 font-mono">
+              {systemLog.length === 0 ? (
+                <div className="text-gray-500 italic">No events yet...</div>
+              ) : (
+                systemLog.map((entry, i) => {
+                  const time = new Date(entry.timestamp * 1000).toLocaleTimeString();
+                  // Color based on level
+                  let colorClass = 'text-gray-300';
+                  if (entry.level === 'trade') colorClass = 'text-green-400';
+                  else if (entry.level === 'warning') colorClass = 'text-yellow-400';
+                  else if (entry.level === 'error') colorClass = 'text-red-400';
+                  else if (entry.level === 'ai') colorClass = 'text-purple-400';
+                  
                   return (
-                    <div key={i} className="text-green-400 py-0.5">
-                      <span className="text-green-600">[{time}]</span> {seg.text}
+                    <div key={i} className={`${colorClass} py-0.5`}>
+                      <span className="text-gray-500">[{time}]</span> {entry.message}
+                      {entry.details && <span className="text-gray-500"> ({entry.details})</span>}
                     </div>
                   );
-                }
-                // Normal transcript - white for finals, gray italic for the current partial
-                return (
-                  <div key={i} className={seg.is_final ? 'text-white' : 'text-gray-500 italic'}>
-                    {seg.text}
-                  </div>
-                );
-              });
-            })()}
+                })
+              )}
+            </div>
+          </div>
+          
+          {/* Transcript - right panel, speech only with speaker markers */}
+          <div className="bg-gray-800 rounded-lg p-3 max-h-[300px] overflow-y-auto">
+            <h2 className="font-semibold text-sm mb-2 sticky top-0 bg-gray-800 pb-1">🎙️ Live Transcript</h2>
+            <div className="text-xs space-y-0.5 font-mono">
+              {(() => {
+                const recent = transcript.slice(-100);
+                // Find finals and the most recent partial
+                const finalsOnly = recent.filter(seg => seg.is_final);
+                const lastPartial = recent.filter(seg => !seg.is_final).slice(-1)[0];
+                const toShow = lastPartial 
+                  ? [...finalsOnly, lastPartial].slice(-50)
+                  : finalsOnly.slice(-50);
+                
+                return toShow.map((seg, i) => {
+                  const time = seg.timestamp ? new Date(seg.timestamp * 1000).toLocaleTimeString() : '';
+                  
+                  // Show speaker label and timestamp on speaker change
+                  const prefix = seg.show_speaker 
+                    ? <><span className="text-blue-400">[{time}]</span> <span className="text-cyan-400 font-bold">{seg.speaker_id || 'Speaker'}:</span> </>
+                    : null;
+                  
+                  // Normal transcript - white for finals, gray italic for the current partial
+                  return (
+                    <div key={i} className={seg.is_final ? 'text-white' : 'text-gray-500 italic'}>
+                      {prefix}{seg.text}
+                    </div>
+                  );
+                });
+              })()}
+            </div>
           </div>
         </div>
       </div>

@@ -515,15 +515,18 @@ export default function VoiceTraderPage() {
           if (data.type === 'full_state') {
             // Log status_message changes to System Log
             const newStatus = data.call?.status_message;
+            // Compare with current containerState and log if different
             setContainerState(prevState => {
-              // Only log if status_message actually changed
               if (newStatus && newStatus !== prevState?.status_message) {
-                setSystemLog(prev => [...prev, {
-                  timestamp: Date.now() / 1000,
-                  message: newStatus,
-                  level: newStatus.toLowerCase().includes('error') ? 'error' : 
-                         newStatus.toLowerCase().includes('wait') ? 'warning' : 'info'
-                }]);
+                // Use setTimeout to avoid calling setState during another setState
+                setTimeout(() => {
+                  setSystemLog(prev => [...prev, {
+                    timestamp: Date.now() / 1000,
+                    message: newStatus,
+                    level: newStatus.toLowerCase().includes('error') ? 'error' : 
+                           newStatus.toLowerCase().includes('wait') ? 'warning' : 'info'
+                  }]);
+                }, 0);
               }
               return data.call;
             });
@@ -597,6 +600,24 @@ export default function VoiceTraderPage() {
                   }
                 : w
             ));
+          } else if (data.type === 'word_status_update') {
+            // Orderbook scanner detected word was already said (no NO bids)
+            console.log('[WORD] Orderbook update:', data.market_ticker, data.source, data.reason);
+            setWords(prev => prev.map(w => 
+              w.market_ticker === data.market_ticker 
+                ? { 
+                    ...w, 
+                    triggered: data.triggered,
+                    status: 'skipped'  // Gray out - word was already said
+                  }
+                : w
+            ));
+            // Log to system log
+            setSystemLog(prev => [...prev, {
+              timestamp: Date.now() / 1000,
+              message: `Word already said: ${data.market_ticker} (${data.reason})`,
+              level: 'warning'
+            }]);
             // Also log to system log
             setSystemLog(prev => [...prev, {
               timestamp: data.timestamp || Date.now() / 1000,

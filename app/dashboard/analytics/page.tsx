@@ -142,6 +142,7 @@ export default function AnalyticsPage() {
               groupBy={groupBy}
               onGroupByChange={setGroupBy}
               isLoading={isLoadingSettlements}
+              userName={selectedUser}
             />
           </div>
         </>

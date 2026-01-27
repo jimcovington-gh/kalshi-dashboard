@@ -1,6 +1,7 @@
 'use client';
 
 interface WeekData {
+  weekLabel: string;
   weekStart: string;
   weekEnd: string;
   startValue: number;
@@ -25,19 +26,6 @@ function formatCurrency(value: number): string {
 function formatPercent(value: number): string {
   const sign = value >= 0 ? '+' : '';
   return `${sign}${value.toFixed(2)}%`;
-}
-
-function getWeekBounds(date: Date): { start: Date; end: Date } {
-  const day = date.getDay();
-  const start = new Date(date);
-  start.setDate(date.getDate() - day); // Sunday
-  start.setHours(0, 0, 0, 0);
-  
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6); // Saturday
-  end.setHours(23, 59, 59, 999);
-  
-  return { start, end };
 }
 
 function formatDateShort(date: Date): string {
@@ -70,42 +58,45 @@ export default function WeeklyPositionTable({ history, isLoading }: WeeklyPositi
   // Sort history by timestamp (oldest first)
   const sortedHistory = [...history].sort((a, b) => a.snapshot_ts - b.snapshot_ts);
   
-  // Group history by week
-  const weeklyData: Map<string, { values: number[]; timestamps: number[] }> = new Map();
+  // Calculate rolling 7-day periods
+  // Week 1: today - 6 days ago (most recent 7 days)
+  // Week 2: 7 days ago - 13 days ago
+  // etc.
+  const now = new Date();
+  now.setHours(23, 59, 59, 999); // End of today
   
-  for (const point of sortedHistory) {
-    const date = new Date(point.snapshot_ts);
-    const { start } = getWeekBounds(date);
-    const weekKey = start.toISOString().split('T')[0];
-    
-    if (!weeklyData.has(weekKey)) {
-      weeklyData.set(weekKey, { values: [], timestamps: [] });
-    }
-    
-    const week = weeklyData.get(weekKey)!;
-    week.values.push(Number(point.total_value));
-    week.timestamps.push(point.snapshot_ts);
-  }
-  
-  // Calculate weekly changes (last 4 weeks)
   const weeks: WeekData[] = [];
-  const weekKeys = Array.from(weeklyData.keys()).sort().reverse().slice(0, 4);
   
-  for (const weekKey of weekKeys) {
-    const weekDate = new Date(weekKey);
-    const { start, end } = getWeekBounds(weekDate);
-    const data = weeklyData.get(weekKey)!;
+  for (let weekIdx = 0; weekIdx < 4; weekIdx++) {
+    // Week end is (weekIdx * 7) days ago from end of today
+    // Week start is (weekIdx * 7 + 6) days ago
+    const weekEnd = new Date(now);
+    weekEnd.setDate(now.getDate() - (weekIdx * 7));
     
-    if (data.values.length === 0) continue;
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - (weekIdx * 7 + 6));
+    weekStart.setHours(0, 0, 0, 0);
     
-    const startValue = data.values[0];
-    const endValue = data.values[data.values.length - 1];
+    // Find history points within this week
+    const weekStartTs = weekStart.getTime();
+    const weekEndTs = weekEnd.getTime();
+    
+    const weekPoints = sortedHistory.filter(point => {
+      const ts = point.snapshot_ts;
+      return ts >= weekStartTs && ts <= weekEndTs;
+    });
+    
+    if (weekPoints.length === 0) continue;
+    
+    const startValue = Number(weekPoints[0].total_value);
+    const endValue = Number(weekPoints[weekPoints.length - 1].total_value);
     const change = endValue - startValue;
     const changePercent = startValue > 0 ? (change / startValue) * 100 : 0;
     
     weeks.push({
-      weekStart: formatDateShort(start),
-      weekEnd: formatDateShort(end),
+      weekLabel: weekIdx === 0 ? 'This Week' : weekIdx === 1 ? 'Last Week' : `${weekIdx + 1} Weeks Ago`,
+      weekStart: formatDateShort(weekStart),
+      weekEnd: formatDateShort(weekEnd),
       startValue,
       endValue,
       change,
@@ -146,8 +137,8 @@ export default function WeeklyPositionTable({ history, isLoading }: WeeklyPositi
             {weeks.map((week, idx) => (
               <tr key={idx} className={idx === 0 ? 'bg-blue-50' : ''}>
                 <td className="px-3 py-3 text-sm text-gray-900">
-                  {week.weekStart} - {week.weekEnd}
-                  {idx === 0 && <span className="ml-2 text-xs text-blue-600">(Current)</span>}
+                  <span className="font-medium">{week.weekLabel}</span>
+                  <span className="text-gray-500 ml-2 text-xs">({week.weekStart} - {week.weekEnd})</span>
                 </td>
                 <td className="px-3 py-3 text-sm text-right text-gray-500">
                   {formatCurrency(week.startValue)}

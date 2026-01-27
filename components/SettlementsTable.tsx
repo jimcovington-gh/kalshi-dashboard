@@ -11,6 +11,7 @@ interface SettlementsTableProps {
   groupBy: 'idea' | 'category' | 'price_bucket' | '';
   onGroupByChange: (groupBy: 'idea' | 'category' | 'price_bucket' | '') => void;
   isLoading: boolean;
+  userName?: string;
 }
 
 function formatCurrency(value: number): string {
@@ -22,6 +23,14 @@ function formatDate(timestamp: number): string {
   if (!timestamp) return '-';
   // timestamp is in seconds
   return format(new Date(timestamp * 1000), 'MMM dd HH:mm');
+}
+
+// Build Kalshi market URL from ticker
+function buildKalshiUrl(ticker: string): string {
+  // Extract event ticker (everything before the last hyphen segment that's the market variant)
+  // e.g., KXNBAMENTION-26JAN25DENMEM-MVP -> event is KXNBAMENTION-26JAN25DENMEM
+  // Simpler approach: link to search page with ticker
+  return `https://kalshi.com/markets?search=${encodeURIComponent(ticker)}`;
 }
 
 function formatDuration(hours: number): string {
@@ -42,7 +51,8 @@ export default function SettlementsTable({
   grouped,
   groupBy,
   onGroupByChange,
-  isLoading
+  isLoading,
+  userName
 }: SettlementsTableProps) {
   const [showDetails, setShowDetails] = useState(false);
 
@@ -162,13 +172,21 @@ export default function SettlementsTable({
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {trades.slice(0, 100).map((trade) => (
+            {trades.slice(0, 100).map((trade) => {
+              const tradeUrl = `/dashboard/trades?ticker=${encodeURIComponent(trade.market_ticker)}${userName ? `&user_name=${encodeURIComponent(userName)}` : ''}`;
+              const kalshiUrl = buildKalshiUrl(trade.market_ticker);
+              
+              return (
               <tr key={trade.order_id} className={`hover:bg-gray-50 ${trade.won ? '' : 'bg-red-50'}`}>
-                <td className="px-3 py-2 text-sm text-gray-500 whitespace-nowrap">
-                  {formatDate(trade.settlement_time)}
+                <td className="px-3 py-2 text-sm whitespace-nowrap">
+                  <a href={tradeUrl} className="text-blue-600 hover:underline">
+                    {formatDate(trade.settlement_time)}
+                  </a>
                 </td>
-                <td className="px-3 py-2 text-sm text-gray-900 font-mono text-xs max-w-[200px] truncate" title={trade.market_ticker}>
-                  {trade.market_ticker}
+                <td className="px-3 py-2 text-sm font-mono text-xs max-w-[200px] truncate" title={trade.market_ticker}>
+                  <a href={kalshiUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                    {trade.market_ticker}
+                  </a>
                 </td>
                 {showDetails && (
                   <>
@@ -201,7 +219,8 @@ export default function SettlementsTable({
                   </td>
                 )}
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       </div>

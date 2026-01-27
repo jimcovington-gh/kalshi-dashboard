@@ -314,18 +314,40 @@ export default function VoiceTraderPage() {
     if (pageState !== 'events' || !authToken) return;
     
     async function fetchEvents() {
+      // Primary: Use Lambda API (works even when EC2 is down)
       try {
-        // Fetch events directly from EC2
+        const response = await fetch(`${API_BASE}/voice-trader/events`, {
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setEvents(data.events || []);
+          setError(null);
+          return;
+        } else {
+          console.log('Lambda events API returned status:', response.status);
+        }
+      } catch (err) {
+        console.log('Lambda events API failed:', err);
+      }
+      
+      // Fallback: Try EC2 directly (faster if EC2 is running)
+      try {
         const response = await fetch(`${EC2_BASE}/events`);
         
-        if (!response.ok) throw new Error('Failed to fetch events');
-        
-        const data = await response.json();
-        setEvents(data.events || []);
+        if (response.ok) {
+          const data = await response.json();
+          setEvents(data.events || []);
+          setError(null);
+          return;
+        }
       } catch (err) {
-        console.error('Error fetching events:', err);
-        setError('Failed to load events - is the voice server running?');
+        console.log('EC2 events API failed:', err);
       }
+      
+      // Both sources failed
+      setError('Failed to load events - check your connection');
     }
     
     async function fetchRunningContainers() {

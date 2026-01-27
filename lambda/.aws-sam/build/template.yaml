@@ -171,6 +171,43 @@ Resources:
             Method: GET
     Metadata:
       SamResourceId: GetAnalyticsFunction
+  GetSettlementsAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-get-settlements-analytics
+      CodeUri: GetSettlementsAnalyticsFunction
+      Handler: get-settlements-analytics.lambda_handler
+      Description: Get settlement analytics from enriched trades-v2 table
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Layers:
+      - Ref: SharedCodeLayer
+      Environment:
+        Variables:
+          TRADES_TABLE: production-kalshi-trades-v2
+          MARKET_METADATA_TABLE: production-kalshi-market-metadata
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-trades-v2
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-market-metadata
+      - Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:Query
+          Resource:
+          - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-trades-v2/index/*
+      Events:
+        GetSettlementsAnalytics:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /analytics/settlements
+            Method: GET
+    Metadata:
+      SamResourceId: GetSettlementsAnalyticsFunction
   TradingStatusFunction:
     Type: AWS::Serverless::Function
     Properties:

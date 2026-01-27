@@ -10,6 +10,11 @@ Returns data for:
 1. Trade-to-settlement table with individual trade outcomes
 2. Weekly position changes
 3. Aggregations by idea, category, price bucket
+
+Category resolution:
+1. First try DynamoDB market-metadata table (cached during TIS sync)
+2. Fall back to Kalshi API: GET /markets/{ticker} -> event_ticker -> GET /events/{event_ticker} -> category
+3. Last resort: prefix-based category inference
 """
 
 import json
@@ -19,11 +24,20 @@ from typing import Dict, List, Any, Optional
 import os
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
+import urllib.request
+import urllib.error
 
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 trades_table = dynamodb.Table(os.environ.get('TRADES_TABLE', 'production-kalshi-trades-v2'))
 market_metadata_table = dynamodb.Table(os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'))
 secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
+
+# Kalshi API base URL (public, no auth needed for market/event data)
+KALSHI_API_BASE = 'https://api.elections.kalshi.com/trade-api/v2'
+
+# Module-level caches (persist across Lambda invocations in warm containers)
+_event_ticker_cache: Dict[str, str] = {}  # market_ticker -> event_ticker
+_category_cache: Dict[str, str] = {}  # event_ticker -> category
 
 
 class DecimalEncoder(json.JSONEncoder):
@@ -32,6 +46,81 @@ class DecimalEncoder(json.JSONEncoder):
         if isinstance(obj, Decimal):
             return float(obj)
         return super(DecimalEncoder, self).default(obj)
+
+
+def fetch_market_from_api(market_ticker: str) -> Optional[Dict]:
+    """Fetch market data from Kalshi API to get event_ticker"""
+    try:
+        url = f"{KALSHI_API_BASE}/markets/{market_ticker}"
+        req = urllib.request.Request(url, headers={'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            return data.get('market')
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None  # Market not found (old/deleted)
+        print(f"HTTP error fetching market {market_ticker}: {e.code}")
+        return None
+    except Exception as e:
+        print(f"Error fetching market {market_ticker}: {e}")
+        return None
+
+
+def fetch_event_from_api(event_ticker: str) -> Optional[Dict]:
+    """Fetch event data from Kalshi API to get category"""
+    try:
+        url = f"{KALSHI_API_BASE}/events/{event_ticker}"
+        req = urllib.request.Request(url, headers={'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            return data.get('event')
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None  # Event not found
+        print(f"HTTP error fetching event {event_ticker}: {e.code}")
+        return None
+    except Exception as e:
+        print(f"Error fetching event {event_ticker}: {e}")
+        return None
+
+
+def get_category_from_api(market_ticker: str) -> Optional[str]:
+    """
+    Get category for a market by:
+    1. Fetching market to get event_ticker
+    2. Fetching event to get category
+    Uses caching to minimize API calls.
+    """
+    global _event_ticker_cache, _category_cache
+    
+    # Check if we already have the event_ticker cached
+    event_ticker = _event_ticker_cache.get(market_ticker)
+    
+    if not event_ticker:
+        # Fetch market to get event_ticker
+        market = fetch_market_from_api(market_ticker)
+        if not market:
+            return None
+        event_ticker = market.get('event_ticker')
+        if not event_ticker:
+            return None
+        _event_ticker_cache[market_ticker] = event_ticker
+    
+    # Check if we already have the category for this event
+    if event_ticker in _category_cache:
+        return _category_cache[event_ticker]
+    
+    # Fetch event to get category
+    event = fetch_event_from_api(event_ticker)
+    if not event:
+        return None
+    
+    category = event.get('category')
+    if category:
+        _category_cache[event_ticker] = category
+        return category
+    
+    return None
 
 
 def get_category_from_ticker(ticker: str) -> str:
@@ -130,14 +219,20 @@ def get_category_from_ticker(ticker: str) -> str:
 
 
 def batch_get_categories(tickers: List[str]) -> Dict[str, str]:
-    """Get categories for a list of tickers using BatchGetItem"""
+    """
+    Get categories for a list of tickers using a multi-tier approach:
+    1. First try DynamoDB market-metadata table (fastest)
+    2. For missing tickers, try Kalshi API (market -> event -> category)
+    3. Last resort: prefix-based inference
+    """
     if not tickers:
         return {}
         
     unique_tickers = list(set(tickers))
     ticker_map = {}
+    missing_tickers = []
     
-    # Process in batches of 100 (DynamoDB limit)
+    # Step 1: Try DynamoDB market-metadata table first
     for i in range(0, len(unique_tickers), 100):
         batch = unique_tickers[i:i+100]
         keys = [{'market_ticker': t} for t in batch]
@@ -152,6 +247,7 @@ def batch_get_categories(tickers: List[str]) -> Dict[str, str]:
                 }
             )
             
+            found_in_batch = set()
             for item in response.get('Responses', {}).get(market_metadata_table.name, []):
                 ticker = item['market_ticker']
                 category = item.get('category', '').strip()
@@ -159,14 +255,42 @@ def batch_get_categories(tickers: List[str]) -> Dict[str, str]:
                 # Skip invalid categories (series tickers stored incorrectly)
                 if category and not category.lower().startswith('kx'):
                     ticker_map[ticker] = category.title()
+                    found_in_batch.add(ticker)
+                    
+            # Track tickers not found in DynamoDB
+            for t in batch:
+                if t not in found_in_batch:
+                    missing_tickers.append(t)
                     
         except Exception as e:
             print(f"Error batch getting metadata: {e}")
+            missing_tickers.extend(batch)
+    
+    # Step 2: For missing tickers, try Kalshi API
+    # Limit API calls to avoid timeout (Lambda has 30s timeout by default)
+    api_call_limit = 50  # Max number of market API calls
+    api_calls_made = 0
+    
+    for ticker in missing_tickers:
+        if api_calls_made >= api_call_limit:
+            break
             
-    # Fill in missing categories from ticker prefix
+        category = get_category_from_api(ticker)
+        api_calls_made += 1
+        
+        if category:
+            ticker_map[ticker] = category.title()
+            
+    # Step 3: Fill in any still-missing categories from ticker prefix
     for ticker in unique_tickers:
         if ticker not in ticker_map:
             ticker_map[ticker] = get_category_from_ticker(ticker)
+            
+    # Log stats for monitoring
+    from_dynamo = len(unique_tickers) - len(missing_tickers)
+    from_api = sum(1 for t in missing_tickers if t in ticker_map)
+    from_prefix = len(unique_tickers) - from_dynamo - from_api
+    print(f"Category resolution: {from_dynamo} from DynamoDB, {from_api} from API, {from_prefix} from prefix")
             
     return ticker_map
 

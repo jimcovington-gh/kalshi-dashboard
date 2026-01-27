@@ -1014,10 +1014,16 @@ export default function QuickBetsPage() {
                 <>
                   {teams.map((team, idx) => {
                     // Determine score for this team based on home/away mapping
+                    // Use flexible matching: exact match, or team name includes/is included by button text
                     let teamScore: number | undefined;
-                    if (gameState.home_team?.toUpperCase() === team.toUpperCase()) {
+                    const teamUpper = team.toUpperCase();
+                    const homeUpper = gameState.home_team?.toUpperCase();
+                    const awayUpper = gameState.away_team?.toUpperCase();
+                    const isHomeMatch = homeUpper && (homeUpper === teamUpper || homeUpper.includes(teamUpper) || teamUpper.includes(homeUpper));
+                    const isAwayMatch = awayUpper && (awayUpper === teamUpper || awayUpper.includes(teamUpper) || teamUpper.includes(awayUpper));
+                    if (isHomeMatch) {
                       teamScore = gameState.home_points;
-                    } else if (gameState.away_team?.toUpperCase() === team.toUpperCase()) {
+                    } else if (isAwayMatch) {
                       teamScore = gameState.away_points;
                     }
                     
@@ -1027,13 +1033,12 @@ export default function QuickBetsPage() {
                     if (poss) {
                       if (poss.length > 10) {
                         // It's a team ID - check against home/away team IDs
-                        const isHome = gameState.home_team?.toUpperCase() === team.toUpperCase();
-                        const isAway = gameState.away_team?.toUpperCase() === team.toUpperCase();
-                        hasPossession = (isHome && gameState.home_team_id === poss) || 
-                                       (isAway && gameState.away_team_id === poss);
+                        hasPossession = !!(isHomeMatch && gameState.home_team_id === poss) || 
+                                       !!(isAwayMatch && gameState.away_team_id === poss);
                       } else {
-                        // It's an abbreviation
-                        hasPossession = poss.toUpperCase() === team.toUpperCase();
+                        // It's an abbreviation - use flexible matching
+                        const possUpper = poss.toUpperCase();
+                        hasPossession = possUpper === teamUpper || possUpper.includes(teamUpper) || teamUpper.includes(possUpper);
                       }
                     }
                     
@@ -1092,7 +1097,7 @@ export default function QuickBetsPage() {
                           {/* Buy Button - Team + Score (with possession icon if applicable) */}
                           <button
                             onClick={() => sendBuy(team)}
-                            className={`w-full py-8 text-xl font-bold uppercase tracking-wider rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] mb-2 ${textColor}`}
+                            className={`w-full py-8 text-xl font-bold uppercase tracking-wider rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] mb-2 border border-white/50 ${textColor}`}
                             style={{ backgroundColor: teamColor === 'transparent' ? undefined : teamColor }}
                           >
                             {hasPossession && '🏈 '}{team.toUpperCase()}{teamScore !== undefined ? ` ${teamScore}` : ''}

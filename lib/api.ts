@@ -129,21 +129,34 @@ export interface SettlementsResponse {
   user: string;
   period: string;
   total_trades: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
   summary: SettlementSummary;
   trades: SettledTrade[];
-  grouped?: Record<string, GroupedStats>;
+  grouped?: {
+    byCategory?: Record<string, GroupedStats>;
+    byIdea?: Record<string, GroupedStats>;
+    byPriceBucket?: Record<string, GroupedStats>;
+  };
 }
 
 export async function getSettlements(
   userName?: string,
   period: string = '30d',
-  groupBy?: 'idea' | 'category' | 'price_bucket'
+  groupBy?: 'idea' | 'category' | 'price_bucket',
+  page: number = 1,
+  pageSize: number = 100
 ): Promise<SettlementsResponse> {
   try {
     const session = await fetchAuthSession();
     const token = session.tokens?.idToken?.toString();
 
-    const params: Record<string, string> = { period };
+    const params: Record<string, string> = { 
+      period,
+      page: page.toString(),
+      page_size: pageSize.toString()
+    };
     if (userName) {
       params.user_name = userName;
     }

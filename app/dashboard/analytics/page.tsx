@@ -10,6 +10,7 @@ export default function AnalyticsPage() {
   const [selectedUser, setSelectedUser] = useState<string>('');
   const [period, setPeriod] = useState<string>('30d');
   const [groupBy, setGroupBy] = useState<'idea' | 'category' | 'price_bucket' | ''>('category');
+  const [page, setPage] = useState<number>(1);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingSettlements, setIsLoadingSettlements] = useState(true);
   const [error, setError] = useState('');
@@ -24,7 +25,12 @@ export default function AnalyticsPage() {
     if (selectedUser) {
       loadSettlementsData();
     }
-  }, [selectedUser, period, groupBy]); // Reload settlements when user/period/groupBy changes
+  }, [selectedUser, period, groupBy, page]); // Reload settlements when user/period/groupBy/page changes
+
+  // Reset page when period or groupBy changes
+  useEffect(() => {
+    setPage(1);
+  }, [selectedUser, period]);
 
   async function loadPortfolioData() {
     setIsLoading(true);
@@ -63,7 +69,9 @@ export default function AnalyticsPage() {
       const data = await getSettlements(
         selectedUser,
         period,
-        groupBy || undefined
+        groupBy || undefined,
+        page,
+        100  // page size
       );
       setSettlementsData(data);
     } catch (err: any) {
@@ -143,6 +151,11 @@ export default function AnalyticsPage() {
               onGroupByChange={setGroupBy}
               isLoading={isLoadingSettlements}
               userName={selectedUser}
+              totalTrades={settlementsData?.total_trades || 0}
+              page={settlementsData?.page || 1}
+              pageSize={settlementsData?.page_size || 100}
+              totalPages={settlementsData?.total_pages || 0}
+              onPageChange={setPage}
             />
           </div>
         </>

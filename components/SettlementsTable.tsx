@@ -7,11 +7,21 @@ import { format } from 'date-fns';
 interface SettlementsTableProps {
   trades: SettledTrade[];
   summary: SettlementSummary;
-  grouped?: Record<string, GroupedStats>;
+  grouped?: {
+    byCategory?: Record<string, GroupedStats>;
+    byIdea?: Record<string, GroupedStats>;
+    byPriceBucket?: Record<string, GroupedStats>;
+  };
   groupBy: 'idea' | 'category' | 'price_bucket' | '';
   onGroupByChange: (groupBy: 'idea' | 'category' | 'price_bucket' | '') => void;
   isLoading: boolean;
   userName?: string;
+  // Pagination
+  totalTrades: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
 }
 
 function formatCurrency(value: number): string {
@@ -52,7 +62,12 @@ export default function SettlementsTable({
   groupBy,
   onGroupByChange,
   isLoading,
-  userName
+  userName,
+  totalTrades,
+  page,
+  pageSize,
+  totalPages,
+  onPageChange
 }: SettlementsTableProps) {
   const [showDetails, setShowDetails] = useState(false);
 
@@ -92,7 +107,14 @@ export default function SettlementsTable({
   const GroupedTable = () => {
     if (!grouped) return null;
     
-    const sortedGroups = Object.entries(grouped)
+    // Get the right grouped data based on groupBy selection
+    const groupedData = groupBy === 'category' ? grouped.byCategory :
+                        groupBy === 'idea' ? grouped.byIdea :
+                        groupBy === 'price_bucket' ? grouped.byPriceBucket : null;
+    
+    if (!groupedData) return null;
+    
+    const sortedGroups = Object.entries(groupedData)
       .sort((a, b) => b[1].profit - a[1].profit);
 
     return (
@@ -225,8 +247,29 @@ export default function SettlementsTable({
         </table>
       </div>
       {trades.length > 100 && (
-        <div className="px-4 py-3 bg-gray-50 text-sm text-gray-500 text-center">
-          Showing 100 of {trades.length} trades
+        <div className="px-4 py-3 bg-gray-50 text-sm text-gray-500 flex justify-between items-center">
+          <span>Showing {((page - 1) * pageSize) + 1}-{Math.min(page * pageSize, totalTrades)} of {totalTrades} trades</span>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onPageChange(page - 1)}
+                disabled={page <= 1}
+                className="px-3 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ← Prev
+              </button>
+              <span className="text-sm">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                onClick={() => onPageChange(page + 1)}
+                disabled={page >= totalPages}
+                className="px-3 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next →
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

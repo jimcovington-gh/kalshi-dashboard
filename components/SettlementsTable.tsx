@@ -80,9 +80,9 @@ export default function SettlementsTable({
         </div>
       </div>
       <div className="bg-white rounded-lg shadow p-4">
-        <div className="text-sm text-gray-500">Total Invested</div>
-        <div className="text-2xl font-bold text-gray-900">
-          ${summary.total_cost.toFixed(2)}
+        <div className="text-sm text-gray-500">Return %</div>
+        <div className={`text-2xl font-bold ${summary.total_cost > 0 ? (summary.total_profit / summary.total_cost * 100) >= 0 ? 'text-green-600' : 'text-red-600' : 'text-gray-900'}`}>
+          {summary.total_cost > 0 ? `${(summary.total_profit / summary.total_cost * 100).toFixed(1)}%` : '-'}
         </div>
       </div>
     </div>

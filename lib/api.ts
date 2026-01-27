@@ -87,6 +87,92 @@ export interface AnalyticsResponse {
   categories: CategoryStat[];
 }
 
+// Settlement Analytics Types
+export interface SettledTrade {
+  order_id: string;
+  market_ticker: string;
+  idea_name: string;
+  category: string;
+  placed_at: number;
+  settlement_time: number;
+  won: boolean;
+  side: 'yes' | 'no';
+  count: number;
+  purchase_price: number;
+  settlement_price: number;
+  total_cost: number;
+  total_return: number;
+  profit: number;
+  duration_hours: number;
+}
+
+export interface SettlementSummary {
+  total_profit: number;
+  win_rate: number;
+  wins: number;
+  losses: number;
+  total_cost: number;
+  total_return: number;
+}
+
+export interface GroupedStats {
+  trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  total_cost: number;
+  total_return: number;
+  profit: number;
+}
+
+export interface SettlementsResponse {
+  user: string;
+  period: string;
+  total_trades: number;
+  summary: SettlementSummary;
+  trades: SettledTrade[];
+  grouped?: Record<string, GroupedStats>;
+}
+
+export async function getSettlements(
+  userName?: string,
+  period: string = '30d',
+  groupBy?: 'idea' | 'category' | 'price_bucket'
+): Promise<SettlementsResponse> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const params: Record<string, string> = { period };
+    if (userName) {
+      params.user_name = userName;
+    }
+    if (groupBy) {
+      params.group_by = groupBy;
+    }
+
+    const queryString = new URLSearchParams(params).toString();
+    
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: `/analytics/settlements?${queryString}`,
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as unknown as SettlementsResponse;
+  } catch (error) {
+    console.error('Error fetching settlements:', error);
+    throw error;
+  }
+}
+
 export async function getTrades(ticker: string, userName?: string): Promise<{
   ticker: string;
   user: string;

@@ -1,42 +1,36 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getPortfolio, Portfolio } from '@/lib/api';
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer
-} from 'recharts';
-import { format } from 'date-fns';
+import { getPortfolio, getSettlements, Portfolio, SettlementsResponse } from '@/lib/api';
+import SettlementsTable from '@/components/SettlementsTable';
+import WeeklyPositionTable from '@/components/WeeklyPositionTable';
 
 export default function AnalyticsPage() {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [selectedUser, setSelectedUser] = useState<string>('');
-  const [period, setPeriod] = useState<string>('24h');
+  const [period, setPeriod] = useState<string>('30d');
+  const [groupBy, setGroupBy] = useState<'idea' | 'category' | 'price_bucket' | ''>('category');
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingSettlements, setIsLoadingSettlements] = useState(true);
   const [error, setError] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
+  const [settlementsData, setSettlementsData] = useState<SettlementsResponse | null>(null);
 
   useEffect(() => {
-    loadData();
-  }, [period]); // Only reload when period changes, not when user selection changes
+    loadPortfolioData();
+  }, []); // Load portfolio once on mount
 
-  async function loadData() {
+  useEffect(() => {
+    if (selectedUser) {
+      loadSettlementsData();
+    }
+  }, [selectedUser, period, groupBy]); // Reload settlements when user/period/groupBy changes
+
+  async function loadPortfolioData() {
     setIsLoading(true);
     try {
-      // 1. Fetch Portfolio History - don't pass selectedUser to get all portfolios for admins
-      const portfolioData = await getPortfolio(undefined, true, period);
-      
-      console.log('Portfolio API Response:', { 
-        is_admin_view: portfolioData.is_admin_view,
-        portfolios_count: portfolioData.portfolios?.length,
-        portfolio_count: portfolioData.portfolio ? 1 : 0,
-        portfolio_usernames: portfolioData.portfolios?.map(p => p.user_name)
-      });
+      // Fetch Portfolio History - don't pass selectedUser to get all portfolios for admins
+      const portfolioData = await getPortfolio(undefined, true, '30d');
       
       let loadedPortfolios: Portfolio[] = [];
       const adminView = portfolioData.is_admin_view;
@@ -48,48 +42,40 @@ export default function AnalyticsPage() {
         loadedPortfolios = [portfolioData.portfolio];
       }
       
-      console.log('Setting portfolios state:', loadedPortfolios.map(p => p.user_name));
       setPortfolios(loadedPortfolios);
       
-      // Only set initial user if we don't have one selected yet
+      // Set initial user if not selected
       if (!selectedUser && loadedPortfolios.length > 0) {
         setSelectedUser(loadedPortfolios[0].user_name);
       }
       
     } catch (err: any) {
-      console.error('Error loading analytics:', err);
-      setError(err.message || 'Failed to load analytics data');
+      console.error('Error loading portfolio:', err);
+      setError(err.message || 'Failed to load portfolio data');
     } finally {
       setIsLoading(false);
     }
   }
 
+  async function loadSettlementsData() {
+    setIsLoadingSettlements(true);
+    try {
+      const data = await getSettlements(
+        selectedUser,
+        period,
+        groupBy || undefined
+      );
+      setSettlementsData(data);
+    } catch (err: any) {
+      console.error('Error loading settlements:', err);
+      // Don't set main error, just log it
+    } finally {
+      setIsLoadingSettlements(false);
+    }
+  }
+
   const currentPortfolio = portfolios.find(p => p.user_name === selectedUser);
   const historyData = currentPortfolio?.history || [];
-
-  // Format data for chart - values are already in dollars
-  const chartData = historyData.map(item => ({
-    timestamp: item.snapshot_ts,
-    date: new Date(Number(item.snapshot_ts)),
-    value: Number(item.total_value),
-    cash: Number(item.cash),
-    invested: Number(item.total_value) - Number(item.cash)
-  }));
-
-  const formatXAxis = (tickItem: number) => {
-    const date = new Date(tickItem);
-    if (period === '24h') return format(date, 'HH:mm');
-    if (period === '7d') return format(date, 'MMM dd');
-    return format(date, 'MMM dd');
-  };
-
-  const formatTooltipDate = (timestamp: number) => {
-    return format(new Date(timestamp), 'MMM dd, yyyy HH:mm');
-  };
-
-  const formatCurrency = (value: number) => {
-    return `$${value.toFixed(2)}`;
-  };
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -112,7 +98,7 @@ export default function AnalyticsPage() {
 
           {/* Period Selector */}
           <div className="flex rounded-md shadow-sm" role="group">
-            {['24h', '7d', '30d', 'all'].map((p) => (
+            {['7d', '30d', '90d', 'all'].map((p) => (
               <button
                 key={p}
                 type="button"
@@ -122,7 +108,7 @@ export default function AnalyticsPage() {
                     ? 'bg-blue-600 text-white border-blue-600'
                     : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                 } ${
-                  p === '24h' ? 'rounded-l-lg' : ''
+                  p === '7d' ? 'rounded-l-lg' : ''
                 } ${
                   p === 'all' ? 'rounded-r-lg' : ''
                 } -ml-px first:ml-0 focus:z-10 focus:ring-2 focus:ring-blue-500 focus:text-blue-700`}
@@ -134,77 +120,29 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      {isLoading && !currentPortfolio ? (
-        <div className="h-96 flex items-center justify-center bg-white rounded-lg shadow">
-          <div className="text-gray-500">Loading chart data...</div>
-        </div>
-      ) : error ? (
+      {error ? (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
           {error}
         </div>
       ) : (
         <>
-          {/* Equity Curve */}
-          <div className="bg-white rounded-lg shadow p-4 md:p-6">
-            <div className="mb-6">
-              <h2 className="text-lg font-medium text-gray-900">Equity Curve</h2>
-              {chartData.length > 0 && (
-                <div className="mt-1 flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-gray-900">
-                    {formatCurrency(chartData[chartData.length - 1].value)}
-                  </span>
-                  <span className={`text-sm font-medium ${
-                    chartData[chartData.length - 1].value >= chartData[0].value 
-                      ? 'text-green-600' 
-                      : 'text-red-600'
-                  }`}>
-                    {chartData[chartData.length - 1].value >= chartData[0].value ? '+' : ''}
-                    {((chartData[chartData.length - 1].value - chartData[0].value) / chartData[0].value * 100).toFixed(2)}%
-                  </span>
-                  <span className="text-sm text-gray-500">vs start of period</span>
-                </div>
-              )}
-            </div>
+          {/* Weekly Position Table */}
+          <WeeklyPositionTable
+            history={historyData}
+            isLoading={isLoading}
+          />
 
-            <div className="h-[300px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={chartData}
-                  margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                >
-                  <defs>
-                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis 
-                    dataKey="timestamp" 
-                    tickFormatter={formatXAxis}
-                    type="number"
-                    domain={['dataMin', 'dataMax']}
-                    minTickGap={50}
-                  />
-                  <YAxis 
-                    domain={['auto', 'auto']}
-                    tickFormatter={(val) => `$${val}`}
-                  />
-                  <Tooltip 
-                    labelFormatter={formatTooltipDate}
-                    formatter={(value: number) => [formatCurrency(value), 'Portfolio Value']}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="value"
-                    stroke="#2563eb"
-                    fillOpacity={1}
-                    fill="url(#colorValue)"
-                    strokeWidth={2}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+          {/* Settlements Table */}
+          <div className="mt-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Trades to Settlement</h2>
+            <SettlementsTable
+              trades={settlementsData?.trades || []}
+              summary={settlementsData?.summary || { total_profit: 0, win_rate: 0, wins: 0, losses: 0, total_cost: 0, total_return: 0 }}
+              grouped={settlementsData?.grouped}
+              groupBy={groupBy}
+              onGroupByChange={setGroupBy}
+              isLoading={isLoadingSettlements}
+            />
           </div>
         </>
       )}

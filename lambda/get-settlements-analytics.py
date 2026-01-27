@@ -36,37 +36,89 @@ class DecimalEncoder(json.JSONEncoder):
 
 def get_category_from_ticker(ticker: str) -> str:
     """Derive category from ticker prefix"""
-    # Common ticker prefixes
+    # Common ticker prefixes - order matters (longer prefixes first for proper matching)
     prefix_map = {
+        # Sports - specific mention markets
+        'KXNBAMENTION': 'NBA',
+        'KXNFLMENTION': 'NFL',
+        'KXNFLPREPACK': 'NFL',
+        'KXSNFMENTION': 'NFL',  # Sunday Night Football
+        'KXTNFMENTION': 'NFL',  # Thursday Night Football
+        'KXNCAAMENTION': 'NCAAB',
+        'KXCFBMENTION': 'NCAAF',
+        # Sports - general
         'KXNBA': 'NBA',
         'KXNFL': 'NFL', 
         'KXNHL': 'NHL',
         'KXMLB': 'MLB',
-        'KXNCAAMB': 'NCAAMB',
-        'KXNCAAFB': 'NCAAFB',
+        'KXNCAAMB': 'NCAAB',
+        'KXNCAAFB': 'NCAAF',
         'KXSOC': 'Soccer',
         'KXPGA': 'Golf',
         'KXUFC': 'UFC',
         'KXMMA': 'MMA',
-        'KXECON': 'Economics',
-        'KXFED': 'Fed/Rates',
-        'KXCPI': 'Inflation',
-        'KXGDP': 'GDP',
-        'KXJOBS': 'Jobs',
+        # Weather/Temperature
+        'KXHIGHNY': 'Weather',
+        'KXHIGHPHIL': 'Weather',
+        'KXHIGHAUS': 'Weather',
+        'KXHIGHMIA': 'Weather',
+        'KXHIGHLAX': 'Weather',
+        'KXHIGHCHI': 'Weather',
+        'KXHIGH': 'Weather',
+        'KXLOW': 'Weather',
+        'KXRAIN': 'Weather',
+        'KXSNOW': 'Weather',
         'KXWEATHER': 'Weather',
         'KXTEMP': 'Weather',
+        # TV Shows & Entertainment
+        'KXDWTSMENTION': 'TV Shows',  # Dancing with the Stars
+        'KXSURVIVORMENTION': 'TV Shows',
+        'KXGAMEDAYMENTION': 'TV Shows',
+        'KXNETFLIXRANK': 'Entertainment',
+        'KXMRBEASTMENTION': 'Entertainment',
+        # Politics/Government
+        'KXTRUMPSAY': 'Politics',
+        'KXTRUMPMENTION': 'Politics',
+        'KXTRUMPMENTIONB': 'Politics',
+        'KXTRUMPSAYMONTH': 'Politics',
+        'KXTRUMPMEET': 'Politics',
+        'KXTRUMPPUTIN': 'Politics',
+        'KXBESSENTMTPMENTION': 'Politics',  # Bessent Meet the Press
+        'KXPOWELLMENTION': 'Politics',
+        'KXAPRPOTUS': 'Politics',  # Approval rating
         'KXELECTION': 'Politics',
         'KXPRES': 'Politics',
         'KXGOV': 'Politics',
         'KXCONGRESS': 'Politics',
         'KXSENATE': 'Politics',
         'KXHOUSE': 'Politics',
+        # Finance/Commentary
+        'KXARMSTRONGMENTION': 'Finance TV',  # Armstrong & Getty or similar
+        'KXBERNIEMENTION': 'Finance TV',
+        'KXZAKARIAMENTION': 'Finance TV',  # Fareed Zakaria
+        'KXFINKMENTION': 'Finance TV',  # Larry Fink
+        'KXKIMMELMENTION': 'Late Night',
+        # Central Banks
+        'KXCBDECISION': 'Central Banks',
+        'KXFED': 'Fed/Rates',
+        # Economics
+        'KXECON': 'Economics',
+        'KXCPI': 'Economics',
+        'KXGDP': 'Economics',
+        'KXJOBS': 'Economics',
+        # Crypto
         'KXCRYPTO': 'Crypto',
         'KXBTC': 'Crypto',
         'KXETH': 'Crypto',
+        # Stocks
         'KXSTOCK': 'Stocks',
         'KXSPY': 'Stocks',
         'KXQQQ': 'Stocks',
+        'KXINX': 'Stocks',
+        'KXTSAW': 'Stocks',  # Stock indices
+        # Movies
+        'KXRT': 'Movies',  # Rotten Tomatoes
+        # Generic fallback for any mention market
         'KXMENTION': 'Mentions',
     }
     

@@ -1,0 +1,51 @@
+version: 1
+backend:
+  phases:
+    build:
+      commands:
+        # Only deploy backend if AMPLIFY_DIFF_DEPLOY is not set or backend changed
+        - |
+          if [ "${AMPLIFY_DIFF_DEPLOY:-true}" = "true" ]; then
+            echo "Checking for backend changes..."
+            if git diff --name-only HEAD~1 HEAD | grep -q "^amplify/"; then
+              echo "Backend changes detected, deploying..."
+              npm ci --cache .npm --prefer-offline
+              npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
+            else
+              echo "No backend changes, skipping backend deploy"
+            fi
+          else
+            npm ci --cache .npm --prefer-offline
+            npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
+          fi
+frontend:
+  phases:
+    preBuild:
+      commands:
+        # Use cached node_modules if package-lock.json unchanged
+        - |
+          if [ -f .npm-cache-hash ] && [ "$(md5sum package-lock.json | cut -d' ' -f1)" = "$(cat .npm-cache-hash)" ]; then
+            echo "package-lock.json unchanged, using cached node_modules"
+          else
+            echo "Installing dependencies..."
+            npm ci --cache .npm --prefer-offline
+            md5sum package-lock.json | cut -d' ' -f1 > .npm-cache-hash
+          fi
+    build:
+      commands:
+        - echo "Building Next.js app..."
+        - npm run build
+  artifacts:
+    baseDirectory: .next
+    files:
+      - '**/*'
+  cache:
+    paths:
+      # Cache node_modules (HUGE time saver)
+      - node_modules/**/*
+      # Cache npm download cache
+      - .npm/**/*
+      # Cache Next.js build cache
+      - .next/cache/**/*
+      # Cache our hash file
+      - .npm-cache-hash

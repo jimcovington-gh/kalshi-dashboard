@@ -35,18 +35,26 @@ fi
 git status --short
 echo ""
 
-# Step 2: Run local build to catch TypeScript errors
-echo "Step 2: Running local build (TypeScript check)..."
-if ! npm run build > /tmp/dashboard-build.log 2>&1; then
-    echo -e "${RED}❌ Build failed! Fix errors before deploying:${NC}"
-    echo ""
-    # Extract and show the error
-    grep -A 10 "Type error\|Error:" /tmp/dashboard-build.log | head -20
-    echo ""
-    echo "Full log: /tmp/dashboard-build.log"
-    exit 1
+# Step 2: Run pre-deploy validation
+echo "Step 2: Running pre-deploy validation..."
+if [ -f scripts/validate-before-deploy.sh ]; then
+    if ! ./scripts/validate-before-deploy.sh; then
+        echo -e "${RED}❌ Validation failed! Fix issues before deploying.${NC}"
+        exit 1
+    fi
+else
+    # Fallback to just build check if script doesn't exist
+    echo "Running local build (TypeScript check)..."
+    if ! npm run build > /tmp/dashboard-build.log 2>&1; then
+        echo -e "${RED}❌ Build failed! Fix errors before deploying:${NC}"
+        echo ""
+        grep -A 10 "Type error\|Error:" /tmp/dashboard-build.log | head -20
+        echo ""
+        echo "Full log: /tmp/dashboard-build.log"
+        exit 1
+    fi
 fi
-echo -e "${GREEN}✅ Local build passed${NC}"
+echo -e "${GREEN}✅ Validation passed${NC}"
 echo ""
 
 # Step 2.5: Check Python syntax before SAM deploy

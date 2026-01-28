@@ -553,6 +553,10 @@ export default function VoiceTraderPage() {
           const data = JSON.parse(event.data);
           
           if (data.type === 'full_state') {
+            // DEBUG: Log words received
+            const triggeredWords = (data.words || []).filter((w: any) => w.triggered);
+            console.log('[FULL_STATE] words:', data.words?.length, 'triggered:', triggeredWords.length, triggeredWords.map((w: any) => w.market_ticker));
+            
             // Log status_message changes to System Log
             const newStatus = data.call?.status_message;
             // Compare with current containerState and log if different

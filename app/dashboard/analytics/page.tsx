@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getPortfolio, getSettlements, Portfolio, SettlementsResponse } from '@/lib/api';
+import { getPortfolio, getSettlements, Portfolio, SettlementsResponse, SettledTrade } from '@/lib/api';
 import SettlementsTable from '@/components/SettlementsTable';
 import WeeklyPositionTable from '@/components/WeeklyPositionTable';
+import LosingTradesTable from '@/components/LosingTradesTable';
 
 export default function AnalyticsPage() {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
@@ -13,9 +14,12 @@ export default function AnalyticsPage() {
   const [page, setPage] = useState<number>(1);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingSettlements, setIsLoadingSettlements] = useState(true);
+  const [isLoadingLosses, setIsLoadingLosses] = useState(true);
   const [error, setError] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [settlementsData, setSettlementsData] = useState<SettlementsResponse | null>(null);
+  const [losingTrades, setLosingTrades] = useState<SettledTrade[]>([]);
+  const [totalLoss, setTotalLoss] = useState<number>(0);
 
   useEffect(() => {
     loadPortfolioData();
@@ -24,6 +28,7 @@ export default function AnalyticsPage() {
   useEffect(() => {
     if (selectedUser) {
       loadSettlementsData();
+      loadLosingTrades();
     }
   }, [selectedUser, period, groupBy, page]); // Reload settlements when user/period/groupBy/page changes
 
@@ -71,7 +76,8 @@ export default function AnalyticsPage() {
         period,
         groupBy || undefined,
         page,
-        100  // page size
+        100,  // page size
+        false // not losses only
       );
       setSettlementsData(data);
     } catch (err: any) {
@@ -79,6 +85,27 @@ export default function AnalyticsPage() {
       // Don't set main error, just log it
     } finally {
       setIsLoadingSettlements(false);
+    }
+  }
+
+  async function loadLosingTrades() {
+    setIsLoadingLosses(true);
+    try {
+      // Always fetch last 30 days of losses regardless of period selector
+      const data = await getSettlements(
+        selectedUser,
+        '30d',
+        undefined,
+        1,
+        500,  // Get up to 500 losing trades
+        true  // losses only
+      );
+      setLosingTrades(data.trades || []);
+      setTotalLoss(data.summary?.total_profit || 0);
+    } catch (err: any) {
+      console.error('Error loading losing trades:', err);
+    } finally {
+      setIsLoadingLosses(false);
     }
   }
 
@@ -140,9 +167,20 @@ export default function AnalyticsPage() {
             isLoading={isLoading}
           />
 
+          {/* Losing Trades Table - Last 30 Days */}
+          <div className="mt-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Losing Trades (Last 30 Days)</h2>
+            <LosingTradesTable
+              trades={losingTrades}
+              totalLoss={totalLoss}
+              isLoading={isLoadingLosses}
+              userName={selectedUser}
+            />
+          </div>
+
           {/* Settlements Table */}
           <div className="mt-6">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Trades to Settlement</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-4">All Trades to Settlement</h2>
             <SettlementsTable
               trades={settlementsData?.trades || []}
               summary={settlementsData?.summary || { total_profit: 0, win_rate: 0, wins: 0, losses: 0, total_cost: 0, total_return: 0 }}

@@ -206,6 +206,7 @@ def lambda_handler(event, context):
     - group_by: idea, category, price_bucket (for grouped stats)
     - page: Page number (1-indexed, default 1)
     - page_size: Items per page (default 100, max 500)
+    - losses_only: true/false - filter to only losing trades (default false)
     """
     
     try:
@@ -213,6 +214,7 @@ def lambda_handler(event, context):
         requested_user = params.get('user_name', params.get('user', '')).strip()
         period = params.get('period', params.get('days', '30d'))
         group_by = params.get('group_by', '')
+        losses_only = params.get('losses_only', '').lower() == 'true'
         
         # Pagination params
         page = max(1, int(params.get('page', 1)))
@@ -290,7 +292,11 @@ def lambda_handler(event, context):
         # Sort by settlement time descending (most recent first)
         all_processed.sort(key=lambda x: x['settlement_time'], reverse=True)
         
-        # Calculate summary on ALL trades
+        # Filter for losses only if requested
+        if losses_only:
+            all_processed = [t for t in all_processed if not t['won']]
+        
+        # Calculate summary on filtered trades
         total_profit = sum(t['profit'] for t in all_processed)
         wins = sum(1 for t in all_processed if t['won'])
         losses = len(all_processed) - wins
@@ -307,12 +313,14 @@ def lambda_handler(event, context):
             'return_pct': round((total_profit / total_cost * 100), 1) if total_cost > 0 else 0
         }
         
-        # Group stats on ALL trades
-        grouped_data = {
-            'byCategory': aggregate_trades(all_processed, 'category'),
-            'byIdea': aggregate_trades(all_processed, 'idea'),
-            'byPriceBucket': aggregate_trades(all_processed, 'price_bucket')
-        }
+        # Group stats on filtered trades (skip if losses_only - not useful)
+        grouped_data = None
+        if not losses_only:
+            grouped_data = {
+                'byCategory': aggregate_trades(all_processed, 'category'),
+                'byIdea': aggregate_trades(all_processed, 'idea'),
+                'byPriceBucket': aggregate_trades(all_processed, 'price_bucket')
+            }
         
         # Pagination - slice for response
         total_trades = len(all_processed)
@@ -320,6 +328,20 @@ def lambda_handler(event, context):
         start_idx = (page - 1) * page_size
         end_idx = start_idx + page_size
         trades_page = all_processed[start_idx:end_idx]
+        
+        response_body = {
+            'user': target_user,
+            'period': period,
+            'total_trades': total_trades,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+            'summary': summary,
+            'trades': trades_page,
+        }
+        
+        if grouped_data:
+            response_body['grouped'] = grouped_data
         
         return {
             'statusCode': 200,
@@ -329,17 +351,7 @@ def lambda_handler(event, context):
                 'Access-Control-Allow-Headers': 'Content-Type,Authorization',
                 'Access-Control-Allow-Methods': 'GET,OPTIONS'
             },
-            'body': json.dumps({
-                'user': target_user,
-                'period': period,
-                'total_trades': total_trades,
-                'page': page,
-                'page_size': page_size,
-                'total_pages': total_pages,
-                'summary': summary,
-                'trades': trades_page,
-                'grouped': grouped_data
-            }, cls=DecimalEncoder)
+            'body': json.dumps(response_body, cls=DecimalEncoder)
         }
         
     except Exception as e:

@@ -1173,13 +1173,17 @@ export default function VoiceTraderDevPage() {
   }, [pageState]);
 
   const handleStop = async () => {
-    // Don't check sessionId - EC2 knows which call to hang up
+    if (!sessionId) {
+      setError('No active session to stop');
+      return;
+    }
+    
     try {
-      console.log('Sending hangup to EC2...');
-      const response = await fetch(`${EC2_BASE}/hangup`, {
+      console.log('Stopping session:', sessionId);
+      const response = await fetch(`${EC2_BASE}/stop/${encodeURIComponent(sessionId)}`, {
         method: 'POST'
       });
-      console.log('Hangup response:', response.status);
+      console.log('Stop response:', response.status);
       
       // Go back to lobby
       setPageState('events');

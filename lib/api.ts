@@ -146,7 +146,8 @@ export async function getSettlements(
   period: string = '30d',
   groupBy?: 'idea' | 'category' | 'price_bucket',
   page: number = 1,
-  pageSize: number = 100
+  pageSize: number = 100,
+  lossesOnly: boolean = false
 ): Promise<SettlementsResponse> {
   try {
     const session = await fetchAuthSession();
@@ -162,6 +163,9 @@ export async function getSettlements(
     }
     if (groupBy) {
       params.group_by = groupBy;
+    }
+    if (lossesOnly) {
+      params.losses_only = 'true';
     }
 
     const queryString = new URLSearchParams(params).toString();

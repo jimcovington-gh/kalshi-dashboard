@@ -352,8 +352,13 @@ export default function VoiceTraderPage() {
     
     async function fetchRunningContainers() {
       // Get status directly from EC2
+      // Use short timeout (3s) to fail fast when EC2 is down
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
       try {
-        const response = await fetch(`${EC2_BASE}/status`);
+        const response = await fetch(`${EC2_BASE}/status`, { signal: controller.signal });
+        clearTimeout(timeoutId);
         
         if (response.ok) {
           const data = await response.json();
@@ -381,8 +386,13 @@ export default function VoiceTraderPage() {
 
     async function fetchEC2Status() {
       // Check if EC2 is responding by hitting health endpoint
+      // Use short timeout (3s) to fail fast when EC2 is down
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
       try {
-        const response = await fetch(`${EC2_BASE}/health`);
+        const response = await fetch(`${EC2_BASE}/health`, { signal: controller.signal });
+        clearTimeout(timeoutId);
         
         if (response.ok) {
           const data = await response.json();
@@ -416,8 +426,13 @@ export default function VoiceTraderPage() {
 
     async function fetchRivaStatus() {
       // Only fetch Riva status if EC2 is running
+      // Use short timeout (3s) to fail fast when EC2 is down
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
       try {
-        const response = await fetch(`${EC2_BASE}/riva/status`);
+        const response = await fetch(`${EC2_BASE}/riva/status`, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (response.ok) {
           const data = await response.json();
           setRivaStatus(data);
@@ -452,9 +467,12 @@ export default function VoiceTraderPage() {
         console.log('Lambda queue failed, falling back to EC2');
       }
       
-      // Fallback to EC2 direct
+      // Fallback to EC2 direct (with short timeout)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
       try {
-        const response = await fetch(`${EC2_BASE}/queue`);
+        const response = await fetch(`${EC2_BASE}/queue`, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (response.ok) {
           const data = await response.json();
           setQueuedEvents(data.events || []);
@@ -634,18 +652,11 @@ export default function VoiceTraderPage() {
                   }
                 : w
             ));
-            // Log to system log
+            // Log to system log - word was already said
             setSystemLog(prev => [...prev, {
               timestamp: Date.now() / 1000,
               message: `Word already said: ${data.market_ticker} (${data.reason})`,
               level: 'warning'
-            }]);
-            // Also log to system log
-            setSystemLog(prev => [...prev, {
-              timestamp: data.timestamp || Date.now() / 1000,
-              message: `Word triggered: ${data.word} (${data.market_ticker})`,
-              level: 'info',
-              details: data.status || 'pending'
             }]);
           } else if (data.type === 'event') {
             // Add event to system log (state changes, Q&A, etc.)
@@ -1344,6 +1355,19 @@ export default function VoiceTraderPage() {
     setLaunchStatus('Dialing...');
     setError(null);
     
+    // Clear state from any previous session
+    setWords([]);
+    setTranscript([]);
+    setSystemLog([]);
+    setContainerState(null);
+    setLastSpeakerId(null);
+    
+    // Close any existing WebSocket
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    
     try {
       // Call EC2 directly - no Lambda needed!
       const body: any = {
@@ -1514,17 +1538,32 @@ export default function VoiceTraderPage() {
     
     try {
       console.log('Stopping session:', sessionId);
+      
+      // Close WebSocket first
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      
       const response = await fetch(`${EC2_BASE}/stop/${encodeURIComponent(sessionId)}`, {
         method: 'POST'
       });
       console.log('Stop response:', response.status);
       
-      // Go back to lobby
+      // Clear all state and go back to lobby
       setPageState('events');
       setSelectedEvent(null);
       setSessionId(null);
       setContainerState(null);
+      setWsConnected(false);
+      setWsUrl(null);
+      setWords([]);
+      setTranscript([]);
+      setSystemLog([]);
+      setLastSpeakerId(null);
       setError(null);
+      setDialing(false);
+      setAudioActive(false);
     } catch (err) {
       console.error('Stop error:', err);
       setError('Failed to end call: ' + (err as Error).message);

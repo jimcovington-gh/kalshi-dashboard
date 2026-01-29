@@ -22,9 +22,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Local env files
+# Local env files (overrides for local dev only)
 .env*.local
-.env
+# Note: .env is COMMITTED - contains NEXT_PUBLIC_* vars (all public, safe to commit)
 
 # Vercel
 .vercel

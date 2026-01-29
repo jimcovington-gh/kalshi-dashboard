@@ -1,10 +1,26 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { fetchAuthSession, signOut } from 'aws-amplify/auth';
 import { isAdmin } from '@/lib/api';
 import Link from 'next/link';
+
+// Tab configuration - using full class names for Tailwind JIT compatibility
+const tabs = [
+  { href: '/dashboard', label: 'Positions', exact: true, 
+    base: 'text-gray-600', active: 'text-gray-900 border-blue-500' },
+  { href: '/dashboard/analytics', label: 'Analytics', 
+    base: 'text-gray-600', active: 'text-gray-900 border-blue-500' },
+  { href: '/dashboard/capture', label: 'Capture', 
+    base: 'text-purple-600', active: 'text-purple-700 border-purple-500' },
+  { href: '/dashboard/quickbets', label: 'InstaButton', 
+    base: 'text-green-600', active: 'text-green-700 border-green-500' },
+  { href: '/dashboard/voice-trader', label: '🎙️ Voice', 
+    base: 'text-orange-600', active: 'text-orange-700 border-orange-500' },
+  { href: '/dashboard/ai-chat', label: '🤖 AI', 
+    base: 'text-indigo-600', active: 'text-indigo-700 border-indigo-500' },
+];
 
 export default function DashboardLayout({
   children,
@@ -15,6 +31,7 @@ export default function DashboardLayout({
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     checkAuth();
@@ -55,63 +72,50 @@ export default function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Navigation */}
-      <nav className="bg-white shadow-sm border-b border-gray-200">
+      {/* Navigation - Tab Style */}
+      <nav className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
-          <div className="flex justify-between h-14 md:h-16">
-            <div className="flex items-center space-x-4 md:space-x-8">
-              <Link href="/dashboard" className="text-base md:text-xl font-bold text-blue-600">
-                📊 <span className="hidden sm:inline">Kalshi Dashboard</span>
+          <div className="flex justify-between h-12">
+            <div className="flex items-center">
+              <Link href="/dashboard" className="text-base font-bold text-blue-600 mr-4 md:mr-6 shrink-0">
+                📊 <span className="hidden sm:inline">Kalshi</span>
               </Link>
-              <div className="flex space-x-2 md:space-x-4">
-                <Link
-                  href="/dashboard"
-                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100"
-                >
-                  Positions
-                </Link>
-                <Link
-                  href="/dashboard/analytics"
-                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100"
-                >
-                  Analytics
-                </Link>
-                <Link
-                  href="/dashboard/capture"
-                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-purple-600 hover:text-purple-800 hover:bg-purple-50"
-                >
-                  Capture
-                </Link>
-                <Link
-                  href="/dashboard/quickbets"
-                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-green-600 hover:text-green-800 hover:bg-green-50"
-                >
-                  InstaButton
-                </Link>
-                <Link
-                  href="/dashboard/voice-trader"
-                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-orange-600 hover:text-orange-800 hover:bg-orange-50"
-                >
-                  🎙️ Voice
-                </Link>
-                <Link
-                  href="/dashboard/ai-chat"
-                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50"
-                >
-                  🤖 AI
-                </Link>
+              <div className="flex items-end h-full -mb-px overflow-x-auto">
+                {tabs.map((tab) => {
+                  const isActive = tab.exact 
+                    ? pathname === tab.href 
+                    : pathname.startsWith(tab.href);
+                  
+                  return (
+                    <Link
+                      key={tab.href}
+                      href={tab.href}
+                      className={`px-3 py-2 text-xs md:text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+                        isActive 
+                          ? tab.active 
+                          : `${tab.base} border-transparent hover:text-gray-900 hover:border-gray-300`
+                      }`}
+                    >
+                      {tab.label}
+                    </Link>
+                  );
+                })}
                 <a
                   href="https://voice.apexmarkets.us:8080/test"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-yellow-600 hover:text-yellow-800 hover:bg-yellow-50"
+                  className="px-3 py-2 text-xs md:text-sm font-medium text-yellow-600 border-b-2 border-transparent hover:text-yellow-800 hover:border-yellow-300 whitespace-nowrap"
                 >
-                  🧪 Test Bench
+                  🧪 Test
                 </a>
                 {isAdminUser && (
                   <Link
                     href="/dashboard/admin"
-                    className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                    className={`px-3 py-2 text-xs md:text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+                      pathname === '/dashboard/admin'
+                        ? 'text-blue-700 border-blue-500'
+                        : 'text-blue-600 border-transparent hover:text-blue-800 hover:border-blue-300'
+                    }`}
                   >
                     Control
                   </Link>
@@ -119,13 +123,13 @@ export default function DashboardLayout({
               </div>
             </div>
 
-            <div className="flex items-center space-x-2 md:space-x-4">
+            <div className="flex items-center space-x-2 md:space-x-4 shrink-0">
               <div className="text-xs md:text-sm text-gray-600">
                 <span className="hidden sm:inline">{user}</span>
               </div>
               <button
                 onClick={handleSignOut}
-                className="px-2 md:px-4 py-1.5 md:py-2 text-xs md:text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-md"
+                className="px-2 md:px-3 py-1 text-xs md:text-sm font-medium text-gray-500 hover:text-gray-700"
               >
                 <span className="hidden sm:inline">Sign Out</span>
                 <span className="sm:hidden">Exit</span>
@@ -136,7 +140,7 @@ export default function DashboardLayout({
       </nav>
 
       {/* Main content */}
-      <main className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 md:py-8">
+      <main className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 md:py-6">
         {children}
       </main>
     </div>

@@ -917,19 +917,23 @@ export async function sendAIChatMessageStreaming(
   onError: (error: string) => void
 ): Promise<void> {
   if (!AI_CHAT_FUNCTION_URL) {
-    onError('AI Chat Function URL not configured');
+    onError('AI Chat Function URL not configured. Check NEXT_PUBLIC_AI_CHAT_FUNCTION_URL environment variable.');
     return;
   }
 
   try {
     // Get IAM credentials from Cognito Identity Pool
-    const session = await fetchAuthSession();
+    // forceRefresh ensures we get fresh Identity Pool credentials
+    const session = await fetchAuthSession({ forceRefresh: true });
     const credentials = session.credentials;
     
     if (!credentials) {
-      onError('Failed to get IAM credentials');
+      console.error('No credentials in session:', session);
+      onError('Failed to get IAM credentials. Make sure you are logged in.');
       return;
     }
+
+    console.log('Got IAM credentials, signing request...');
 
     // Build request body
     const messagesPayload = messages.map(m => ({ role: m.role, content: m.content }));

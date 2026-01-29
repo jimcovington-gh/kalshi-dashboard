@@ -592,6 +592,108 @@ Resources:
             Method: GET
     Metadata:
       SamResourceId: VoiceTraderRouterFunction
+  AIChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-ai-chat
+      CodeUri: AIChatFunction
+      Handler: ai-chat.lambda_handler
+      Description: AI chat assistant with read-only access to trading data
+      Timeout: 300
+      MemorySize: 512
+      AutoPublishAlias: live
+      Layers:
+      - Ref: SharedCodeLayer
+      - Ref: PortfolioFetcherLayerArn
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - bedrock:InvokeModel
+          - bedrock:Converse
+          Resource:
+          - Fn::Sub: arn:aws:bedrock:${AWS::Region}::foundation-model/us.anthropic.claude-sonnet-4-5-20250514-v1:0
+          - Fn::Sub: arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-sonnet-4-5-20250514-v1:0
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-event-archive
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-event-metadata
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-market-metadata
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-mention-event-rotation
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-mention-event-state
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-mention-event-termination
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-mention-events
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-orderbook-snapshots
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-orders
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-portfolio-snapshots
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-positions-live
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-prohibited-events
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-quickbets-sessions
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-rate-limiter
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-rotation-state
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-series-metadata
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-traded-market-metadata
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-trades-v2
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-trading-shutdown-signals
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-voice-trader-queue
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-voice-trader-sessions
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-voice-trader-state
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-volatile-watchlist
+      - Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:Query
+          Resource:
+          - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-*/index/*
+      - S3ReadPolicy:
+          BucketName: production-kalshi-trading-config
+      - S3ReadPolicy:
+          BucketName: production-kalshi-trading-captures
+      - Statement:
+        - Effect: Allow
+          Action:
+          - secretsmanager:GetSecretValue
+          Resource:
+          - arn:aws:secretsmanager:us-east-1:355149669325:secret:production/kalshi/users/*
+      - Statement:
+        - Effect: Allow
+          Action:
+          - secretsmanager:ListSecrets
+          Resource: '*'
+      Events:
+        AIChat:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /ai-chat
+            Method: POST
+    Metadata:
+      SamResourceId: AIChatFunction
   VoiceTraderSchedulerFunction:
     Type: AWS::Serverless::Function
     Properties:

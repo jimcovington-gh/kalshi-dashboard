@@ -159,6 +159,8 @@ export default function VoiceTraderPage() {
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
   const [systemLog, setSystemLog] = useState<SystemLogEntry[]>([]);  // System log - never truncated
   const [lastSpeakerId, setLastSpeakerId] = useState<string | null>(null);  // Track speaker changes
+  const wsConnectedOnceRef = useRef<boolean>(false);  // Track if we've logged connection once
+  const lastLoggedStatusRef = useRef<string | null>(null);  // Prevent Strict Mode duplicate logs
   const [wsUrl, setWsUrl] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const systemLogRef = useRef<HTMLDivElement | null>(null);  // For auto-scroll  
@@ -171,6 +173,9 @@ export default function VoiceTraderPage() {
   // Jitter buffer: track next scheduled playback time for gapless audio
   const nextPlayTimeRef = useRef<number>(0);
   const JITTER_BUFFER_MS = 50; // Buffer 50ms before starting playback (low latency for operator conversation);
+  // Audio lag tracking
+  const [audioLagMs, setAudioLagMs] = useState<number>(0);
+  const audioLagUpdateRef = useRef<number>(0);
   // Audio chunk counter for debugging
   const audioChunkCountRef = useRef<number>(0);
   const audioChunkLogIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -528,12 +533,15 @@ export default function VoiceTraderPage() {
           setWsConnected(true);
           retryCount = 0;  // Reset retry count on success
           
-          // Log connection to system log
-          setSystemLog(prev => [...prev, {
-            timestamp: Date.now() / 1000,
-            message: 'Connected to Voice Trader',
-            level: 'info'
-          }]);
+          // Log connection to system log ONLY on first connect (not reconnects)
+          if (!wsConnectedOnceRef.current) {
+            wsConnectedOnceRef.current = true;
+            setSystemLog(prev => [...prev, {
+              timestamp: Date.now() / 1000,
+              message: 'Connected to Voice Trader',
+              level: 'info'
+            }]);
+          }
           
           // Request audio streaming
           ws?.send(JSON.stringify({ type: 'enable_audio_stream' }));
@@ -544,7 +552,7 @@ export default function VoiceTraderPage() {
         };
         
         ws.onmessage = (event) => {
-          // Handle binary audio data
+          // Handle binary audio data (always ArrayBuffer since we set ws.binaryType = 'arraybuffer')
           if (event.data instanceof ArrayBuffer) {
             playAudioChunk(event.data);
             return;
@@ -558,19 +566,26 @@ export default function VoiceTraderPage() {
             console.log('[FULL_STATE] words:', data.words?.length, 'triggered:', triggeredWords.length, triggeredWords.map((w: any) => w.market_ticker));
             
             // Log status_message changes to System Log
+            // NOTE: Must compare and log OUTSIDE setContainerState to avoid React Strict Mode
+            // double-invocation causing duplicate log entries (side effects in updaters run twice!)
             const newStatus = data.call?.status_message;
-            // Compare with current containerState and log if different
             setContainerState(prevState => {
+              // Log only if status actually changed (check inside updater for accurate prev value)
+              // But use a ref to ensure we only log once even with Strict Mode double-invoke
               if (newStatus && newStatus !== prevState?.status_message) {
-                // Use setTimeout to avoid calling setState during another setState
-                setTimeout(() => {
-                  setSystemLog(prev => [...prev, {
-                    timestamp: Date.now() / 1000,
-                    message: newStatus,
-                    level: newStatus.toLowerCase().includes('error') ? 'error' : 
-                           newStatus.toLowerCase().includes('wait') ? 'warning' : 'info'
-                  }]);
-                }, 0);
+                // Check if we already logged this exact status (prevents Strict Mode duplicates)
+                if (lastLoggedStatusRef.current !== newStatus) {
+                  lastLoggedStatusRef.current = newStatus;
+                  // Schedule the log entry (will only run once due to ref guard)
+                  setTimeout(() => {
+                    setSystemLog(prev => [...prev, {
+                      timestamp: Date.now() / 1000,
+                      message: newStatus,
+                      level: newStatus.toLowerCase().includes('error') ? 'error' : 
+                             newStatus.toLowerCase().includes('wait') ? 'warning' : 'info'
+                    }]);
+                  }, 0);
+                }
               }
               return data.call;
             });
@@ -1152,9 +1167,25 @@ export default function VoiceTraderPage() {
       // Jitter buffer: Schedule playback at precise times for gapless audio
       const now = ctx.currentTime;
       
-      // If this is the first chunk or we've fallen behind, reset the schedule
-      // Add jitter buffer delay on first chunk for smoother playback
-      if (nextPlayTimeRef.current <= now) {
+      // Calculate current audio lag (how far ahead the buffer is)
+      const currentLagSec = Math.max(0, nextPlayTimeRef.current - now);
+      const currentLagMs = Math.round(currentLagSec * 1000);
+      
+      // Update lag display (throttled to every 500ms to avoid re-render spam)
+      if (Date.now() - audioLagUpdateRef.current > 500) {
+        audioLagUpdateRef.current = Date.now();
+        setAudioLagMs(currentLagMs);
+      }
+      
+      // MAX_LAG: Auto-reset if buffer gets too far behind (>3 seconds)
+      // This prevents runaway lag accumulation
+      const MAX_LAG_SEC = 3.0;
+      
+      // If this is the first chunk, we've fallen behind, OR lag is too high, reset
+      if (nextPlayTimeRef.current <= now || currentLagSec > MAX_LAG_SEC) {
+        if (currentLagSec > MAX_LAG_SEC) {
+          console.log(`[AUDIO] Auto-reset: lag was ${currentLagMs}ms (>${MAX_LAG_SEC*1000}ms max)`);
+        }
         nextPlayTimeRef.current = now + (JITTER_BUFFER_MS / 1000);
       }
       
@@ -1172,6 +1203,17 @@ export default function VoiceTraderPage() {
       console.error('Audio playback error:', err);
     }
   }, [audioMuted, initAudioContext]);
+
+  // Catch up audio to live (reset buffer)
+  const catchUpAudio = useCallback(() => {
+    const ctx = audioContextRef.current;
+    if (ctx) {
+      console.log(`[AUDIO] Manual catch-up: was ${audioLagMs}ms behind`);
+      // Reset to now + small buffer
+      nextPlayTimeRef.current = ctx.currentTime + (JITTER_BUFFER_MS / 1000);
+      setAudioLagMs(JITTER_BUFFER_MS);
+    }
+  }, [audioLagMs]);
 
   // Update volume when slider changes
   useEffect(() => {
@@ -1365,6 +1407,8 @@ export default function VoiceTraderPage() {
     setSystemLog([]);
     setContainerState(null);
     setLastSpeakerId(null);
+    wsConnectedOnceRef.current = false;  // Allow "Connected" message for new session
+    lastLoggedStatusRef.current = null;  // Allow status messages for new session
     
     // Close any existing WebSocket
     if (wsRef.current) {
@@ -2403,7 +2447,19 @@ export default function VoiceTraderPage() {
               </button>
             )}
             {isConnecting && (
-              <span className="bg-yellow-600 px-4 py-2 rounded animate-pulse">📞 Dialing...</span>
+              <button
+                onClick={() => {
+                  // Cancel dialing - send stop command and reset state
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'cancel' }));
+                  }
+                  setDialing(false);
+                  setError('Dialing cancelled');
+                }}
+                className="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded animate-pulse"
+              >
+                📞 Dialing... (click to cancel)
+              </button>
             )}
             {isCallActive && (
               <button
@@ -2460,6 +2516,23 @@ export default function VoiceTraderPage() {
               className="w-16 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
               title="Speaker volume"
             />
+            {/* Audio lag indicator and catch-up button - always visible but grayed when no lag */}
+            <button
+              onClick={catchUpAudio}
+              disabled={audioLagMs <= 100 || audioMuted}
+              className={`px-2 py-1 rounded text-xs font-mono transition-all duration-100 min-w-[60px] ${
+                audioMuted || audioLagMs <= 100
+                  ? 'bg-gray-800 text-gray-500 cursor-default'
+                  : audioLagMs > 1000 
+                    ? 'bg-red-600 hover:bg-red-700 animate-pulse active:scale-95' 
+                    : audioLagMs > 500 
+                    ? 'bg-orange-600 hover:bg-orange-700 active:scale-95'
+                    : 'bg-gray-600 hover:bg-gray-500 active:scale-95'
+              }`}
+              title={audioLagMs > 100 ? `Audio is ${(audioLagMs/1000).toFixed(1)}s behind live. Click to catch up.` : 'Audio lag (click to catch up when lagging)'}
+            >
+              ⏩ {audioLagMs > 100 ? (audioLagMs > 1000 ? `${(audioLagMs/1000).toFixed(1)}s` : `${audioLagMs}ms`) : '0ms'}
+            </button>
           </div>
           
           {/* Divider */}
@@ -2504,11 +2577,14 @@ export default function VoiceTraderPage() {
                 // Color based on status:
                 // pending = yellow (trade in progress)
                 // success = green (got fills)
-                // no_fill/failed/skipped = gray (no trade executed)
+                // skipped = purple strikethrough (word already said - orderbook detected)
+                // no_fill/failed = gray (no trade executed)
                 const bgClass = w.status === 'pending'
                   ? 'bg-yellow-900 border border-yellow-500'
                   : w.status === 'success'
                   ? 'bg-green-900 border border-green-500'
+                  : w.status === 'skipped'
+                  ? 'bg-purple-900/50 border border-purple-500'
                   : w.no_purchased
                   ? 'bg-red-900 border border-red-500'
                   : 'bg-gray-700';
@@ -2520,7 +2596,7 @@ export default function VoiceTraderPage() {
                   : w.status === 'no_fill'
                   ? '⚡'
                   : w.status === 'skipped'
-                  ? '⏸'
+                  ? '🚫'
                   : w.status === 'failed'
                   ? '✗'
                   : w.no_purchased
@@ -2532,11 +2608,13 @@ export default function VoiceTraderPage() {
                     key={w.market_ticker}
                     className={`p-1.5 rounded text-xs ${bgClass}`}
                   >
-                    <div className="font-medium truncate" title={w.word}>
+                    <div className={`font-medium truncate ${w.status === 'skipped' ? 'line-through text-purple-300' : ''}`} title={w.word}>
                       {w.word}
                     </div>
                     <div className="text-[10px] text-gray-400 truncate">
-                      {w.status && w.triggered_at
+                      {w.status === 'skipped'
+                        ? '🚫 said'
+                        : w.status && w.triggered_at
                         ? `${statusIcon} ${formatTime(w.triggered_at)}`
                         : w.no_purchased
                         ? '✗ NO'

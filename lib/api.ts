@@ -790,3 +790,46 @@ export async function stopVoiceContainer(sessionId: string): Promise<{ success: 
     throw error;
   }
 }
+
+// AI Chat Types and Functions
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AIChatResponse {
+  response: string;
+  user: string;
+  is_admin: boolean;
+}
+
+export async function sendAIChatMessage(messages: ChatMessage[]): Promise<AIChatResponse> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    // Convert messages to simple objects for Amplify API compatibility
+    const messagesPayload = messages.map(m => ({ role: m.role, content: m.content }));
+
+    const restOperation = post({
+      apiName: 'DashboardAPI',
+      path: '/ai-chat',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: {
+          messages: JSON.stringify(messagesPayload),
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    
+    return data as unknown as AIChatResponse;
+  } catch (error) {
+    console.error('Error sending AI chat message:', error);
+    throw error;
+  }
+}

@@ -74,6 +74,16 @@ fi
 echo -e "${GREEN}✅ Python syntax OK${NC}"
 echo ""
 
+# Step 2.6: Sync AI documentation to S3
+echo "Step 2.6: Syncing AI documentation to S3..."
+if [ -x "/home/ubuntu/kalshi/kalshi-market-capture/sync-ai-docs.sh" ]; then
+    /home/ubuntu/kalshi/kalshi-market-capture/sync-ai-docs.sh
+    echo -e "${GREEN}✅ AI docs synced${NC}"
+else
+    echo -e "${YELLOW}⚠️  sync-ai-docs.sh not found, skipping${NC}"
+fi
+echo ""
+
 # Step 3: Deploy Lambda functions (SAM)
 echo "Step 3: Deploying Lambda API functions..."
 cd "$SCRIPT_DIR/lambda"

@@ -94,6 +94,12 @@ export default function DashboardLayout({
                 >
                   🎙️ Voice
                 </Link>
+                <Link
+                  href="/dashboard/ai-chat"
+                  className="px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50"
+                >
+                  🤖 AI
+                </Link>
                 <a
                   href="https://voice.apexmarkets.us:8080/test"
                   target="_blank"

@@ -858,12 +858,9 @@ def lambda_handler(event, context):
         elif action == 'delete':
             return handle_delete_conversation(body, user_name)
         elif action == 'chat':
-            if is_function_url:
-                # Return streaming response
-                return handle_chat_streaming(body, user_name, is_admin)
-            else:
-                # Return non-streaming response (API Gateway)
-                return handle_chat_sync(body, user_name, is_admin)
+            # Both Function URL and API Gateway use sync handler
+            # Function URL gives us 15-min timeout, streaming not supported for Python
+            return handle_chat_sync(body, user_name, is_admin)
         else:
             return error_response(400, f"Unknown action: {action}")
             

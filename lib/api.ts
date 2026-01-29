@@ -903,10 +903,11 @@ async function signRequest(
 }
 
 /**
- * Send a streaming AI chat message via Lambda Function URL.
+ * Send AI chat message via Lambda Function URL.
+ * Non-streaming: Lambda returns complete response (allows 15-min timeout)
  * 
  * @param messages - The conversation history
- * @param onProgress - Callback for progress updates
+ * @param onProgress - Callback for progress updates (called once with "Processing...")
  * @param onDone - Callback when response is complete
  * @param onError - Callback for errors
  */
@@ -939,9 +940,10 @@ export async function sendAIChatMessageStreaming(
       is_admin: isAdmin,
     });
 
-    console.log('Making streaming request to:', AI_CHAT_FUNCTION_URL);
+    console.log('Making request to:', AI_CHAT_FUNCTION_URL);
+    onProgress('Processing request (this may take a minute)...');
 
-    // Make the streaming request (no SigV4 needed - Function URL is public)
+    // Make the request (no SigV4 needed - Function URL is public)
     let response: Response;
     try {
       response = await fetch(AI_CHAT_FUNCTION_URL, {
@@ -967,65 +969,24 @@ export async function sendAIChatMessageStreaming(
       return;
     }
 
-    if (!response.body) {
-      onError('No response body');
+    // Parse JSON response (not streaming)
+    const result = await response.json();
+    console.log('Response received:', result);
+
+    if (result.error) {
+      onError(result.error);
       return;
     }
 
-    // Read the streaming response
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // Process complete lines (newline-delimited JSON)
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        
-        try {
-          const chunk: AIChatStreamChunk = JSON.parse(line);
-          
-          switch (chunk.type) {
-            case 'progress':
-              onProgress(chunk.content);
-              break;
-            case 'done':
-              onDone(chunk);
-              break;
-            case 'error':
-              onError(chunk.content);
-              break;
-          }
-        } catch (e) {
-          console.error('Failed to parse streaming chunk:', line, e);
-        }
-      }
-    }
-
-    // Process any remaining buffer
-    if (buffer.trim()) {
-      try {
-        const chunk: AIChatStreamChunk = JSON.parse(buffer);
-        if (chunk.type === 'done') {
-          onDone(chunk);
-        } else if (chunk.type === 'error') {
-          onError(chunk.content);
-        }
-      } catch (e) {
-        console.error('Failed to parse final chunk:', buffer, e);
-      }
-    }
+    // Convert to the expected done format
+    onDone({
+      type: 'done',
+      content: result.response || result.body?.response || 'No response content',
+      user: result.user || userName,
+      is_admin: result.is_admin ?? isAdmin,
+    });
   } catch (error) {
-    console.error('AI Chat streaming error:', error);
+    console.error('AI Chat error:', error);
     onError(error instanceof Error ? error.message : 'Unknown error');
   }
 }

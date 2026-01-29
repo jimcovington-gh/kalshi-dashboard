@@ -364,8 +364,8 @@ export default function AIChatPage() {
       )}
 
       {/* Input Area */}
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <div className="flex-1 relative">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-1">
+        <div className="flex gap-2">
           <textarea
             ref={inputRef}
             value={input}
@@ -374,26 +374,26 @@ export default function AIChatPage() {
             placeholder="Ask about your trading data..."
             disabled={isLoading}
             rows={2}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+            className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
           />
-          <div className="absolute bottom-2 right-2 text-xs text-gray-400">
-            Press Enter to send, Shift+Enter for new line
-          </div>
+          <button
+            type="submit"
+            disabled={isLoading || !input.trim()}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors self-start"
+          >
+            {isLoading ? (
+              <span className="flex items-center gap-2">
+                <LoadingSpinner />
+                Thinking...
+              </span>
+            ) : (
+              'Send'
+            )}
+          </button>
         </div>
-        <button
-          type="submit"
-          disabled={isLoading || !input.trim()}
-          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors self-start"
-        >
-          {isLoading ? (
-            <span className="flex items-center gap-2">
-              <LoadingSpinner />
-              Thinking...
-            </span>
-          ) : (
-            'Send'
-          )}
-        </button>
+        <div className="text-xs text-gray-400 ml-1">
+          Press Enter to send, Shift+Enter for new line
+        </div>
       </form>
     </div>
   );
@@ -443,7 +443,7 @@ function MessageBubble({ message, progress }: { message: DisplayMessage; progres
                 )}
               </div>
             )}
-            <div className="prose prose-sm max-w-none prose-pre:bg-gray-800 prose-pre:text-gray-100">
+            <div className="prose prose-sm max-w-none prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-table:text-xs prose-th:bg-gray-200 prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-td:border prose-th:border prose-table:border-collapse">
               <ReactMarkdown>{message.content}</ReactMarkdown>
             </div>
           </div>

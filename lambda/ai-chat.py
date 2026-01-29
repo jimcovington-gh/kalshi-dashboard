@@ -52,6 +52,7 @@ secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
 # Claude Sonnet 4.5 via cross-region inference profile
 MODEL_ID = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0'
 MAX_TOKENS = 8192
+MAX_INPUT_TOKENS = 180000  # Claude Sonnet has 200K context, leave room for output
 INTERNAL_RATE_LIMIT = 10  # requests per second
 HIGH_CALL_WARNING_THRESHOLD = 50
 
@@ -88,6 +89,75 @@ S3_BUCKETS = [
 ]
 
 KALSHI_API_BASE = 'https://api.elections.kalshi.com'
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough estimate of tokens (Claude uses ~4 chars per token on average)."""
+    return len(text) // 4
+
+
+def estimate_messages_tokens(messages: List[Dict]) -> int:
+    """Estimate total tokens in a list of messages."""
+    total = 0
+    for msg in messages:
+        content = msg.get('content', [])
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and 'text' in block:
+                    total += estimate_tokens(block['text'])
+        elif isinstance(content, str):
+            total += estimate_tokens(content)
+    return total
+
+
+def truncate_conversation(messages: List[Dict], max_tokens: int = MAX_INPUT_TOKENS) -> List[Dict]:
+    """
+    Truncate conversation history to fit within token limit.
+    Keeps the first message (for context) and as many recent messages as possible.
+    """
+    if not messages:
+        return messages
+    
+    total_tokens = estimate_messages_tokens(messages)
+    
+    if total_tokens <= max_tokens:
+        return messages
+    
+    logger.info(f"Truncating conversation: {total_tokens} estimated tokens -> {max_tokens} limit")
+    
+    # Always keep first and last message
+    if len(messages) <= 2:
+        return messages
+    
+    # Keep first message, then add messages from the end until we hit limit
+    first_msg = messages[0]
+    first_tokens = estimate_messages_tokens([first_msg])
+    
+    # Add messages from the end
+    kept_messages = []
+    running_total = first_tokens
+    
+    for msg in reversed(messages[1:]):
+        msg_tokens = estimate_messages_tokens([msg])
+        if running_total + msg_tokens <= max_tokens:
+            kept_messages.insert(0, msg)
+            running_total += msg_tokens
+        else:
+            break
+    
+    # If we had to drop messages, add a system note
+    dropped_count = len(messages) - 1 - len(kept_messages)
+    if dropped_count > 0:
+        truncation_note = {
+            'role': 'assistant',
+            'content': [{'text': f'[Note: {dropped_count} earlier messages were truncated to fit context window. The conversation continues below.]'}]
+        }
+        result = [first_msg, truncation_note] + kept_messages
+    else:
+        result = [first_msg] + kept_messages
+    
+    logger.info(f"Kept {len(result)} messages, dropped {dropped_count}")
+    return result
 
 
 class DecimalEncoder(json.JSONEncoder):
@@ -1036,6 +1106,9 @@ def handle_chat_sync(body: Dict, user_name: str, is_admin: bool) -> Dict:
                 'content': [{'text': content}]
             })
     
+    # Truncate conversation if too long
+    claude_messages = truncate_conversation(claude_messages)
+    
     result = call_bedrock_with_tools(
         system_prompt=system_prompt,
         messages=claude_messages,
@@ -1076,6 +1149,9 @@ def handle_chat_streaming(body: Dict, user_name: str, is_admin: bool):
                 'role': role, 
                 'content': [{'text': content}]
             })
+    
+    # Truncate conversation if too long
+    claude_messages = truncate_conversation(claude_messages)
     
     yield from call_bedrock_with_tools_streaming(
         system_prompt=system_prompt,

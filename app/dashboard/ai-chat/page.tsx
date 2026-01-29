@@ -1,7 +1,16 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { sendAIChatMessage, ChatMessage } from '@/lib/api';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { 
+  sendAIChatMessageStreaming, 
+  ChatMessage,
+  AIChatStreamDone,
+  listConversations,
+  saveConversation,
+  loadConversation,
+  deleteConversation,
+  SavedConversation
+} from '@/lib/api';
 import ReactMarkdown from 'react-markdown';
 
 interface DisplayMessage {
@@ -9,25 +18,79 @@ interface DisplayMessage {
   content: string;
   timestamp: Date;
   isLoading?: boolean;
+  progress?: string;
 }
+
+// Generate a unique conversation ID
+function generateConversationId(): string {
+  return `conv-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Local storage key for current conversation
+const CURRENT_CONVERSATION_KEY = 'ai-chat-current-conversation';
+const CONVERSATION_ID_KEY = 'ai-chat-conversation-id';
 
 export default function AIChatPage() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string>('');
+  const [conversationId, setConversationId] = useState<string>('');
+  const [savedConversations, setSavedConversations] = useState<SavedConversation[]>([]);
+  const [showSavedPanel, setShowSavedPanel] = useState(false);
+  const [saveTitle, setSaveTitle] = useState('');
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load conversation from localStorage on mount
+  useEffect(() => {
+    const savedMessages = localStorage.getItem(CURRENT_CONVERSATION_KEY);
+    const savedId = localStorage.getItem(CONVERSATION_ID_KEY);
+    
+    if (savedMessages) {
+      try {
+        const parsed = JSON.parse(savedMessages);
+        setMessages(parsed.map((m: any) => ({
+          ...m,
+          timestamp: new Date(m.timestamp),
+        })));
+      } catch (e) {
+        console.error('Failed to parse saved conversation:', e);
+      }
+    }
+    
+    setConversationId(savedId || generateConversationId());
+  }, []);
+
+  // Save conversation to localStorage when messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem(CURRENT_CONVERSATION_KEY, JSON.stringify(messages));
+      localStorage.setItem(CONVERSATION_ID_KEY, conversationId);
+    }
+  }, [messages, conversationId]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, progress]);
 
   // Focus input on mount
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Load saved conversations list
+  const loadSavedConversations = useCallback(async () => {
+    const conversations = await listConversations();
+    setSavedConversations(conversations);
+  }, []);
+
+  useEffect(() => {
+    loadSavedConversations();
+  }, [loadSavedConversations]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,6 +99,7 @@ export default function AIChatPage() {
     const userMessage = input.trim();
     setInput('');
     setError(null);
+    setProgress('');
 
     // Add user message to display
     const newUserMessage: DisplayMessage = {
@@ -55,37 +119,47 @@ export default function AIChatPage() {
     setMessages(prev => [...prev, loadingMessage]);
     setIsLoading(true);
 
-    try {
-      // Build conversation history for API
-      const apiMessages: ChatMessage[] = messages.map(m => ({
-        role: m.role,
-        content: m.content,
-      }));
-      apiMessages.push({ role: 'user', content: userMessage });
+    // Build conversation history for API
+    const apiMessages: ChatMessage[] = messages.map(m => ({
+      role: m.role,
+      content: m.content,
+    }));
+    apiMessages.push({ role: 'user', content: userMessage });
 
-      // Send to API
-      const response = await sendAIChatMessage(apiMessages);
-
-      // Replace loading message with actual response
-      setMessages(prev => {
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          role: 'assistant',
-          content: response.response,
-          timestamp: new Date(),
-          isLoading: false,
-        };
-        return updated;
-      });
-    } catch (err: any) {
-      console.error('AI Chat error:', err);
-      setError(err.message || 'Failed to get response');
-      // Remove loading message on error
-      setMessages(prev => prev.slice(0, -1));
-    } finally {
-      setIsLoading(false);
-      inputRef.current?.focus();
-    }
+    // Send streaming request
+    await sendAIChatMessageStreaming(
+      apiMessages,
+      // onProgress
+      (progressContent: string) => {
+        setProgress(progressContent);
+      },
+      // onDone
+      (response: AIChatStreamDone) => {
+        setMessages(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: 'assistant',
+            content: response.content,
+            timestamp: new Date(),
+            isLoading: false,
+          };
+          return updated;
+        });
+        setIsLoading(false);
+        setProgress('');
+        inputRef.current?.focus();
+      },
+      // onError
+      (errorMessage: string) => {
+        console.error('AI Chat error:', errorMessage);
+        setError(errorMessage);
+        // Remove loading message on error
+        setMessages(prev => prev.slice(0, -1));
+        setIsLoading(false);
+        setProgress('');
+        inputRef.current?.focus();
+      }
+    );
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -99,7 +173,54 @@ export default function AIChatPage() {
   function clearChat() {
     setMessages([]);
     setError(null);
+    setProgress('');
+    setConversationId(generateConversationId());
+    localStorage.removeItem(CURRENT_CONVERSATION_KEY);
+    localStorage.removeItem(CONVERSATION_ID_KEY);
     inputRef.current?.focus();
+  }
+
+  async function handleSaveConversation() {
+    if (!saveTitle.trim() || messages.length === 0) return;
+    
+    const chatMessages: ChatMessage[] = messages.map(m => ({
+      role: m.role,
+      content: m.content,
+    }));
+    
+    const success = await saveConversation(conversationId, saveTitle.trim(), chatMessages);
+    if (success) {
+      setShowSaveDialog(false);
+      setSaveTitle('');
+      await loadSavedConversations();
+    } else {
+      setError('Failed to save conversation');
+    }
+  }
+
+  async function handleLoadConversation(id: string) {
+    const conversation = await loadConversation(id);
+    if (conversation) {
+      setMessages(conversation.messages.map(m => ({
+        ...m,
+        timestamp: new Date(conversation.updated_at),
+      })));
+      setConversationId(conversation.id);
+      setShowSavedPanel(false);
+    } else {
+      setError('Failed to load conversation');
+    }
+  }
+
+  async function handleDeleteConversation(id: string) {
+    if (!confirm('Delete this conversation?')) return;
+    
+    const success = await deleteConversation(id);
+    if (success) {
+      await loadSavedConversations();
+    } else {
+      setError('Failed to delete conversation');
+    }
   }
 
   return (
@@ -112,13 +233,94 @@ export default function AIChatPage() {
             Ask questions about your trading data, positions, and system configuration
           </p>
         </div>
-        <button
-          onClick={clearChat}
-          className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-        >
-          Clear Chat
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowSavedPanel(!showSavedPanel)}
+            className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+          >
+            📁 Saved ({savedConversations.length})
+          </button>
+          {messages.length > 0 && (
+            <button
+              onClick={() => setShowSaveDialog(true)}
+              className="px-3 py-1.5 text-sm text-blue-600 hover:text-blue-900 hover:bg-blue-50 rounded-md transition-colors"
+            >
+              💾 Save
+            </button>
+          )}
+          <button
+            onClick={clearChat}
+            className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+          >
+            🗑️ New Chat
+          </button>
+        </div>
       </div>
+
+      {/* Save Dialog */}
+      {showSaveDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-96 shadow-xl">
+            <h3 className="text-lg font-semibold mb-4">Save Conversation</h3>
+            <input
+              type="text"
+              value={saveTitle}
+              onChange={(e) => setSaveTitle(e.target.value)}
+              placeholder="Enter a title..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-md mb-4"
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleSaveConversation()}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowSaveDialog(false)}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveConversation}
+                disabled={!saveTitle.trim()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Saved Conversations Panel */}
+      {showSavedPanel && (
+        <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+          <h3 className="font-semibold mb-2">Saved Conversations</h3>
+          {savedConversations.length === 0 ? (
+            <p className="text-sm text-gray-500">No saved conversations yet.</p>
+          ) : (
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {savedConversations.map((conv) => (
+                <div key={conv.id} className="flex items-center justify-between p-2 bg-white rounded border hover:bg-gray-50">
+                  <button
+                    onClick={() => handleLoadConversation(conv.id)}
+                    className="flex-1 text-left"
+                  >
+                    <div className="font-medium text-sm">{conv.title}</div>
+                    <div className="text-xs text-gray-500">
+                      {new Date(conv.updated_at).toLocaleDateString()} • {conv.messages.length} messages
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => handleDeleteConversation(conv.id)}
+                    className="p-1 text-red-500 hover:bg-red-50 rounded"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto bg-white rounded-lg border border-gray-200 p-4 mb-4">
@@ -140,7 +342,11 @@ export default function AIChatPage() {
         ) : (
           <div className="space-y-4">
             {messages.map((message, index) => (
-              <MessageBubble key={index} message={message} />
+              <MessageBubble 
+                key={index} 
+                message={message} 
+                progress={index === messages.length - 1 && message.isLoading ? progress : undefined}
+              />
             ))}
             <div ref={messagesEndRef} />
           </div>
@@ -190,7 +396,7 @@ export default function AIChatPage() {
   );
 }
 
-function MessageBubble({ message }: { message: DisplayMessage }) {
+function MessageBubble({ message, progress }: { message: DisplayMessage; progress?: string }) {
   const isUser = message.role === 'user';
 
   return (
@@ -203,9 +409,11 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
         }`}
       >
         {message.isLoading ? (
-          <div className="flex items-center gap-2">
-            <LoadingSpinner />
-            <span className="text-gray-500">Thinking...</span>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <LoadingSpinner />
+              <span className="text-gray-500">{progress || 'Connecting...'}</span>
+            </div>
           </div>
         ) : isUser ? (
           <p className="whitespace-pre-wrap">{message.content}</p>

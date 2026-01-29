@@ -1,5 +1,7 @@
 import { get, post } from 'aws-amplify/api';
 import { fetchAuthSession } from 'aws-amplify/auth';
+import { SignatureV4 } from '@aws-sdk/signature-v4';
+import { Sha256 } from '@aws-crypto/sha256-browser';
 
 // V2 Trade schema - uses market_ticker, idea_name, placed_at, completed_at
 // Only filled trades are returned (filled_count > 0)
@@ -831,5 +833,325 @@ export async function sendAIChatMessage(messages: ChatMessage[]): Promise<AIChat
   } catch (error) {
     console.error('Error sending AI chat message:', error);
     throw error;
+  }
+}
+
+// AI Chat Streaming Types
+export interface AIChatStreamProgress {
+  type: 'progress';
+  content: string;
+}
+
+export interface AIChatStreamDone {
+  type: 'done';
+  content: string;
+  user: string;
+  is_admin: boolean;
+}
+
+export interface AIChatStreamError {
+  type: 'error';
+  content: string;
+}
+
+export type AIChatStreamChunk = AIChatStreamProgress | AIChatStreamDone | AIChatStreamError;
+
+// Get the AI Chat Function URL - this should be configured after deployment
+const AI_CHAT_FUNCTION_URL = process.env.NEXT_PUBLIC_AI_CHAT_FUNCTION_URL || '';
+
+/**
+ * Sign a request using SigV4 for Lambda Function URL (IAM auth)
+ */
+async function signRequest(
+  url: string,
+  method: string,
+  body: string,
+  credentials: { accessKeyId: string; secretAccessKey: string; sessionToken?: string },
+  region: string
+): Promise<Headers> {
+  const parsedUrl = new URL(url);
+  
+  const signer = new SignatureV4({
+    service: 'lambda',
+    region,
+    credentials,
+    sha256: Sha256,
+  });
+
+  const request = {
+    method,
+    protocol: parsedUrl.protocol,
+    hostname: parsedUrl.hostname,
+    port: parsedUrl.port ? parseInt(parsedUrl.port) : undefined,
+    path: parsedUrl.pathname,
+    query: Object.fromEntries(parsedUrl.searchParams),
+    headers: {
+      'Content-Type': 'application/json',
+      'Host': parsedUrl.host,
+    },
+    body,
+  };
+
+  const signedRequest = await signer.sign(request);
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(signedRequest.headers)) {
+    if (typeof value === 'string') {
+      headers.set(key, value);
+    }
+  }
+  return headers;
+}
+
+/**
+ * Send a streaming AI chat message via Lambda Function URL.
+ * 
+ * @param messages - The conversation history
+ * @param onProgress - Callback for progress updates
+ * @param onDone - Callback when response is complete
+ * @param onError - Callback for errors
+ */
+export async function sendAIChatMessageStreaming(
+  messages: ChatMessage[],
+  onProgress: (content: string) => void,
+  onDone: (response: AIChatStreamDone) => void,
+  onError: (error: string) => void
+): Promise<void> {
+  if (!AI_CHAT_FUNCTION_URL) {
+    onError('AI Chat Function URL not configured');
+    return;
+  }
+
+  try {
+    // Get IAM credentials from Cognito Identity Pool
+    const session = await fetchAuthSession();
+    const credentials = session.credentials;
+    
+    if (!credentials) {
+      onError('Failed to get IAM credentials');
+      return;
+    }
+
+    // Build request body
+    const messagesPayload = messages.map(m => ({ role: m.role, content: m.content }));
+    const body = JSON.stringify({ messages: messagesPayload });
+
+    // Sign the request
+    const signedHeaders = await signRequest(
+      AI_CHAT_FUNCTION_URL,
+      'POST',
+      body,
+      {
+        accessKeyId: credentials.accessKeyId,
+        secretAccessKey: credentials.secretAccessKey,
+        sessionToken: credentials.sessionToken,
+      },
+      'us-east-1'
+    );
+
+    // Make the streaming request
+    const response = await fetch(AI_CHAT_FUNCTION_URL, {
+      method: 'POST',
+      headers: signedHeaders,
+      body,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      onError(`HTTP ${response.status}: ${text}`);
+      return;
+    }
+
+    if (!response.body) {
+      onError('No response body');
+      return;
+    }
+
+    // Read the streaming response
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete lines (newline-delimited JSON)
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        
+        try {
+          const chunk: AIChatStreamChunk = JSON.parse(line);
+          
+          switch (chunk.type) {
+            case 'progress':
+              onProgress(chunk.content);
+              break;
+            case 'done':
+              onDone(chunk);
+              break;
+            case 'error':
+              onError(chunk.content);
+              break;
+          }
+        } catch (e) {
+          console.error('Failed to parse streaming chunk:', line, e);
+        }
+      }
+    }
+
+    // Process any remaining buffer
+    if (buffer.trim()) {
+      try {
+        const chunk: AIChatStreamChunk = JSON.parse(buffer);
+        if (chunk.type === 'done') {
+          onDone(chunk);
+        } else if (chunk.type === 'error') {
+          onError(chunk.content);
+        }
+      } catch (e) {
+        console.error('Failed to parse final chunk:', buffer, e);
+      }
+    }
+  } catch (error) {
+    console.error('AI Chat streaming error:', error);
+    onError(error instanceof Error ? error.message : 'Unknown error');
+  }
+}
+
+// Conversation storage types
+export interface SavedConversation {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * List saved conversations from S3 (via Lambda)
+ */
+export async function listConversations(): Promise<SavedConversation[]> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: '/ai-chat/conversations',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json() as unknown as { conversations: SavedConversation[] };
+    return data.conversations || [];
+  } catch (error) {
+    console.error('Error listing conversations:', error);
+    return [];
+  }
+}
+
+/**
+ * Save a conversation to S3 (via Lambda)
+ */
+export async function saveConversation(id: string, title: string, messages: ChatMessage[]): Promise<boolean> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    // Convert messages to plain objects for API compatibility
+    const messagesForApi = messages.map(m => ({ role: m.role, content: m.content }));
+
+    const restOperation = post({
+      apiName: 'DashboardAPI',
+      path: '/ai-chat/conversations',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: {
+          action: 'save',
+          id,
+          title,
+          messages: messagesForApi,
+        },
+      },
+    });
+
+    await restOperation.response;
+    return true;
+  } catch (error) {
+    console.error('Error saving conversation:', error);
+    return false;
+  }
+}
+
+/**
+ * Load a conversation from S3 (via Lambda)
+ */
+export async function loadConversation(id: string): Promise<SavedConversation | null> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = post({
+      apiName: 'DashboardAPI',
+      path: '/ai-chat/conversations',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: {
+          action: 'load',
+          id,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json() as unknown as { conversation: SavedConversation };
+    return data.conversation || null;
+  } catch (error) {
+    console.error('Error loading conversation:', error);
+    return null;
+  }
+}
+
+/**
+ * Delete a conversation from S3 (via Lambda)
+ */
+export async function deleteConversation(id: string): Promise<boolean> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = post({
+      apiName: 'DashboardAPI',
+      path: '/ai-chat/conversations',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: {
+          action: 'delete',
+          id,
+        },
+      },
+    });
+
+    await restOperation.response;
+    return true;
+  } catch (error) {
+    console.error('Error deleting conversation:', error);
+    return false;
   }
 }

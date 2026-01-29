@@ -599,7 +599,7 @@ Resources:
       CodeUri: AIChatFunction
       Handler: ai-chat.lambda_handler
       Description: AI chat assistant with read-only access to trading data
-      Timeout: 300
+      Timeout: 900
       MemorySize: 512
       AutoPublishAlias: live
       Layers:
@@ -608,6 +608,7 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: INFO
+          CONVERSATIONS_BUCKET: production-kalshi-trading-config
       Policies:
       - Statement:
         - Effect: Allow
@@ -615,8 +616,8 @@ Resources:
           - bedrock:InvokeModel
           - bedrock:Converse
           Resource:
-          - Fn::Sub: arn:aws:bedrock:${AWS::Region}::foundation-model/us.anthropic.claude-sonnet-4-5-20250514-v1:0
-          - Fn::Sub: arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-sonnet-4-5-20250514-v1:0
+          - arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0
+          - Fn::Sub: arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0
       - DynamoDBReadPolicy:
           TableName: production-kalshi-event-archive
       - DynamoDBReadPolicy:
@@ -676,6 +677,13 @@ Resources:
       - Statement:
         - Effect: Allow
           Action:
+          - s3:PutObject
+          - s3:DeleteObject
+          Resource:
+          - arn:aws:s3:::production-kalshi-trading-config/ai-conversations/*
+      - Statement:
+        - Effect: Allow
+          Action:
           - secretsmanager:GetSecretValue
           Resource:
           - arn:aws:secretsmanager:us-east-1:355149669325:secret:production/kalshi/users/*
@@ -691,6 +699,20 @@ Resources:
             RestApiId:
               Ref: DashboardApi
             Path: /ai-chat
+            Method: POST
+        AIChatConversationsGet:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /ai-chat/conversations
+            Method: GET
+        AIChatConversationsPost:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /ai-chat/conversations
             Method: POST
     Metadata:
       SamResourceId: AIChatFunction

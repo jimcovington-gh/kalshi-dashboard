@@ -7,11 +7,16 @@ Architecture:
 - Tools for: DynamoDB queries, S3 reads, Kalshi API, documentation
 - Internal rate limiter: 10 requests/second
 - User-scoped data access (non-admin sees only their data)
+- Conversations stored in localStorage (client) + optional S3 save
 
 Security:
 - Read-only IAM policies (enforced at AWS level)
-- User authentication via Cognito
+- User authentication via Cognito IAM credentials (Function URL)
 - Admin users can query all users' data
+
+Endpoints:
+- Function URL (primary): Streaming, 15 min timeout, IAM auth
+- API Gateway (legacy): Non-streaming, 29s timeout, Cognito auth
 """
 
 import json
@@ -44,7 +49,8 @@ s3 = boto3.client('s3', region_name='us-east-1')
 secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
 
 # Configuration
-MODEL_ID = 'us.anthropic.claude-sonnet-4-5-20250514-v1:0'
+# Claude Sonnet 4.5 via cross-region inference profile
+MODEL_ID = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0'
 MAX_TOKENS = 8192
 INTERNAL_RATE_LIMIT = 10  # requests per second
 HIGH_CALL_WARNING_THRESHOLD = 50
@@ -220,7 +226,7 @@ TOOLS = [
 - production-kalshi-portfolio-snapshots: Portfolio history (keys: user_name, timestamp)
 - production-kalshi-volatile-watchlist: Volatility tracking
 Use scan for broad queries, get_item for specific items, query for indexed lookups.""",
-        "input_schema": {
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "table_name": {
@@ -266,7 +272,7 @@ Use scan for broad queries, get_item for specific items, query for indexed looku
 - production-kalshi-trading-config: Trading configuration (ideas/, etc.)
 - production-kalshi-trading-captures: Recorded game/event data
 Returns file content as text (for JSON/YAML) or metadata (for binary).""",
-        "input_schema": {
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "bucket": {
@@ -284,7 +290,7 @@ Returns file content as text (for JSON/YAML) or metadata (for binary).""",
     {
         "name": "list_s3_objects",
         "description": "List objects in an S3 bucket/prefix",
-        "input_schema": {
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "bucket": {
@@ -306,7 +312,7 @@ Returns file content as text (for JSON/YAML) or metadata (for binary).""",
     {
         "name": "kalshi_get_portfolio",
         "description": "Get current portfolio (balance and positions) from Kalshi API for a user",
-        "input_schema": {
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "user_name": {
@@ -320,7 +326,7 @@ Returns file content as text (for JSON/YAML) or metadata (for binary).""",
     {
         "name": "kalshi_get_market",
         "description": "Get details about a specific market from Kalshi API",
-        "input_schema": {
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "ticker": {
@@ -338,7 +344,7 @@ Returns file content as text (for JSON/YAML) or metadata (for binary).""",
     {
         "name": "kalshi_get_orderbook",
         "description": "Get current orderbook for a market from Kalshi API",
-        "input_schema": {
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "ticker": {
@@ -356,7 +362,7 @@ Returns file content as text (for JSON/YAML) or metadata (for binary).""",
     {
         "name": "kalshi_get_fills",
         "description": "Get recent fills (executed trades) from Kalshi API",
-        "input_schema": {
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "user_name": {
@@ -385,7 +391,7 @@ Returns file content as text (for JSON/YAML) or metadata (for binary).""",
 - QUICKBETS_IMPLEMENTATION.md: QuickBets system design
 - EC2_VOICE_TRADER.md: Voice trader deployment and operation
 Use this to understand how the system works.""",
-        "input_schema": {
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "doc_name": {
@@ -399,7 +405,7 @@ Use this to understand how the system works.""",
     {
         "name": "estimate_query_cost",
         "description": "Estimate how many API calls a complex query will require. Use before expensive operations.",
-        "input_schema": {
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "operation_type": {
@@ -785,90 +791,397 @@ Current timestamp: {datetime.now(timezone.utc).isoformat()}
 
 def lambda_handler(event, context):
     """
-    Main Lambda handler for AI chat.
+    AI Chat handler - supports both streaming (Function URL) and non-streaming (API Gateway).
     
-    Expects:
-    - body.messages: List of {role, content} messages
-    - requestContext.authorizer.claims: Cognito user info
+    For Function URL (streaming):
+    - Returns a generator that yields JSON chunks
+    - Each chunk: {"type": "progress|text|done|error", "content": "..."}
     
-    Returns:
-    - Streaming response with AI output
+    For API Gateway (non-streaming):
+    - Returns complete response as JSON
+    
+    Actions:
+    - chat: Process a chat message
+    - save: Save conversation to S3
+    - load: Load conversation from S3
+    - list: List saved conversations
+    - delete: Delete a saved conversation
     """
     logger.info(f"AI Chat request received")
     
+    # Detect if this is a Function URL request (streaming) or API Gateway
+    is_function_url = 'requestContext' in event and 'http' in event.get('requestContext', {})
+    
     try:
-        # Parse request
-        body = json.loads(event.get('body', '{}'))
-        messages = body.get('messages', [])
+        # Parse request body (may be empty for GET requests)
+        body_str = event.get('body', '{}') or '{}'
+        if isinstance(body_str, str):
+            body = json.loads(body_str) if body_str else {}
+        else:
+            body = body_str or {}
         
-        # Handle case where messages is a JSON string (from Amplify API)
-        if isinstance(messages, str):
-            messages = json.loads(messages)
+        # Get HTTP method and path for routing
+        http_method = event.get('httpMethod', 'POST')
+        path = event.get('path', '/ai-chat')
         
-        if not messages:
-            return {
-                'statusCode': 400,
-                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                'body': json.dumps({'error': 'No messages provided'})
-            }
+        # Determine action based on path or body
+        if '/conversations' in path:
+            if http_method == 'GET':
+                action = 'list'
+            else:
+                # POST to /conversations - action in body
+                action = body.get('action', 'save')
+        else:
+            action = body.get('action', 'chat')
         
-        # Get user from Cognito claims
-        claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
-        user_name = claims.get('cognito:username', claims.get('preferred_username', 'unknown'))
-        groups_str = claims.get('cognito:groups', '')
-        is_admin = 'admin' in groups_str.lower() if groups_str else False
+        # Get user identity - different for Function URL vs API Gateway
+        if is_function_url:
+            # Function URL with IAM auth - user comes from request body
+            user_name = body.get('user_name', 'unknown')
+            is_admin = body.get('is_admin', False)
+        else:
+            # API Gateway with Cognito authorizer
+            claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
+            user_name = claims.get('cognito:username', claims.get('preferred_username', 'unknown'))
+            groups_str = claims.get('cognito:groups', '')
+            is_admin = 'admin' in groups_str.lower() if groups_str else False
         
-        logger.info(f"User: {user_name}, Admin: {is_admin}")
+        logger.info(f"User: {user_name}, Admin: {is_admin}, Action: {action}, Method: {http_method}, Path: {path}, Streaming: {is_function_url}")
         
-        # Build conversation for Bedrock
-        system_prompt = build_system_prompt(user_name, is_admin)
-        
-        # Format messages for Claude
-        claude_messages = []
-        for msg in messages:
-            role = msg.get('role', 'user')
-            content = msg.get('content', '')
-            if role in ['user', 'assistant']:
-                claude_messages.append({'role': role, 'content': content})
-        
-        # Call Bedrock with tool support
-        response = call_bedrock_with_tools(
-            system_prompt=system_prompt,
-            messages=claude_messages,
-            user_name=user_name,
-            is_admin=is_admin
-        )
-        
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-            },
-            'body': json.dumps({
-                'response': response,
-                'user': user_name,
-                'is_admin': is_admin
-            })
-        }
-        
+        # Handle different actions
+        if action == 'save':
+            return handle_save_conversation(body, user_name)
+        elif action == 'load':
+            return handle_load_conversation(body, user_name)
+        elif action == 'list':
+            return handle_list_conversations(user_name)
+        elif action == 'delete':
+            return handle_delete_conversation(body, user_name)
+        elif action == 'chat':
+            if is_function_url:
+                # Return streaming response
+                return handle_chat_streaming(body, user_name, is_admin)
+            else:
+                # Return non-streaming response (API Gateway)
+                return handle_chat_sync(body, user_name, is_admin)
+        else:
+            return error_response(400, f"Unknown action: {action}")
+            
     except Exception as e:
         logger.error(f"Error in AI chat handler: {e}", exc_info=True)
-        return {
-            'statusCode': 500,
-            'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-            'body': json.dumps({'error': str(e)})
+        return error_response(500, str(e))
+
+
+def error_response(status_code: int, message: str) -> Dict:
+    """Return a standard error response."""
+    return {
+        'statusCode': status_code,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Amz-Date,X-Amz-Security-Token',
+        },
+        'body': json.dumps({'error': message})
+    }
+
+
+def success_response(data: Dict) -> Dict:
+    """Return a standard success response."""
+    return {
+        'statusCode': 200,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Amz-Date,X-Amz-Security-Token',
+        },
+        'body': json.dumps(data, cls=DecimalEncoder)
+    }
+
+
+# ============================================================================
+# Conversation Storage (S3)
+# ============================================================================
+
+CONVERSATIONS_BUCKET = os.environ.get('CONVERSATIONS_BUCKET', 'production-kalshi-trading-config')
+CONVERSATIONS_PREFIX = 'ai-conversations'
+
+
+def handle_save_conversation(body: Dict, user_name: str) -> Dict:
+    """Save a conversation to S3."""
+    conversation_id = body.get('conversation_id')
+    title = body.get('title', 'Untitled')
+    messages = body.get('messages', [])
+    
+    if not conversation_id:
+        conversation_id = f"{int(time.time() * 1000)}"
+    
+    conversation = {
+        'id': conversation_id,
+        'title': title,
+        'messages': messages,
+        'user_name': user_name,
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'updated_at': datetime.now(timezone.utc).isoformat(),
+    }
+    
+    key = f"{CONVERSATIONS_PREFIX}/{user_name}/{conversation_id}.json"
+    
+    try:
+        s3.put_object(
+            Bucket=CONVERSATIONS_BUCKET,
+            Key=key,
+            Body=json.dumps(conversation, cls=DecimalEncoder),
+            ContentType='application/json'
+        )
+        return success_response({'conversation_id': conversation_id, 'saved': True})
+    except Exception as e:
+        logger.error(f"Failed to save conversation: {e}")
+        return error_response(500, f"Failed to save: {e}")
+
+
+def handle_load_conversation(body: Dict, user_name: str) -> Dict:
+    """Load a conversation from S3."""
+    conversation_id = body.get('conversation_id')
+    if not conversation_id:
+        return error_response(400, "conversation_id required")
+    
+    key = f"{CONVERSATIONS_PREFIX}/{user_name}/{conversation_id}.json"
+    
+    try:
+        response = s3.get_object(Bucket=CONVERSATIONS_BUCKET, Key=key)
+        conversation = json.loads(response['Body'].read().decode('utf-8'))
+        return success_response({'conversation': conversation})
+    except s3.exceptions.NoSuchKey:
+        return error_response(404, "Conversation not found")
+    except Exception as e:
+        logger.error(f"Failed to load conversation: {e}")
+        return error_response(500, f"Failed to load: {e}")
+
+
+def handle_list_conversations(user_name: str) -> Dict:
+    """List all conversations for a user."""
+    prefix = f"{CONVERSATIONS_PREFIX}/{user_name}/"
+    
+    try:
+        response = s3.list_objects_v2(
+            Bucket=CONVERSATIONS_BUCKET,
+            Prefix=prefix,
+            MaxKeys=100
+        )
+        
+        conversations = []
+        for obj in response.get('Contents', []):
+            try:
+                meta_response = s3.get_object(Bucket=CONVERSATIONS_BUCKET, Key=obj['Key'])
+                conv = json.loads(meta_response['Body'].read().decode('utf-8'))
+                conversations.append({
+                    'id': conv.get('id'),
+                    'title': conv.get('title', 'Untitled'),
+                    'created_at': conv.get('created_at'),
+                    'updated_at': conv.get('updated_at'),
+                    'message_count': len(conv.get('messages', [])),
+                })
+            except:
+                pass
+        
+        conversations.sort(key=lambda x: x.get('updated_at', ''), reverse=True)
+        return success_response({'conversations': conversations})
+    except Exception as e:
+        logger.error(f"Failed to list conversations: {e}")
+        return error_response(500, f"Failed to list: {e}")
+
+
+def handle_delete_conversation(body: Dict, user_name: str) -> Dict:
+    """Delete a conversation from S3."""
+    conversation_id = body.get('conversation_id')
+    if not conversation_id:
+        return error_response(400, "conversation_id required")
+    
+    key = f"{CONVERSATIONS_PREFIX}/{user_name}/{conversation_id}.json"
+    
+    try:
+        s3.delete_object(Bucket=CONVERSATIONS_BUCKET, Key=key)
+        return success_response({'deleted': True})
+    except Exception as e:
+        logger.error(f"Failed to delete conversation: {e}")
+        return error_response(500, f"Failed to delete: {e}")
+
+
+# ============================================================================
+# Chat Handlers
+# ============================================================================
+
+def handle_chat_sync(body: Dict, user_name: str, is_admin: bool) -> Dict:
+    """Handle chat synchronously (for API Gateway)."""
+    messages = body.get('messages', [])
+    
+    if isinstance(messages, str):
+        messages = json.loads(messages)
+    
+    if not messages:
+        return error_response(400, 'No messages provided')
+    
+    system_prompt = build_system_prompt(user_name, is_admin)
+    
+    claude_messages = []
+    for msg in messages:
+        role = msg.get('role', 'user')
+        content = msg.get('content', '')
+        if role in ['user', 'assistant']:
+            claude_messages.append({
+                'role': role, 
+                'content': [{'text': content}]
+            })
+    
+    response = call_bedrock_with_tools(
+        system_prompt=system_prompt,
+        messages=claude_messages,
+        user_name=user_name,
+        is_admin=is_admin
+    )
+    
+    return success_response({
+        'response': response,
+        'user': user_name,
+        'is_admin': is_admin
+    })
+
+
+def handle_chat_streaming(body: Dict, user_name: str, is_admin: bool):
+    """
+    Handle chat with streaming response (for Function URL).
+    Returns a generator that yields newline-delimited JSON chunks.
+    """
+    messages = body.get('messages', [])
+    
+    if isinstance(messages, str):
+        messages = json.loads(messages)
+    
+    if not messages:
+        yield json.dumps({'type': 'error', 'content': 'No messages provided'}) + '\n'
+        return
+    
+    system_prompt = build_system_prompt(user_name, is_admin)
+    
+    claude_messages = []
+    for msg in messages:
+        role = msg.get('role', 'user')
+        content = msg.get('content', '')
+        if role in ['user', 'assistant']:
+            claude_messages.append({
+                'role': role, 
+                'content': [{'text': content}]
+            })
+    
+    yield from call_bedrock_with_tools_streaming(
+        system_prompt=system_prompt,
+        messages=claude_messages,
+        user_name=user_name,
+        is_admin=is_admin
+    )
+
+
+def call_bedrock_with_tools_streaming(
+    system_prompt: str, 
+    messages: List[Dict], 
+    user_name: str, 
+    is_admin: bool, 
+    max_iterations: int = 20
+) -> Generator[str, None, None]:
+    """
+    Call Bedrock Claude with tool support, yielding progress updates.
+    
+    Yields newline-delimited JSON chunks:
+    - {"type": "progress", "content": "Querying portfolio..."}
+    - {"type": "done", "content": "full response", "user": "...", "is_admin": ...}
+    - {"type": "error", "content": "error message"}
+    """
+    current_messages = messages.copy()
+    
+    bedrock_tools = []
+    for t in TOOLS:
+        tool_spec = {
+            'name': t['name'],
+            'description': t['description'],
+            'inputSchema': {'json': t['inputSchema']}
         }
+        bedrock_tools.append({'toolSpec': tool_spec})
+    
+    for iteration in range(max_iterations):
+        logger.info(f"Bedrock call iteration {iteration + 1}")
+        yield json.dumps({'type': 'progress', 'content': f'Thinking... (iteration {iteration + 1})'}) + '\n'
+        
+        response = bedrock.converse(
+            modelId=MODEL_ID,
+            system=[{'text': system_prompt}],
+            messages=current_messages,
+            toolConfig={'tools': bedrock_tools},
+            inferenceConfig={
+                'maxTokens': MAX_TOKENS,
+                'temperature': 0.3,
+            }
+        )
+        
+        stop_reason = response.get('stopReason', 'end_turn')
+        output = response.get('output', {})
+        message = output.get('message', {})
+        content_blocks = message.get('content', [])
+        
+        logger.info(f"Stop reason: {stop_reason}, Content blocks: {len(content_blocks)}")
+        
+        if stop_reason != 'tool_use':
+            text_parts = []
+            for block in content_blocks:
+                if 'text' in block:
+                    text_parts.append(block['text'])
+            full_response = '\n'.join(text_parts)
+            yield json.dumps({'type': 'done', 'content': full_response, 'user': user_name, 'is_admin': is_admin}) + '\n'
+            return
+        
+        tool_results = []
+        for block in content_blocks:
+            if 'toolUse' in block:
+                tool_use = block['toolUse']
+                tool_id = tool_use['toolUseId']
+                tool_name = tool_use['name']
+                tool_input = tool_use.get('input', {})
+                
+                friendly_name = tool_name.replace('_', ' ').title()
+                yield json.dumps({'type': 'progress', 'content': f'Executing: {friendly_name}...'}) + '\n'
+                
+                logger.info(f"Executing tool: {tool_name}")
+                result = execute_tool(tool_name, tool_input, user_name, is_admin)
+                
+                tool_results.append({
+                    'toolResult': {
+                        'toolUseId': tool_id,
+                        'content': [{'json': result}]
+                    }
+                })
+        
+        current_messages.append(message)
+        current_messages.append({'role': 'user', 'content': tool_results})
+    
+    yield json.dumps({'type': 'done', 'content': 'Max iterations reached. The query may be too complex.', 'user': user_name, 'is_admin': is_admin}) + '\n'
 
 
-def call_bedrock_with_tools(system_prompt: str, messages: List[Dict], user_name: str, is_admin: bool, max_iterations: int = 10) -> str:
+def call_bedrock_with_tools(system_prompt: str, messages: List[Dict], user_name: str, is_admin: bool, max_iterations: int = 20) -> str:
     """
     Call Bedrock Claude with tool support, handling tool use loops.
     
     Returns the final text response after all tool calls are complete.
     """
     current_messages = messages.copy()
+    
+    # Convert tools to Bedrock format - inputSchema must be wrapped in {'json': schema}
+    bedrock_tools = []
+    for t in TOOLS:
+        tool_spec = {
+            'name': t['name'],
+            'description': t['description'],
+            'inputSchema': {'json': t['inputSchema']}  # Wrap in json key
+        }
+        bedrock_tools.append({'toolSpec': tool_spec})
     
     for iteration in range(max_iterations):
         logger.info(f"Bedrock call iteration {iteration + 1}")
@@ -878,7 +1191,7 @@ def call_bedrock_with_tools(system_prompt: str, messages: List[Dict], user_name:
             modelId=MODEL_ID,
             system=[{'text': system_prompt}],
             messages=current_messages,
-            toolConfig={'tools': [{'toolSpec': t} for t in TOOLS]},
+            toolConfig={'tools': bedrock_tools},
             inferenceConfig={
                 'maxTokens': MAX_TOKENS,
                 'temperature': 0.3,

@@ -579,7 +579,7 @@ Resources:
       CodeUri: ./
       Handler: ai-chat.lambda_handler
       Description: AI chat assistant with read-only access to trading data
-      Timeout: 300
+      Timeout: 900  # 15 minutes max - complex queries may need time
       MemorySize: 512
       AutoPublishAlias: live
       # No provisioned concurrency - occasional use
@@ -589,16 +589,17 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: INFO
+          CONVERSATIONS_BUCKET: production-kalshi-trading-config
       Policies:
-        # Bedrock access for Claude
+        # Bedrock access for Claude Sonnet 4.5 via cross-region inference
         - Statement:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
                 - bedrock:Converse
               Resource:
-                - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/us.anthropic.claude-sonnet-4-5-20250514-v1:0'
-                - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-sonnet-4-5-20250514-v1:0'
+                - 'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0'
+                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0'
         # Read-only DynamoDB access to all kalshi tables
         - DynamoDBReadPolicy:
             TableName: production-kalshi-event-archive
@@ -653,11 +654,19 @@ Resources:
                 - dynamodb:Query
               Resource:
                 - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-*/index/*
-        # Read-only S3 access
+        # Read-only S3 access for docs and captures
         - S3ReadPolicy:
             BucketName: production-kalshi-trading-config
         - S3ReadPolicy:
             BucketName: production-kalshi-trading-captures
+        # S3 write for saving conversations
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:DeleteObject
+              Resource:
+                - arn:aws:s3:::production-kalshi-trading-config/ai-conversations/*
         # Secrets access for Kalshi API credentials
         - Statement:
             - Effect: Allow
@@ -670,12 +679,25 @@ Resources:
               Action:
                 - secretsmanager:ListSecrets
               Resource: '*'
+      # Keep API Gateway endpoint for backwards compat, but Function URL is primary
       Events:
         AIChat:
           Type: Api
           Properties:
             RestApiId: !Ref DashboardApi
             Path: /ai-chat
+            Method: POST
+        AIChatConversationsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /ai-chat/conversations
+            Method: GET
+        AIChatConversationsPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /ai-chat/conversations
             Method: POST
 
   # Voice Trader Scheduler - Auto-start EC2 before scheduled events

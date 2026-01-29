@@ -922,45 +922,33 @@ export async function sendAIChatMessageStreaming(
   }
 
   try {
-    // Get IAM credentials from Cognito Identity Pool
-    // forceRefresh ensures we get fresh Identity Pool credentials
-    const session = await fetchAuthSession({ forceRefresh: true });
-    const credentials = session.credentials;
-    
-    if (!credentials) {
-      console.error('No credentials in session:', session);
-      onError('Failed to get IAM credentials. Make sure you are logged in.');
-      return;
-    }
+    // Get user info from session for the request body
+    const session = await fetchAuthSession();
+    const idToken = session.tokens?.idToken;
+    const userName = idToken?.payload?.['cognito:username'] as string || 'unknown';
+    const groups = idToken?.payload?.['cognito:groups'] as string[] || [];
+    const isAdmin = groups.some(g => g.toLowerCase().includes('admin'));
 
-    console.log('Got IAM credentials, signing request...');
+    console.log('User:', userName, 'Admin:', isAdmin);
 
-    // Build request body
+    // Build request body - include user info since Function URL has no auth
     const messagesPayload = messages.map(m => ({ role: m.role, content: m.content }));
-    const body = JSON.stringify({ messages: messagesPayload });
-
-    // Sign the request
-    const signedHeaders = await signRequest(
-      AI_CHAT_FUNCTION_URL,
-      'POST',
-      body,
-      {
-        accessKeyId: credentials.accessKeyId,
-        secretAccessKey: credentials.secretAccessKey,
-        sessionToken: credentials.sessionToken,
-      },
-      'us-east-1'
-    );
+    const body = JSON.stringify({ 
+      messages: messagesPayload,
+      user_name: userName,
+      is_admin: isAdmin,
+    });
 
     console.log('Making streaming request to:', AI_CHAT_FUNCTION_URL);
-    console.log('Signed headers:', Object.fromEntries(signedHeaders.entries()));
 
-    // Make the streaming request
+    // Make the streaming request (no SigV4 needed - Function URL is public)
     let response: Response;
     try {
       response = await fetch(AI_CHAT_FUNCTION_URL, {
         method: 'POST',
-        headers: signedHeaders,
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body,
         mode: 'cors',
       });

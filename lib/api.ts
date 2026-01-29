@@ -927,7 +927,11 @@ export async function sendAIChatMessageStreaming(
     // Get user info from session for the request body
     const session = await fetchAuthSession();
     const idToken = session.tokens?.idToken;
-    const userName = idToken?.payload?.['cognito:username'] as string || 'unknown';
+    // Note: cognito:username is the UUID when email is used as alias
+    // Use preferred_username which contains the actual username (e.g., "jimc")
+    const userName = idToken?.payload?.['preferred_username'] as string 
+                  || idToken?.payload?.['cognito:username'] as string 
+                  || 'unknown';
     const groups = idToken?.payload?.['cognito:groups'] as string[] || [];
     const isAdmin = groups.some(g => g.toLowerCase().includes('admin'));
 

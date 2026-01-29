@@ -871,12 +871,12 @@ def lambda_handler(event, context):
 
 def error_response(status_code: int, message: str) -> Dict:
     """Return a standard error response."""
+    # Note: Don't add CORS headers here - Function URL handles them
+    # Adding them causes duplicate '*, *' which browsers reject
     return {
         'statusCode': status_code,
         'headers': {
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Amz-Date,X-Amz-Security-Token',
         },
         'body': json.dumps({'error': message})
     }
@@ -884,12 +884,11 @@ def error_response(status_code: int, message: str) -> Dict:
 
 def success_response(data: Dict) -> Dict:
     """Return a standard success response."""
+    # Note: Don't add CORS headers here - Function URL handles them
     return {
         'statusCode': 200,
         'headers': {
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Amz-Date,X-Amz-Security-Token',
         },
         'body': json.dumps(data, cls=DecimalEncoder)
     }

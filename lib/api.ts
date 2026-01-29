@@ -856,7 +856,8 @@ export interface AIChatStreamError {
 
 export type AIChatStreamChunk = AIChatStreamProgress | AIChatStreamDone | AIChatStreamError;
 
-// Get the AI Chat Function URL - this should be configured after deployment
+// Get the AI Chat Function URL from environment
+// Falls back to empty string if not configured (will show error in UI)
 const AI_CHAT_FUNCTION_URL = process.env.NEXT_PUBLIC_AI_CHAT_FUNCTION_URL || '';
 
 /**

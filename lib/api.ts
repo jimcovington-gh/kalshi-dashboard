@@ -974,17 +974,25 @@ export async function sendAIChatMessageStreaming(
     const result = await response.json();
     console.log('Response received:', result);
 
-    if (result.error) {
-      onError(result.error);
+    // Handle API Gateway-style response (statusCode, headers, body)
+    // Function URL with RESPONSE_STREAM mode returns this format
+    let data = result;
+    if (result.statusCode && result.body) {
+      // Body is a JSON string, parse it
+      data = typeof result.body === 'string' ? JSON.parse(result.body) : result.body;
+    }
+
+    if (data.error) {
+      onError(data.error);
       return;
     }
 
     // Convert to the expected done format
     onDone({
       type: 'done',
-      content: result.response || result.body?.response || 'No response content',
-      user: result.user || userName,
-      is_admin: result.is_admin ?? isAdmin,
+      content: data.response || 'No response content',
+      user: data.user || userName,
+      is_admin: data.is_admin ?? isAdmin,
     });
   } catch (error) {
     console.error('AI Chat error:', error);

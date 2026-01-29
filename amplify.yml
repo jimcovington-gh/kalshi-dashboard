@@ -34,6 +34,13 @@ frontend:
     build:
       commands:
         - echo "Building Next.js app..."
+        # Clear Next.js cache if .env changed (env vars baked into JS at build time)
+        - |
+          if [ -f .env-hash ] && [ "$(md5sum .env | cut -d' ' -f1)" != "$(cat .env-hash)" ]; then
+            echo ".env changed, clearing Next.js cache..."
+            rm -rf .next/cache
+          fi
+          md5sum .env | cut -d' ' -f1 > .env-hash
         - npm run build
   artifacts:
     baseDirectory: .next

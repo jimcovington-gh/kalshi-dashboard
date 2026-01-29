@@ -952,15 +952,29 @@ export async function sendAIChatMessageStreaming(
       'us-east-1'
     );
 
+    console.log('Making streaming request to:', AI_CHAT_FUNCTION_URL);
+    console.log('Signed headers:', Object.fromEntries(signedHeaders.entries()));
+
     // Make the streaming request
-    const response = await fetch(AI_CHAT_FUNCTION_URL, {
-      method: 'POST',
-      headers: signedHeaders,
-      body,
-    });
+    let response: Response;
+    try {
+      response = await fetch(AI_CHAT_FUNCTION_URL, {
+        method: 'POST',
+        headers: signedHeaders,
+        body,
+        mode: 'cors',
+      });
+    } catch (fetchError) {
+      console.error('Fetch failed:', fetchError);
+      onError(`Network error: ${fetchError instanceof Error ? fetchError.message : 'Unknown fetch error'}`);
+      return;
+    }
+
+    console.log('Response status:', response.status);
 
     if (!response.ok) {
       const text = await response.text();
+      console.error('Response error:', response.status, text);
       onError(`HTTP ${response.status}: ${text}`);
       return;
     }

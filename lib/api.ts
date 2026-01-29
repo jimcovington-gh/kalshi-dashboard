@@ -842,11 +842,17 @@ export interface AIChatStreamProgress {
   content: string;
 }
 
+export interface ToolCall {
+  tool: string;
+  detail: string;
+}
+
 export interface AIChatStreamDone {
   type: 'done';
   content: string;
   user: string;
   is_admin: boolean;
+  tool_calls?: ToolCall[];
 }
 
 export interface AIChatStreamError {
@@ -997,6 +1003,7 @@ export async function sendAIChatMessageStreaming(
       content: data.response || 'No response content',
       user: data.user || userName,
       is_admin: data.is_admin ?? isAdmin,
+      tool_calls: data.tool_calls || [],
     });
   } catch (error) {
     console.error('AI Chat error:', error);

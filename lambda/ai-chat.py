@@ -772,6 +772,12 @@ def build_system_prompt(user_name: str, is_admin: bool) -> str:
 3. **Warn about costs** - Use estimate_query_cost before operations that might be expensive.
 4. **Explain data** - Help users understand what the data means, not just show raw values.
 5. **Stay read-only** - You cannot modify any data. If asked to trade or change settings, explain you can only read.
+6. **Time formatting** - All timestamps in the database are stored in UTC. When presenting times to the user:
+   - Always convert UTC to the user's local timezone
+   - Ask the user for their timezone if not known (default assumption: US Eastern)
+   - Display times in a human-readable format like "Jan 29, 2026 at 2:30 PM ET"
+   - When showing relative times (e.g., "2 hours ago"), that's fine without timezone
+   - IMPORTANT: Do NOT say times are in Eastern if they're actually UTC - convert them properly
 
 ## Common Queries
 
@@ -781,7 +787,8 @@ def build_system_prompt(user_name: str, is_admin: bool) -> str:
 - Market info: Query production-kalshi-market-metadata or use kalshi_get_market
 - System docs: Use read_documentation for PROJECT_SUMMARY.md or QUICK_REFERENCE.md
 
-Current timestamp: {datetime.now(timezone.utc).isoformat()}
+Current UTC timestamp: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC
+Note: US Eastern is UTC-5 (EST) or UTC-4 (EDT during daylight saving). Currently it's {'EST (UTC-5)' if datetime.now(timezone.utc).month in [11, 12, 1, 2, 3] else 'EDT (UTC-4)'}.
 """
 
 
@@ -1029,7 +1036,7 @@ def handle_chat_sync(body: Dict, user_name: str, is_admin: bool) -> Dict:
                 'content': [{'text': content}]
             })
     
-    response = call_bedrock_with_tools(
+    result = call_bedrock_with_tools(
         system_prompt=system_prompt,
         messages=claude_messages,
         user_name=user_name,
@@ -1037,7 +1044,8 @@ def handle_chat_sync(body: Dict, user_name: str, is_admin: bool) -> Dict:
     )
     
     return success_response({
-        'response': response,
+        'response': result['response'],
+        'tool_calls': result['tool_calls'],
         'user': user_name,
         'is_admin': is_admin
     })
@@ -1161,13 +1169,16 @@ def call_bedrock_with_tools_streaming(
     yield json.dumps({'type': 'done', 'content': 'Max iterations reached. The query may be too complex.', 'user': user_name, 'is_admin': is_admin}) + '\n'
 
 
-def call_bedrock_with_tools(system_prompt: str, messages: List[Dict], user_name: str, is_admin: bool, max_iterations: int = 20) -> str:
+def call_bedrock_with_tools(system_prompt: str, messages: List[Dict], user_name: str, is_admin: bool, max_iterations: int = 20) -> Dict:
     """
     Call Bedrock Claude with tool support, handling tool use loops.
     
-    Returns the final text response after all tool calls are complete.
+    Returns a dict with:
+    - response: The final text response
+    - tool_calls: List of tools that were called with their descriptions
     """
     current_messages = messages.copy()
+    tool_calls_made = []  # Track which tools were called
     
     # Convert tools to Bedrock format - inputSchema must be wrapped in {'json': schema}
     bedrock_tools = []
@@ -1208,7 +1219,10 @@ def call_bedrock_with_tools(system_prompt: str, messages: List[Dict], user_name:
             for block in content_blocks:
                 if 'text' in block:
                     text_parts.append(block['text'])
-            return '\n'.join(text_parts)
+            return {
+                'response': '\n'.join(text_parts),
+                'tool_calls': tool_calls_made
+            }
         
         # Handle tool use
         tool_results = []
@@ -1220,6 +1234,26 @@ def call_bedrock_with_tools(system_prompt: str, messages: List[Dict], user_name:
                 tool_input = tool_use.get('input', {})
                 
                 logger.info(f"Executing tool: {tool_name}")
+                
+                # Track the tool call for the "train of thought"
+                tool_call_info = {'tool': tool_name}
+                if tool_name == 'query_dynamodb':
+                    tool_call_info['detail'] = f"Querying {tool_input.get('table_name', 'table')}"
+                elif tool_name == 'read_s3_file':
+                    tool_call_info['detail'] = f"Reading {tool_input.get('key', 'file')}"
+                elif tool_name == 'kalshi_get_portfolio':
+                    tool_call_info['detail'] = f"Getting portfolio for {tool_input.get('user_name', 'user')}"
+                elif tool_name == 'kalshi_get_market':
+                    tool_call_info['detail'] = f"Getting market {tool_input.get('ticker', '')}"
+                elif tool_name == 'kalshi_get_orderbook':
+                    tool_call_info['detail'] = f"Getting orderbook for {tool_input.get('ticker', '')}"
+                elif tool_name == 'read_documentation':
+                    tool_call_info['detail'] = f"Reading {tool_input.get('file_path', 'docs')}"
+                elif tool_name == 'estimate_query_cost':
+                    tool_call_info['detail'] = f"Estimating cost for {tool_input.get('table_name', 'query')}"
+                else:
+                    tool_call_info['detail'] = tool_name
+                tool_calls_made.append(tool_call_info)
                 
                 # Execute the tool
                 result = execute_tool(tool_name, tool_input, user_name, is_admin)
@@ -1235,4 +1269,7 @@ def call_bedrock_with_tools(system_prompt: str, messages: List[Dict], user_name:
         current_messages.append(message)
         current_messages.append({'role': 'user', 'content': tool_results})
     
-    return "Max iterations reached. The query may be too complex."
+    return {
+        'response': "Max iterations reached. The query may be too complex.",
+        'tool_calls': tool_calls_made
+    }

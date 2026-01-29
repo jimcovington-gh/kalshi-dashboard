@@ -5,6 +5,7 @@ import {
   sendAIChatMessageStreaming, 
   ChatMessage,
   AIChatStreamDone,
+  ToolCall,
   listConversations,
   saveConversation,
   loadConversation,
@@ -19,6 +20,7 @@ interface DisplayMessage {
   timestamp: Date;
   isLoading?: boolean;
   progress?: string;
+  toolCalls?: ToolCall[];
 }
 
 // Generate a unique conversation ID
@@ -142,6 +144,7 @@ export default function AIChatPage() {
             content: response.content,
             timestamp: new Date(),
             isLoading: false,
+            toolCalls: response.tool_calls,
           };
           return updated;
         });
@@ -398,6 +401,8 @@ export default function AIChatPage() {
 
 function MessageBubble({ message, progress }: { message: DisplayMessage; progress?: string }) {
   const isUser = message.role === 'user';
+  const [showToolCalls, setShowToolCalls] = useState(false);
+  const hasToolCalls = message.toolCalls && message.toolCalls.length > 0;
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -418,8 +423,29 @@ function MessageBubble({ message, progress }: { message: DisplayMessage; progres
         ) : isUser ? (
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (
-          <div className="prose prose-sm max-w-none prose-pre:bg-gray-800 prose-pre:text-gray-100">
-            <ReactMarkdown>{message.content}</ReactMarkdown>
+          <div>
+            {/* Tool calls disclosure */}
+            {hasToolCalls && (
+              <div className="mb-2">
+                <button
+                  onClick={() => setShowToolCalls(!showToolCalls)}
+                  className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+                >
+                  <span className={`transform transition-transform ${showToolCalls ? 'rotate-90' : ''}`}>▶</span>
+                  {message.toolCalls!.length} tool{message.toolCalls!.length !== 1 ? 's' : ''} used
+                </button>
+                {showToolCalls && (
+                  <div className="mt-1 pl-3 border-l-2 border-gray-300 text-xs text-gray-500 space-y-0.5">
+                    {message.toolCalls!.map((tc, i) => (
+                      <div key={i}>• {tc.detail}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="prose prose-sm max-w-none prose-pre:bg-gray-800 prose-pre:text-gray-100">
+              <ReactMarkdown>{message.content}</ReactMarkdown>
+            </div>
           </div>
         )}
         <div

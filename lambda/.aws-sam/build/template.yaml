@@ -370,6 +370,7 @@ Resources:
       - Statement:
         - Effect: Allow
           Action:
+          - ecs:ListTasks
           - ecs:StopTask
           - ecs:DescribeTasks
           Resource: '*'

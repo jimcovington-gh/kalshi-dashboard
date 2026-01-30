@@ -328,21 +328,19 @@ def clear_user_monitors(user_name: str, admin_username: str) -> dict:
                 continue  # Skip USER# records (already handled)
             
             try:
-                table.update_item(
-                    Key={'event_ticker': event_ticker},
-                    UpdateExpression='SET fargate_state = :state, phase = :phase, cleared_at = :time, cleared_by = :admin',
-                    ExpressionAttributeValues={
-                        ':state': 'cleared',
-                        ':phase': 'cleared',
-                        ':time': now,
-                        ':admin': admin_username
-                    }
+                # DELETE the event record so it can be picked up fresh later
+                # This is cleaner than marking as 'cleared' since:
+                # 1. No stale 'cleared' records accumulate
+                # 2. Event can be re-assigned to any user via round-robin
+                # 3. No race conditions with heartbeat overwrites
+                table.delete_item(
+                    Key={'event_ticker': event_ticker}
                 )
                 results['events_cleared'] += 1
-                logger.info(f"Cleared event: {event_ticker}")
+                logger.info(f"Deleted event record: {event_ticker}")
             except Exception as e:
-                results['errors'].append(f"Error clearing {event_ticker}: {str(e)}")
-                logger.error(f"Error clearing event {event_ticker}: {e}")
+                results['errors'].append(f"Error deleting {event_ticker}: {str(e)}")
+                logger.error(f"Error deleting event {event_ticker}: {e}")
         
         results['success'] = len(results['errors']) == 0
         return results

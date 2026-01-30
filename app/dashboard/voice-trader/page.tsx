@@ -173,9 +173,6 @@ export default function VoiceTraderPage() {
   // Jitter buffer: track next scheduled playback time for gapless audio
   const nextPlayTimeRef = useRef<number>(0);
   const JITTER_BUFFER_MS = 50; // Buffer 50ms before starting playback (low latency for operator conversation);
-  // Audio lag tracking
-  const [audioLagMs, setAudioLagMs] = useState<number>(0);
-  const audioLagUpdateRef = useRef<number>(0);
   // Audio chunk counter for debugging
   const audioChunkCountRef = useRef<number>(0);
   const audioChunkLogIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -554,11 +551,41 @@ export default function VoiceTraderPage() {
         ws.onmessage = (event) => {
           // Handle binary audio data (always ArrayBuffer since we set ws.binaryType = 'arraybuffer')
           if (event.data instanceof ArrayBuffer) {
-            playAudioChunk(event.data);
-            return;
+            let audioBuffer = event.data;
+            const size = audioBuffer.byteLength;
+            const firstByte = new Uint8Array(audioBuffer)[0];
+            
+            // CRITICAL: Check if this is actually JSON text encoded as ArrayBuffer
+            // JSON starts with '{' (0x7B) - skip these, they're not audio!
+            if (firstByte === 0x7B) {  // '{' character
+              // This is JSON, decode and handle as message
+              const text = new TextDecoder().decode(audioBuffer);
+              const data = JSON.parse(text);
+              // Re-dispatch as if it were a text message (fall through to JSON handling below)
+              // by NOT returning here
+            } else {
+              // Skip tiny chunks (likely corrupted)
+              if (size < 100) {
+                console.warn(`[AUDIO] Tiny chunk skipped: size=${size}`);
+                return;
+              }
+              
+              // If odd number of bytes, pad to make even (Int16Array requires pairs)
+              if (size % 2 !== 0) {
+                const padded = new Uint8Array(size + 1);
+                padded.set(new Uint8Array(audioBuffer));
+                padded[size] = 0;
+                audioBuffer = padded.buffer;
+              }
+              
+              // Play the audio
+              playAudioChunk(audioBuffer);
+              return;
+            }
           }
           
-          const data = JSON.parse(event.data);
+          // Handle JSON text messages (or JSON-as-ArrayBuffer that fell through)
+          const data = typeof event.data === 'string' ? JSON.parse(event.data) : JSON.parse(new TextDecoder().decode(event.data));
           
           if (data.type === 'full_state') {
             // DEBUG: Log words received
@@ -1167,25 +1194,9 @@ export default function VoiceTraderPage() {
       // Jitter buffer: Schedule playback at precise times for gapless audio
       const now = ctx.currentTime;
       
-      // Calculate current audio lag (how far ahead the buffer is)
-      const currentLagSec = Math.max(0, nextPlayTimeRef.current - now);
-      const currentLagMs = Math.round(currentLagSec * 1000);
-      
-      // Update lag display (throttled to every 500ms to avoid re-render spam)
-      if (Date.now() - audioLagUpdateRef.current > 500) {
-        audioLagUpdateRef.current = Date.now();
-        setAudioLagMs(currentLagMs);
-      }
-      
-      // MAX_LAG: Auto-reset if buffer gets too far behind (>3 seconds)
-      // This prevents runaway lag accumulation
-      const MAX_LAG_SEC = 3.0;
-      
-      // If this is the first chunk, we've fallen behind, OR lag is too high, reset
-      if (nextPlayTimeRef.current <= now || currentLagSec > MAX_LAG_SEC) {
-        if (currentLagSec > MAX_LAG_SEC) {
-          console.log(`[AUDIO] Auto-reset: lag was ${currentLagMs}ms (>${MAX_LAG_SEC*1000}ms max)`);
-        }
+      // If this is the first chunk or we've fallen behind, reset the schedule
+      // Add jitter buffer delay on first chunk for smoother playback
+      if (nextPlayTimeRef.current <= now) {
         nextPlayTimeRef.current = now + (JITTER_BUFFER_MS / 1000);
       }
       
@@ -1203,17 +1214,6 @@ export default function VoiceTraderPage() {
       console.error('Audio playback error:', err);
     }
   }, [audioMuted, initAudioContext]);
-
-  // Catch up audio to live (reset buffer)
-  const catchUpAudio = useCallback(() => {
-    const ctx = audioContextRef.current;
-    if (ctx) {
-      console.log(`[AUDIO] Manual catch-up: was ${audioLagMs}ms behind`);
-      // Reset to now + small buffer
-      nextPlayTimeRef.current = ctx.currentTime + (JITTER_BUFFER_MS / 1000);
-      setAudioLagMs(JITTER_BUFFER_MS);
-    }
-  }, [audioLagMs]);
 
   // Update volume when slider changes
   useEffect(() => {
@@ -2516,23 +2516,6 @@ export default function VoiceTraderPage() {
               className="w-16 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
               title="Speaker volume"
             />
-            {/* Audio lag indicator and catch-up button - always visible but grayed when no lag */}
-            <button
-              onClick={catchUpAudio}
-              disabled={audioLagMs <= 100 || audioMuted}
-              className={`px-2 py-1 rounded text-xs font-mono transition-all duration-100 min-w-[60px] ${
-                audioMuted || audioLagMs <= 100
-                  ? 'bg-gray-800 text-gray-500 cursor-default'
-                  : audioLagMs > 1000 
-                    ? 'bg-red-600 hover:bg-red-700 animate-pulse active:scale-95' 
-                    : audioLagMs > 500 
-                    ? 'bg-orange-600 hover:bg-orange-700 active:scale-95'
-                    : 'bg-gray-600 hover:bg-gray-500 active:scale-95'
-              }`}
-              title={audioLagMs > 100 ? `Audio is ${(audioLagMs/1000).toFixed(1)}s behind live. Click to catch up.` : 'Audio lag (click to catch up when lagging)'}
-            >
-              ⏩ {audioLagMs > 100 ? (audioLagMs > 1000 ? `${(audioLagMs/1000).toFixed(1)}s` : `${audioLagMs}ms`) : '0ms'}
-            </button>
           </div>
           
           {/* Divider */}

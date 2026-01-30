@@ -51,8 +51,8 @@ secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
 # Configuration
 # Claude Sonnet 4.5 via cross-region inference profile
 MODEL_ID = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0'
-MAX_TOKENS = 8192
-MAX_INPUT_TOKENS = 180000  # Claude Sonnet has 200K context, leave room for output
+MAX_TOKENS = 64000  # Claude Sonnet 4.5 supports up to 64K output tokens
+MAX_INPUT_TOKENS = 190000  # Claude Sonnet has 200K context, leave room for output
 INTERNAL_RATE_LIMIT = 10  # requests per second
 HIGH_CALL_WARNING_THRESHOLD = 50
 
@@ -166,6 +166,53 @@ class DecimalEncoder(json.JSONEncoder):
         if isinstance(obj, Decimal):
             return float(obj)
         return super().default(obj)
+
+
+# Maximum characters for a single tool result to prevent context overflow
+MAX_TOOL_RESULT_CHARS = 100000
+
+def truncate_tool_result(result: Dict) -> Dict:
+    """
+    Truncate tool results that are too large to prevent context overflow.
+    For list results, keeps complete items until limit is reached.
+    """
+    result_str = json.dumps(result, cls=DecimalEncoder)
+    if len(result_str) <= MAX_TOOL_RESULT_CHARS:
+        return result
+    
+    logger.warning(f"Tool result too large ({len(result_str)} chars), truncating to {MAX_TOOL_RESULT_CHARS}")
+    
+    # If result has 'items' list, truncate by removing items from the end
+    if 'items' in result and isinstance(result['items'], list):
+        items = result['items']
+        truncated_items = []
+        current_size = len(json.dumps({**result, 'items': []}, cls=DecimalEncoder))
+        
+        for item in items:
+            item_str = json.dumps(item, cls=DecimalEncoder)
+            if current_size + len(item_str) + 2 < MAX_TOOL_RESULT_CHARS:  # +2 for comma and bracket
+                truncated_items.append(item)
+                current_size += len(item_str) + 2
+            else:
+                break
+        
+        result = {
+            **result,
+            'items': truncated_items,
+            'count': len(truncated_items),
+            'truncated': True,
+            'truncated_message': f'Result truncated from {len(items)} to {len(truncated_items)} items due to size limits'
+        }
+        return result
+    
+    # For other results, just truncate the string representation
+    truncated_str = result_str[:MAX_TOOL_RESULT_CHARS]
+    return {
+        'truncated_result': truncated_str,
+        'truncated': True,
+        'original_size': len(result_str),
+        'truncated_message': 'Result truncated due to size limits'
+    }
 
 
 class RateLimiter:
@@ -286,16 +333,45 @@ def call_kalshi_api(user_name: str, method: str, endpoint: str, params: Optional
 TOOLS = [
     {
         "name": "query_dynamodb_table",
-        "description": """Query a DynamoDB table. Available tables:
-- production-kalshi-trades-v2: Trade history (keys: user_name, placed_at)
-- production-kalshi-positions-live: Current positions (keys: user_name, market_ticker)
-- production-kalshi-orders: Order history (keys: user_name, order_id)
-- production-kalshi-market-metadata: Market info (key: market_ticker)
-- production-kalshi-mention-events: Mention event config (key: event_ticker)
-- production-kalshi-mention-event-state: Event state (key: event_ticker)
-- production-kalshi-portfolio-snapshots: Portfolio history (keys: user_name, timestamp)
-- production-kalshi-volatile-watchlist: Volatility tracking
-Use scan for broad queries, get_item for specific items, query for indexed lookups.""",
+        "description": """Query a DynamoDB table. 
+
+⚠️ EFFICIENCY RULES:
+- Use limit=10-25 for initial queries (can request more if needed)
+- Use 'query' with index_name + key_condition_expression for large tables
+- trades-v2 records are ~6KB each due to orderbook_snapshot field!
+
+TABLE SCHEMAS (use correct keys!):
+
+production-kalshi-trades-v2:
+  - Primary key: order_id (HASH only)
+  - GSI 'user_name-placed_at-index': user_name (HASH), placed_at (RANGE) ← USE THIS FOR USER TRADES
+  - GSI 'user_name-index': user_name (HASH)
+  - GSI 'market_ticker-index': market_ticker (HASH)
+  - ⚠️ Each record ~6KB due to orderbook_snapshot field
+
+production-kalshi-positions-live:
+  - Primary key: user_name (HASH), market_ticker (RANGE)
+  - Small records, safe to query with higher limits
+
+production-kalshi-orders:
+  - Primary key: order_id (HASH only)
+  - GSI 'user_name-placed_at-index': user_name (HASH), placed_at (RANGE) ← USE THIS
+  - GSI 'user_name-index': user_name (HASH)
+
+production-kalshi-market-metadata:
+  - Primary key: market_ticker (HASH)
+  - GSI 'event_ticker-index': event_ticker (HASH)
+  - GSI 'status-index': status (HASH)
+
+production-kalshi-portfolio-snapshots:
+  - Primary key: api_key_id (HASH), snapshot_ts (RANGE)
+
+QUERY EXAMPLE for user trades:
+  operation='query', table='production-kalshi-trades-v2', 
+  index_name='user_name-placed_at-index',
+  key_condition_expression='user_name = :u',
+  expression_attribute_values={':u': 'jimc'}, 
+  limit=25, scan_index_forward=false (newest first)""",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -306,19 +382,19 @@ Use scan for broad queries, get_item for specific items, query for indexed looku
                 "operation": {
                     "type": "string",
                     "enum": ["scan", "get_item", "query"],
-                    "description": "The operation type"
+                    "description": "The operation type. Use 'query' with index_name for user-scoped tables!"
                 },
                 "key": {
                     "type": "object",
-                    "description": "For get_item: the primary key. E.g., {'user_name': 'jimc', 'market_ticker': 'TICKER'}"
+                    "description": "For get_item: the primary key. E.g., {'order_id': 'abc-123'}"
                 },
                 "filter_expression": {
                     "type": "string",
-                    "description": "For scan: filter expression. E.g., 'user_name = :u'"
+                    "description": "Filter expression (applied AFTER scan/query). E.g., 'status = :s'"
                 },
                 "key_condition_expression": {
                     "type": "string",
-                    "description": "For query: key condition. E.g., 'user_name = :u'"
+                    "description": "For query: key condition. E.g., 'user_name = :u' - REQUIRED for query operation"
                 },
                 "expression_attribute_values": {
                     "type": "object",
@@ -326,11 +402,15 @@ Use scan for broad queries, get_item for specific items, query for indexed looku
                 },
                 "index_name": {
                     "type": "string",
-                    "description": "GSI name for query operations"
+                    "description": "GSI name - REQUIRED for querying trades-v2 or orders by user_name! Use 'user_name-placed_at-index'"
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum items to return (default 100, max 1000)"
+                    "description": "Maximum items to return. Use 10-25 for trades (6KB each!). Max 1000."
+                },
+                "scan_index_forward": {
+                    "type": "boolean",
+                    "description": "Sort order for query. false=descending (newest first), true=ascending (oldest first). Default true."
                 }
             },
             "required": ["table_name", "operation"]
@@ -530,7 +610,9 @@ def tool_query_dynamodb(params: Dict, user_name: str, is_admin: bool) -> Dict:
     """Query DynamoDB table with user scoping."""
     table_name = params.get('table_name', '')
     operation = params.get('operation', 'scan')
-    limit = min(params.get('limit', 100), 1000)
+    # Default to 25 items - enough for most queries but not overwhelming
+    limit = min(params.get('limit', 25), 1000)
+    scan_index_forward = params.get('scan_index_forward', True)  # True = ascending (oldest first)
     
     # Validate table
     if table_name not in KALSHI_TABLES:
@@ -544,7 +626,7 @@ def tool_query_dynamodb(params: Dict, user_name: str, is_admin: bool) -> Dict:
     filter_expr = params.get('filter_expression', '')
     key_condition = params.get('key_condition_expression', '')
     
-    # Add user filter for tables with user_name
+    # Add user filter for tables with user_name (only for scan operations)
     user_scoped_tables = [
         'production-kalshi-trades-v2',
         'production-kalshi-positions-live',
@@ -552,7 +634,7 @@ def tool_query_dynamodb(params: Dict, user_name: str, is_admin: bool) -> Dict:
         'production-kalshi-portfolio-snapshots',
     ]
     
-    if not is_admin and table_name in user_scoped_tables:
+    if not is_admin and table_name in user_scoped_tables and operation == 'scan':
         if ':user_filter' not in expression_values:
             expression_values[':user_filter'] = user_name
             if filter_expr:
@@ -560,16 +642,32 @@ def tool_query_dynamodb(params: Dict, user_name: str, is_admin: bool) -> Dict:
             else:
                 filter_expr = "user_name = :user_filter"
     
+    def strip_large_fields(items: list, table: str) -> list:
+        """Remove large fields that bloat responses."""
+        if table == 'production-kalshi-trades-v2':
+            # orderbook_snapshot is ~3KB per record and rarely needed
+            for item in items:
+                if 'orderbook_snapshot' in item:
+                    del item['orderbook_snapshot']
+                # idea_parameters is also verbose
+                if 'idea_parameters' in item:
+                    del item['idea_parameters']
+        return items
+    
     try:
         if operation == 'get_item':
             key = params.get('key', {})
             response = table.get_item(Key=key)
             item = response.get('Item')
+            if item:
+                items = strip_large_fields([item], table_name)
+                item = items[0] if items else None
             return {"item": json.loads(json.dumps(item, cls=DecimalEncoder)) if item else None}
         
         elif operation == 'query':
             kwargs = {
                 'Limit': limit,
+                'ScanIndexForward': scan_index_forward,
             }
             if key_condition:
                 kwargs['KeyConditionExpression'] = key_condition
@@ -582,10 +680,12 @@ def tool_query_dynamodb(params: Dict, user_name: str, is_admin: bool) -> Dict:
             
             response = table.query(**kwargs)
             items = response.get('Items', [])
+            items = strip_large_fields(items, table_name)
             return {
                 "items": json.loads(json.dumps(items, cls=DecimalEncoder)),
                 "count": len(items),
-                "scanned_count": response.get('ScannedCount', len(items))
+                "scanned_count": response.get('ScannedCount', len(items)),
+                "has_more": 'LastEvaluatedKey' in response
             }
         
         else:  # scan
@@ -597,10 +697,12 @@ def tool_query_dynamodb(params: Dict, user_name: str, is_admin: bool) -> Dict:
             
             response = table.scan(**kwargs)
             items = response.get('Items', [])
+            items = strip_large_fields(items, table_name)
             return {
                 "items": json.loads(json.dumps(items, cls=DecimalEncoder)),
                 "count": len(items),
-                "scanned_count": response.get('ScannedCount', len(items))
+                "scanned_count": response.get('ScannedCount', len(items)),
+                "has_more": 'LastEvaluatedKey' in response
             }
     
     except Exception as e:
@@ -625,8 +727,8 @@ def tool_read_s3(params: Dict) -> Dict:
         if 'text' in content_type or 'json' in content_type or 'yaml' in content_type or key.endswith(('.json', '.yaml', '.yml', '.txt', '.md')):
             content = response['Body'].read().decode('utf-8')
             # Truncate very large files
-            if len(content) > 50000:
-                content = content[:50000] + "\n\n... [truncated, file too large]"
+            if len(content) > 500000:
+                content = content[:500000] + "\n\n... [truncated, file too large]"
             return {"content": content, "content_type": content_type, "size": response['ContentLength']}
         else:
             return {
@@ -765,8 +867,8 @@ def tool_read_docs(params: Dict) -> Dict:
         content = response['Body'].read().decode('utf-8')
         
         # Truncate very large files
-        if len(content) > 50000:
-            content = content[:50000] + "\n\n... [truncated, file too large]"
+        if len(content) > 500000:
+            content = content[:500000] + "\n\n... [truncated, file too large]"
         
         return {"content": content, "doc_name": doc_name}
     except s3.exceptions.NoSuchKey:
@@ -821,44 +923,76 @@ def build_system_prompt(user_name: str, is_admin: bool) -> str:
 3. **Call Kalshi API** - Live portfolio, market data, orderbooks (rate-limited to 10/sec)
 4. **Read documentation** - System architecture and deployment docs
 
-## Key Data Locations
+## DynamoDB Table Schemas (USE CORRECT KEYS!)
 
-### DynamoDB Tables
-- `production-kalshi-trades-v2`: All executed trades (user_name, market_ticker, placed_at, filled_count, avg_fill_price)
-- `production-kalshi-positions-live`: Current open positions (user_name, market_ticker, position, resting_orders)
-- `production-kalshi-orders`: Order history (user_name, order_id, status)
-- `production-kalshi-market-metadata`: Market info (ticker, title, event_ticker, close_time)
-- `production-kalshi-mention-events`: Mention market configurations
-- `production-kalshi-mention-event-state`: Current state of mention events
+### production-kalshi-trades-v2 (⚠️ ~3KB per record after stripping)
+- **Primary key:** order_id (HASH only) - NOT user_name!
+- **GSI 'user_name-placed_at-index':** user_name (HASH), placed_at (RANGE) ← USE THIS FOR USER TRADES
+- **GSI 'market_ticker-index':** market_ticker (HASH)
+- Query example: operation='query', index_name='user_name-placed_at-index', key_condition='user_name = :u', scan_index_forward=false
+
+### production-kalshi-positions-live (small, safe to query)
+- **Primary key:** user_name (HASH), market_ticker (RANGE)
+- Can query directly by user_name without GSI
+
+### production-kalshi-orders
+- **Primary key:** order_id (HASH only)
+- **GSI 'user_name-placed_at-index':** user_name (HASH), placed_at (RANGE) ← USE THIS
+
+### production-kalshi-market-metadata
+- **Primary key:** market_ticker (HASH)
+- **GSI 'event_ticker-index':** event_ticker (HASH)
+- Use get_item for single market lookups
 
 ### S3 Buckets
 - `production-kalshi-trading-config`: Trading idea configs (ideas/high-confidence.yaml)
 - `production-kalshi-trading-captures`: Recorded game/event audio and data
 
-## Guidelines
+## ⚠️ CRITICAL: Query Patterns
 
-1. **Be concise** - Don't overwhelm with data. Summarize and highlight key points.
+### For User Trades (CORRECT WAY):
+```
+query_dynamodb_table(
+  table_name="production-kalshi-trades-v2",
+  operation="query",
+  index_name="user_name-placed_at-index",   ← REQUIRED! Primary key is order_id, not user_name
+  key_condition_expression="user_name = :u",
+  expression_attribute_values={{":u": "{user_name}"}},
+  scan_index_forward=false,  ← newest first
+  limit=25
+)
+```
+
+### For User Positions (simpler - user_name is primary key):
+```
+query_dynamodb_table(
+  table_name="production-kalshi-positions-live",
+  operation="query",
+  key_condition_expression="user_name = :u",
+  expression_attribute_values={{":u": "{user_name}"}},
+  limit=100
+)
+```
+
+### NEVER DO THIS:
+❌ scan on trades-v2 (11K+ records, will timeout)
+❌ query trades-v2 without index_name (primary key is order_id, not user_name)
+❌ limit=100+ on trades (3KB each = 300KB+ response)
+
+## General Guidelines
+
+1. **Be concise** - Summarize and highlight key points.
 2. **Use tables** - Format data nicely when showing multiple items.
-3. **Warn about costs** - Use estimate_query_cost before operations that might be expensive.
-4. **Explain data** - Help users understand what the data means, not just show raw values.
-5. **Stay read-only** - You cannot modify any data. If asked to trade or change settings, explain you can only read.
-6. **Time formatting** - All timestamps in the database are stored in UTC. When presenting times to the user:
-   - Always convert UTC to the user's local timezone
-   - Ask the user for their timezone if not known (default assumption: US Eastern)
-   - Display times in a human-readable format like "Jan 29, 2026 at 2:30 PM ET"
-   - When showing relative times (e.g., "2 hours ago"), that's fine without timezone
-   - IMPORTANT: Do NOT say times are in Eastern if they're actually UTC - convert them properly
-
-## Common Queries
-
-- Portfolio value: Use kalshi_get_portfolio
-- Recent trades: Query production-kalshi-trades-v2 with user filter
-- Position details: Query production-kalshi-positions-live
-- Market info: Query production-kalshi-market-metadata or use kalshi_get_market
-- System docs: Use read_documentation for PROJECT_SUMMARY.md or QUICK_REFERENCE.md
+3. **Explain data** - Help users understand what the data means.
+4. **Stay read-only** - You cannot modify any data.
+5. **Time formatting** - Timestamps are UTC. Convert to US Eastern when displaying.
+   - Display like "Jan 29, 2026 at 2:30 PM ET"
+   - placed_at is Unix timestamp (seconds since epoch)
+6. **Give exact counts** - When reporting row counts, always give the exact number (e.g., "27 trades") instead of approximate ranges (e.g., "20+ trades" or "several trades"). Query to get the actual count if needed.
+7. **Show market_ticker, not order_id** - When displaying trades to users, show the market_ticker (e.g., "KXBTC-26JAN29-T104999") as the primary identifier, not the internal order_id. Users care about which market, not the UUID.
 
 Current UTC timestamp: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC
-Note: US Eastern is UTC-5 (EST) or UTC-4 (EDT during daylight saving). Currently it's {'EST (UTC-5)' if datetime.now(timezone.utc).month in [11, 12, 1, 2, 3] else 'EDT (UTC-4)'}.
+Note: US Eastern is currently {'EST (UTC-5)' if datetime.now(timezone.utc).month in [11, 12, 1, 2, 3] else 'EDT (UTC-4)'}.
 """
 
 
@@ -1188,7 +1322,11 @@ def call_bedrock_with_tools_streaming(
         bedrock_tools.append({'toolSpec': tool_spec})
     
     for iteration in range(max_iterations):
-        logger.info(f"Bedrock call iteration {iteration + 1}")
+        # Log the size of what we're sending
+        messages_json = json.dumps(current_messages, cls=DecimalEncoder)
+        system_json = json.dumps(system_prompt)
+        tools_json = json.dumps(bedrock_tools)
+        logger.info(f"Bedrock call iteration {iteration + 1}: messages={len(messages_json)} chars, system={len(system_json)} chars, tools={len(tools_json)} chars, total={len(messages_json)+len(system_json)+len(tools_json)} chars")
         yield json.dumps({'type': 'progress', 'content': f'Thinking... (iteration {iteration + 1})'}) + '\n'
         
         response = bedrock.converse(
@@ -1231,6 +1369,7 @@ def call_bedrock_with_tools_streaming(
                 
                 logger.info(f"Executing tool: {tool_name}")
                 result = execute_tool(tool_name, tool_input, user_name, is_admin)
+                result = truncate_tool_result(result)  # Prevent context overflow
                 
                 tool_results.append({
                     'toolResult': {
@@ -1267,7 +1406,11 @@ def call_bedrock_with_tools(system_prompt: str, messages: List[Dict], user_name:
         bedrock_tools.append({'toolSpec': tool_spec})
     
     for iteration in range(max_iterations):
-        logger.info(f"Bedrock call iteration {iteration + 1}")
+        # Log the size of what we're sending
+        messages_json = json.dumps(current_messages, cls=DecimalEncoder)
+        system_json = json.dumps(system_prompt)
+        tools_json = json.dumps(bedrock_tools)
+        logger.info(f"Bedrock call iteration {iteration + 1}: messages={len(messages_json)} chars, system={len(system_json)} chars, tools={len(tools_json)} chars, total={len(messages_json)+len(system_json)+len(tools_json)} chars")
         
         # Call Bedrock
         response = bedrock.converse(
@@ -1333,6 +1476,7 @@ def call_bedrock_with_tools(system_prompt: str, messages: List[Dict], user_name:
                 
                 # Execute the tool
                 result = execute_tool(tool_name, tool_input, user_name, is_admin)
+                result = truncate_tool_result(result)  # Prevent context overflow
                 
                 tool_results.append({
                     'toolResult': {

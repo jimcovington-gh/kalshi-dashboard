@@ -969,13 +969,14 @@ export function TestBenchV2() {
 
     try {
       const config = {
+        session_id: selectedEvent.event_ticker,
         event_ticker: selectedEvent.event_ticker,
         audio_source: audioSource,
         phone_number: audioSource === 'phone' ? phoneNumber : undefined,
         passcode: audioSource === 'phone' ? passcode : undefined,
         stream_url: audioSource === 'web' ? webUrl : undefined,
         dry_run: dryRun,
-        use_v2_pipeline: true, // Flag to use new worker
+        use_v2: true, // Use v2 worker pipeline (worker_new.py)
       };
 
       const response = await fetch(`${EC2_BASE}/connect`, {

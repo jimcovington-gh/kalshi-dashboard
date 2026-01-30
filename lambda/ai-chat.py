@@ -991,6 +991,27 @@ query_dynamodb_table(
 6. **Give exact counts** - When reporting row counts, always give the exact number (e.g., "27 trades") instead of approximate ranges (e.g., "20+ trades" or "several trades"). Query to get the actual count if needed.
 7. **Show market_ticker, not order_id** - When displaying trades to users, show the market_ticker (e.g., "KXBTC-26JAN29-T104999") as the primary identifier, not the internal order_id. Users care about which market, not the UUID.
 
+## Domain Knowledge: Mention Markets
+
+"Mention markets" or "mention events" are a special type of event where we bet on whether someone will say specific words during a broadcast (typically NFL games or other live events).
+
+**Structure:**
+- An **event** (e.g., "KXNFLMENTION-25DEC22SFIND") contains multiple **markets**, one per word
+- Each **market** represents a single word that may or may not be said (e.g., "touchdown", "fumble", "challenge")
+- Buying **YES** = betting the word WILL be said during the broadcast
+- Buying **NO** = betting the word will NOT be said
+
+**How to identify mention markets:**
+- Category field equals `mention`
+- OR the event_ticker/market_ticker contains the string `MENTION` (e.g., `KXNFLMENTION-...`)
+
+**Related tables:**
+- `production-kalshi-mention-events` - List of mention events we're tracking
+- `production-kalshi-mention-event-state` - Current state of each event (active, monitoring, etc.)
+- `production-kalshi-mention-event-rotation` - Rotation schedule for mention event monitoring
+
+**Trading strategy:** We use the Voice Trader system to listen to live audio and trade in real-time when words are detected.
+
 Current UTC timestamp: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC
 Note: US Eastern is currently {'EST (UTC-5)' if datetime.now(timezone.utc).month in [11, 12, 1, 2, 3] else 'EDT (UTC-4)'}.
 """

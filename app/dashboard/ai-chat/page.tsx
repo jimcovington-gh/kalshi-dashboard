@@ -541,7 +541,7 @@ export default function AIChatPage() {
           </button>
         </div>
         <div className="text-xs text-gray-400 ml-1">
-          Press Enter to send, Shift+Enter for new line{speechSupported && ' • Click 🎤 for voice input'}
+          Press Enter to send, Shift+Enter for new line{speechSupported && ' • Click the mic icon for voice input'}
         </div>
       </form>
     </div>

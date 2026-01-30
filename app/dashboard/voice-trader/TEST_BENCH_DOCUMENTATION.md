@@ -1,8 +1,26 @@
 # Voice Trader Test Bench Documentation
 
-**Location:** `/home/ubuntu/kalshi/kalshi-dashboard/app/dashboard/voice-trader/page.tsx`  
+**Location:** `/home/ubuntu/kalshi/kalshi-dashboard/app/dashboard/voice-trader/`  
 **URL:** Dashboard → Voice Trader tab (https://dashboard.apexmarkets.us/dashboard/voice-trader)  
-**Size:** ~2800 lines, single React component  
+
+## File Structure
+
+```
+app/dashboard/voice-trader/
+├── page.tsx                         # Version selector (dropdown)
+├── TEST_BENCH_DOCUMENTATION.md      # This file
+└── components/
+    ├── TestBenchLegacy.tsx          # Legacy test bench (worker.py) - DO NOT MODIFY
+    └── TestBenchV2.tsx              # V2 test bench (worker_new.py) - for v2 development
+```
+
+## Version Selector
+
+The main `page.tsx` provides a dropdown in the top-right corner to switch between:
+- **Legacy (worker.py)**: Production-stable test bench
+- **V2 Pipeline (worker_new.py)**: For testing the new pipeline (marked BETA)
+
+Selection is persisted in localStorage.  
 
 ## Purpose
 
@@ -140,10 +158,19 @@ When migrating to v2 worker pipeline:
 
 ## Backup Strategy
 
-Before making changes to the test bench:
-1. **Copy to v2 variant** if modifying to support new protocols
-2. **Keep original functional** for legacy worker testing
-3. The test bench was used "as a framework" in a prior migration and functional code was lost - always maintain a working backup
+The test bench is now structured with two parallel implementations:
+
+1. **TestBenchLegacy.tsx** - Frozen copy, DO NOT MODIFY during v2 migration
+   - Works with `worker.py` (production worker)
+   - Serves as reference implementation
+   - Fallback if v2 has issues
+
+2. **TestBenchV2.tsx** - Can be modified for v2 pipeline
+   - Works with `worker_new.py` (v2 worker)
+   - Can add v2-specific features
+   - Safe to experiment with
+
+This structure ensures we always have a working test bench during the migration.
 
 ---
 

@@ -1,3 +1,17 @@
+/**
+ * TestBenchV2.tsx - V2 Pipeline Voice Trader Test Bench
+ * 
+ * This version is designed to work with the NEW v2 worker pipeline (worker_new.py).
+ * It can be modified to test v2-specific features while TestBenchLegacy remains stable.
+ * 
+ * v2 Pipeline Features:
+ * - Plugin-based audio sources
+ * - Plugin-based STT providers
+ * - Ring buffer for async/thread bridging
+ * - Explicit pipeline orchestration
+ * 
+ * See TEST_BENCH_DOCUMENTATION.md for full documentation.
+ */
 'use client';
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
@@ -132,7 +146,7 @@ const VOICE_TRADER_HOST = process.env.NEXT_PUBLIC_VOICE_TRADER_HOST || 'voice.ap
 const EC2_BASE = `https://${VOICE_TRADER_HOST}:8080`;  // Direct EC2 endpoint
 const WS_BASE = `wss://${VOICE_TRADER_HOST}:8765`;  // WebSocket endpoint
 
-export default function VoiceTraderPage() {
+export function TestBenchV2() {
   const router = useRouter();
   const [pageState, setPageState] = useState<PageState>('loading');
   const [events, setEvents] = useState<MentionEvent[]>([]);

@@ -207,7 +207,10 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
     # STEP 2: Get fill prices AND fill times by querying each ticker in parallel
     def query_ticker_fill_data(ticker: str) -> tuple:
         """Query fill price and fill time for a single ticker using market_ticker-index.
-        Returns (ticker, avg_fill_price, most_recent_fill_time, idea_name)"""
+        Returns (ticker, avg_fill_price, most_recent_fill_time, idea_name)
+        
+        Calculates volume-weighted average price (VWAP) from individual fills
+        across all trades for accurate pricing when multiple fills at different prices."""
         try:
             response = trades_table.query(
                 IndexName='market_ticker-index',
@@ -221,8 +224,28 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
             )
             items = response.get('Items', [])
             if items:
-                total_contracts = sum(int(t.get('filled_count', 0)) for t in items)
-                total_cost = sum(int(t.get('filled_count', 0)) * float(t.get('avg_fill_price', 0)) for t in items)
+                # Calculate VWAP from individual fills for accuracy
+                # Each fill has 'price' and 'count' fields
+                total_contracts = 0
+                total_cost = 0.0
+                
+                for trade in items:
+                    fills = trade.get('fills', [])
+                    if fills:
+                        # Calculate from individual fills (most accurate)
+                        for fill in fills:
+                            if isinstance(fill, dict):
+                                count = int(fill.get('count', 0))
+                                price = float(fill.get('price', 0))
+                                total_contracts += count
+                                total_cost += count * price
+                    else:
+                        # Fallback to trade-level avg_fill_price if no fills array
+                        count = int(trade.get('filled_count', 0))
+                        price = float(trade.get('avg_fill_price', 0))
+                        total_contracts += count
+                        total_cost += count * price
+                
                 # Get most recent fill time (latest trade, not earliest)
                 fill_times = [t.get('completed_at') or t.get('placed_at') for t in items if t.get('completed_at') or t.get('placed_at')]
                 most_recent_fill = max(fill_times) if fill_times else None
@@ -236,7 +259,9 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
                     idea_name = None
                 
                 if total_contracts > 0:
-                    return ticker, total_cost / total_contracts, most_recent_fill, idea_name
+                    # Round to 3 decimal places (tenth of a cent)
+                    vwap = round(total_cost / total_contracts, 3)
+                    return ticker, vwap, most_recent_fill, idea_name
             return ticker, None, None, None
         except Exception as e:
             logger.warning(f"Failed to query fill data for {ticker}: {e}")

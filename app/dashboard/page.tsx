@@ -459,7 +459,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                       {Math.abs(position.contracts)}
                     </td>
                     <td className="px-3 py-0.5 whitespace-nowrap text-right text-xs text-gray-600">
-                      {position.fill_price ? `$${position.fill_price.toFixed(2)}` : '-'}
+                      {position.fill_price ? `$${position.fill_price.toFixed(3)}` : '-'}
                     </td>
                     <td className="px-3 py-0.5 whitespace-nowrap text-right text-xs font-semibold">
                       <span className={`${
@@ -549,7 +549,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                 <div className="col-span-5">
                   <div className="text-gray-500 mb-0.5">Fill</div>
                   <div className="font-medium text-gray-600">
-                    {position.fill_price ? `$${position.fill_price.toFixed(2)}` : '-'}
+                    {position.fill_price ? `$${position.fill_price.toFixed(3)}` : '-'}
                   </div>
                 </div>
                 <div className="col-span-5">

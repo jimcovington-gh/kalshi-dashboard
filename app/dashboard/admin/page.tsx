@@ -298,23 +298,28 @@ export default function AdminPage() {
     }
   }
 
-  // Helper function to build Kalshi event URL from event_ticker
-  function buildEventUrl(eventTicker: string): string {
-    if (!eventTicker) return '';
-    const parts = eventTicker.split('-');
-    const seriesTicker = parts[0];
-    return `https://kalshi.com/markets/${seriesTicker}/${eventTicker}`;
+  // Helper function to build Kalshi market URL from market_ticker
+  // Format: https://kalshi.com/markets/<prefix>/<market_ticker>
+  function buildKalshiMarketUrl(marketTicker: string): string {
+    if (!marketTicker) return '';
+    const prefix = marketTicker.split('-')[0];
+    return `https://kalshi.com/markets/${prefix}/${marketTicker}`;
   }
 
-  // Helper function to build Kalshi event URL from market_ticker (fallback when event_ticker not available)
+  // Helper function to build Kalshi event URL from event_ticker (for mention events)
+  // Format: https://kalshi.com/markets/<prefix>/<event_ticker>
+  function buildEventUrl(eventTicker: string): string {
+    if (!eventTicker) return '';
+    const prefix = eventTicker.split('-')[0];
+    return `https://kalshi.com/markets/${prefix}/${eventTicker}`;
+  }
+
+  // Helper function to build Kalshi market URL from market_ticker (for volatile watchlist/orders)
+  // Format: https://kalshi.com/markets/<prefix>/<market_ticker>
   function buildMarketUrlFromTicker(marketTicker: string): string {
     if (!marketTicker) return '';
-    // Extract event ticker by removing the last segment (market suffix)
-    const parts = marketTicker.split('-');
-    if (parts.length < 2) return '';
-    const seriesTicker = parts[0];
-    const eventTicker = parts.slice(0, -1).join('-');
-    return `https://kalshi.com/markets/${seriesTicker}/${eventTicker}`;
+    const prefix = marketTicker.split('-')[0];
+    return `https://kalshi.com/markets/${prefix}/${marketTicker}`;
   }
 
   // Helper function to format timestamp for display (compact)
@@ -736,14 +741,14 @@ export default function AdminPage() {
                 {adminStats.recent_orders.map((order) => (
                   <tr key={order.order_id} className="hover:bg-gray-50">
                     <td className="px-2 py-1 whitespace-nowrap" style={{width: '12%'}}>
-                      <a href={`/dashboard/trade/${order.order_id}?user=${order.user_name}`}
+                      <a href={`/dashboard/trades?ticker=${encodeURIComponent(order.market_ticker)}&user_name=${encodeURIComponent(order.user_name)}`}
                         className="text-blue-600 hover:underline">
                         {formatTimestamp(order.placed_at)}
                       </a>
                     </td>
                     <td className="px-2 py-1 font-medium text-gray-900" style={{width: '10%'}}>{order.user_name}</td>
                     <td className="px-2 py-1 whitespace-nowrap" style={{width: '28%'}}>
-                      <a href={buildEventUrl(order.event_ticker || order.series_ticker)}
+                      <a href={buildKalshiMarketUrl(order.market_ticker)}
                         target="_blank" rel="noopener noreferrer"
                         className="text-blue-600 hover:underline font-mono">
                         {order.market_ticker}
@@ -792,14 +797,14 @@ export default function AdminPage() {
                 {adminStats.recent_trades.map((trade) => (
                   <tr key={trade.order_id} className="hover:bg-gray-50">
                     <td className="px-2 py-1 whitespace-nowrap" style={{width: '12%'}}>
-                      <a href={`/dashboard/trade/${trade.order_id}?user=${trade.user_name}`}
+                      <a href={`/dashboard/trades?ticker=${encodeURIComponent(trade.market_ticker)}&user_name=${encodeURIComponent(trade.user_name)}`}
                         className="text-blue-600 hover:underline">
                         {formatTimestamp(trade.completed_at || trade.placed_at)}
                       </a>
                     </td>
                     <td className="px-2 py-1 font-medium text-gray-900" style={{width: '10%'}}>{trade.user_name}</td>
                     <td className="px-2 py-1 whitespace-nowrap" style={{width: '28%'}}>
-                      <a href={buildEventUrl(trade.event_ticker || trade.series_ticker)}
+                      <a href={buildKalshiMarketUrl(trade.market_ticker)}
                         target="_blank" rel="noopener noreferrer"
                         className="text-blue-600 hover:underline font-mono">
                         {trade.market_ticker}

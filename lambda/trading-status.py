@@ -27,7 +27,7 @@ CONFIG_BUCKET = 'production-kalshi-trading-config'
 # The Trading Lambda now uses phase-qualified idea_ids (mention-market:phase3) but
 # checks the base 'mention-market' toggle for all phases.
 TRADING_IDEAS = [
-    {'idea_id': 'high-confidence', 'display_name': 'High Confidence', 'description': 'Automated high-confidence trades'},
+    {'idea_id': 'hicon:original', 'display_name': 'High Confidence', 'description': 'Automated high-confidence trades'},
     {'idea_id': 'mention-market', 'display_name': 'Mention Markets', 'description': 'All mention market phases (1-4)'},
     {'idea_id': 'quickbets', 'display_name': 'QuickBets', 'description': 'Manual quick betting interface'},
 ]
@@ -281,7 +281,7 @@ def set_user_idea_toggle(user_name: str, idea_id: str, enabled: bool, username: 
     
     Args:
         user_name: The trading user name (e.g., 'jimc')
-        idea_id: The trading idea ID (e.g., 'high-confidence')
+        idea_id: The trading idea ID (e.g., 'hicon:original')
         enabled: True to enable trading, False to disable
         username: Admin username making the change
     

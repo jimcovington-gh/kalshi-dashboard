@@ -34,7 +34,7 @@ def load_idea_config(idea_id: str) -> Dict[str, Any]:
     """Load trading idea configuration from S3.
     
     Args:
-        idea_id: Trading idea identifier (e.g., 'high-confidence')
+        idea_id: Trading idea identifier (e.g., 'hicon')
     
     Returns:
         Dict with idea configuration including all versions

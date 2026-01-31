@@ -48,6 +48,10 @@ def load_idea_config(idea_id: str) -> Dict[str, Any]:
 def get_latest_idea_version(idea_id: str) -> Dict[str, Any]:
     """Get the latest version of a trading idea.
     
+    Supports two YAML formats:
+    - Old format: 'latest_version' at top, 'versions' list with version blocks
+    - New format: 'version' at top, 'parameters' directly at top level (no versions list)
+    
     Args:
         idea_id: Trading idea identifier
     
@@ -55,22 +59,32 @@ def get_latest_idea_version(idea_id: str) -> Dict[str, Any]:
         Dict with latest version parameters and metadata
     """
     config = load_idea_config(idea_id)
+    
+    # Check for old format first (latest_version + versions list)
     latest_version = config.get('latest_version')
+    if latest_version:
+        # Old format: find version in versions list
+        for version_data in config.get('versions', []):
+            if version_data.get('version') == latest_version:
+                return {
+                    'idea_id': idea_id,
+                    'version': latest_version,
+                    'description': version_data.get('description', ''),
+                    'parameters': version_data.get('parameters', {})
+                }
+        raise ValueError(f"Latest version {latest_version} not found in versions list for {idea_id}")
     
-    if not latest_version:
-        raise ValueError(f"No latest_version specified for idea: {idea_id}")
+    # Check for new simplified format (version + top-level parameters)
+    version = config.get('version')
+    if version:
+        return {
+            'idea_id': idea_id,
+            'version': version,
+            'description': config.get('version_description', ''),
+            'parameters': config.get('parameters', {})
+        }
     
-    # Find the version in versions list
-    for version_data in config.get('versions', []):
-        if version_data.get('version') == latest_version:
-            return {
-                'idea_id': idea_id,
-                'version': latest_version,
-                'description': version_data.get('description', ''),
-                'parameters': version_data.get('parameters', {})
-            }
-    
-    raise ValueError(f"Latest version {latest_version} not found in versions list for {idea_id}")
+    raise ValueError(f"No 'latest_version' or 'version' specified for idea: {idea_id}")
 
 
 def _discover_users_from_secrets() -> List[str]:

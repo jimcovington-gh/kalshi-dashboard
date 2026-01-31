@@ -680,6 +680,17 @@ Resources:
               Action:
                 - secretsmanager:ListSecrets
               Resource: '*'
+        # CloudWatch Logs access for execution log search (admin only)
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:FilterLogEvents
+                - logs:DescribeLogGroups
+              Resource:
+                - arn:aws:logs:us-east-1:355149669325:log-group:/ecs/kalshi-tis:*
+                - arn:aws:logs:us-east-1:355149669325:log-group:/ecs/kalshi-quickbets:*
+                - arn:aws:logs:us-east-1:355149669325:log-group:/ecs/production-mention-market-monitor:*
+                - arn:aws:logs:us-east-1:355149669325:log-group:/ecs/production-voice-mention-trader:*
       # Keep API Gateway endpoint for backwards compat, but Function URL is primary
       Events:
         AIChat:

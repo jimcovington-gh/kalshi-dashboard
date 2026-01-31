@@ -306,7 +306,7 @@ export default function AdminPage() {
     return `https://kalshi.com/markets/${seriesTicker}/${eventTicker}`;
   }
 
-  // Helper function to build Kalshi event URL from market_ticker
+  // Helper function to build Kalshi event URL from market_ticker (fallback when event_ticker not available)
   function buildMarketUrlFromTicker(marketTicker: string): string {
     if (!marketTicker) return '';
     // Extract event ticker by removing the last segment (market suffix)
@@ -735,10 +735,15 @@ export default function AdminPage() {
               <tbody className="divide-y divide-gray-100">
                 {adminStats.recent_orders.map((order) => (
                   <tr key={order.order_id} className="hover:bg-gray-50">
-                    <td className="px-2 py-1 text-gray-600 whitespace-nowrap" style={{width: '12%'}}>{formatTimestamp(order.placed_at)}</td>
+                    <td className="px-2 py-1 whitespace-nowrap" style={{width: '12%'}}>
+                      <a href={`/dashboard/trade/${order.order_id}?user=${order.user_name}`}
+                        className="text-blue-600 hover:underline">
+                        {formatTimestamp(order.placed_at)}
+                      </a>
+                    </td>
                     <td className="px-2 py-1 font-medium text-gray-900" style={{width: '10%'}}>{order.user_name}</td>
                     <td className="px-2 py-1 whitespace-nowrap" style={{width: '28%'}}>
-                      <a href={buildMarketUrlFromTicker(order.market_ticker)}
+                      <a href={buildEventUrl(order.event_ticker || order.series_ticker)}
                         target="_blank" rel="noopener noreferrer"
                         className="text-blue-600 hover:underline font-mono">
                         {order.market_ticker}
@@ -786,10 +791,16 @@ export default function AdminPage() {
               <tbody className="divide-y divide-gray-100">
                 {adminStats.recent_trades.map((trade) => (
                   <tr key={trade.order_id} className="hover:bg-gray-50">
-                    <td className="px-2 py-1 text-gray-600 whitespace-nowrap" style={{width: '12%'}}>{formatTimestamp(trade.completed_at || trade.placed_at)}</td>
+                    <td className="px-2 py-1 whitespace-nowrap" style={{width: '12%'}}>
+                      <a href={`/dashboard/trade/${trade.order_id}?user=${trade.user_name}`}
+                        className="text-blue-600 hover:underline">
+                        {formatTimestamp(trade.completed_at || trade.placed_at)}
+                      </a>
+                    </td>
                     <td className="px-2 py-1 font-medium text-gray-900" style={{width: '10%'}}>{trade.user_name}</td>
                     <td className="px-2 py-1 whitespace-nowrap" style={{width: '28%'}}>
-                      <a href={`/dashboard/trades?ticker=${trade.market_ticker}&user_name=${trade.user_name}`}
+                      <a href={buildEventUrl(trade.event_ticker || trade.series_ticker)}
+                        target="_blank" rel="noopener noreferrer"
                         className="text-blue-600 hover:underline font-mono">
                         {trade.market_ticker}
                       </a>

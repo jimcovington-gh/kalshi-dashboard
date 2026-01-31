@@ -47,6 +47,7 @@ dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 dynamodb_client = boto3.client('dynamodb', region_name='us-east-1')
 s3 = boto3.client('s3', region_name='us-east-1')
 secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
+logs_client = boto3.client('logs', region_name='us-east-1')
 
 # Configuration
 # Claude Sonnet 4.5 via cross-region inference profile
@@ -570,6 +571,61 @@ Use this to understand how the system works.""",
             },
             "required": ["operation_type", "estimated_items"]
         }
+    },
+    {
+        "name": "search_execution_logs",
+        "description": """Search CloudWatch execution logs for trade decisions and market activity.
+
+Use this tool to understand WHY a trade was made or to trace the decision path for a specific market.
+
+LOG GROUPS:
+- /ecs/kalshi-tis - TIS (Trading Infrastructure Service) - order execution, fills
+- /ecs/kalshi-quickbets - QuickBets container - real-time trading
+- /ecs/production-mention-market-monitor - Mention market monitoring, phase transitions, orderbook analysis
+- /ecs/production-voice-mention-trader - Voice trader (legacy)
+
+SEARCH PATTERNS:
+- For a specific market: use the full market_ticker (e.g., 'KXEARNINGSMENTIONAXP-26JUN30-REGU')
+- For event-level activity: use just the word suffix (e.g., 'REGU', 'MILL', 'BLOC')
+- For errors: use filter_pattern='ERROR' or 'WARNING'
+- For phase transitions: use filter_pattern='P3→4' or 'phase' with market_ticker
+
+TIME RANGE:
+- Default: last 1 hour
+- For specific trades: use placed_at timestamp from trades-v2 (provide hours_ago=0 and use start_time_utc)
+
+IMPORTANT: Returns max 50 log entries. Use specific time ranges and filter patterns to narrow results.""",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "log_group": {
+                    "type": "string",
+                    "enum": ["/ecs/kalshi-tis", "/ecs/kalshi-quickbets", "/ecs/production-mention-market-monitor", "/ecs/production-voice-mention-trader"],
+                    "description": "CloudWatch log group to search"
+                },
+                "filter_pattern": {
+                    "type": "string",
+                    "description": "CloudWatch filter pattern. Use market_ticker or keyword like 'ERROR'. Patterns: 'TICKER' matches exact, '?A ?B' matches A OR B"
+                },
+                "hours_ago": {
+                    "type": "integer",
+                    "description": "How many hours back to search (default 1, max 24)"
+                },
+                "start_time_utc": {
+                    "type": "string",
+                    "description": "Optional: specific start time in ISO format (e.g., '2026-01-30T13:48:00'). Overrides hours_ago."
+                },
+                "end_time_utc": {
+                    "type": "string",
+                    "description": "Optional: specific end time in ISO format. Only used with start_time_utc."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max log entries to return (default 25, max 50)"
+                }
+            },
+            "required": ["log_group", "filter_pattern"]
+        }
     }
 ]
 
@@ -599,6 +655,8 @@ def execute_tool(tool_name: str, tool_input: Dict, user_name: str, is_admin: boo
             return tool_read_docs(tool_input)
         elif tool_name == "estimate_query_cost":
             return tool_estimate_cost(tool_input)
+        elif tool_name == "search_execution_logs":
+            return tool_search_execution_logs(tool_input, user_name, is_admin)
         else:
             return {"error": f"Unknown tool: {tool_name}"}
     except Exception as e:
@@ -903,6 +961,110 @@ def tool_estimate_cost(params: Dict) -> Dict:
     }
 
 
+def tool_search_execution_logs(params: Dict, user_name: str, is_admin: bool) -> Dict:
+    """Search CloudWatch logs for trade execution details."""
+    filter_pattern = params.get('filter_pattern', '')
+    
+    # Non-admins can only search if their username is in the filter pattern
+    # This ensures they can only see logs related to their own trades
+    if not is_admin:
+        if not filter_pattern or user_name.lower() not in filter_pattern.lower():
+            return {"error": f"Non-admin users must include their username ('{user_name}') in the filter pattern to search execution logs."}
+    
+    log_group = params.get('log_group', '')
+    filter_pattern = params.get('filter_pattern', '')
+    hours_ago = min(params.get('hours_ago', 1), 24)  # Max 24 hours
+    limit = min(params.get('limit', 25), 50)  # Max 50 entries
+    
+    # Validate log group
+    allowed_log_groups = [
+        '/ecs/kalshi-tis',
+        '/ecs/kalshi-quickbets', 
+        '/ecs/production-mention-market-monitor',
+        '/ecs/production-voice-mention-trader'
+    ]
+    if log_group not in allowed_log_groups:
+        return {"error": f"Log group not allowed: {log_group}. Allowed: {', '.join(allowed_log_groups)}"}
+    
+    # For non-admins, add username to filter pattern if not already prominently included
+    # This is a safety measure to ensure they only see their own logs
+    if not is_admin and user_name.lower() not in filter_pattern.lower():
+        filter_pattern = f'"{user_name}" {filter_pattern}'.strip()
+    
+    # Calculate time range
+    now = datetime.now(timezone.utc)
+    start_time_utc = params.get('start_time_utc')
+    end_time_utc = params.get('end_time_utc')
+    
+    if start_time_utc:
+        try:
+            # Parse ISO format
+            start_dt = datetime.fromisoformat(start_time_utc.replace('Z', '+00:00'))
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+            start_ms = int(start_dt.timestamp() * 1000)
+            
+            if end_time_utc:
+                end_dt = datetime.fromisoformat(end_time_utc.replace('Z', '+00:00'))
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=timezone.utc)
+                end_ms = int(end_dt.timestamp() * 1000)
+            else:
+                # Default to 10 minutes after start
+                end_ms = start_ms + (10 * 60 * 1000)
+        except ValueError as e:
+            return {"error": f"Invalid time format: {e}. Use ISO format like '2026-01-30T13:48:00'"}
+    else:
+        # Use hours_ago
+        end_ms = int(now.timestamp() * 1000)
+        start_ms = end_ms - (hours_ago * 60 * 60 * 1000)
+    
+    rate_limiter.wait_and_acquire()
+    
+    try:
+        response = logs_client.filter_log_events(
+            logGroupName=log_group,
+            startTime=start_ms,
+            endTime=end_ms,
+            filterPattern=filter_pattern,
+            limit=limit
+        )
+        
+        events = response.get('events', [])
+        
+        if not events:
+            return {
+                "log_group": log_group,
+                "filter_pattern": filter_pattern,
+                "time_range": f"{datetime.fromtimestamp(start_ms/1000, tz=timezone.utc).isoformat()} to {datetime.fromtimestamp(end_ms/1000, tz=timezone.utc).isoformat()}",
+                "message": "No log entries found matching the filter pattern in this time range.",
+                "entries": []
+            }
+        
+        # Format entries
+        formatted_entries = []
+        for event in events:
+            ts = datetime.fromtimestamp(event['timestamp'] / 1000, tz=timezone.utc)
+            formatted_entries.append({
+                "timestamp": ts.strftime('%Y-%m-%d %H:%M:%S UTC'),
+                "message": event['message'].strip()
+            })
+        
+        return {
+            "log_group": log_group,
+            "filter_pattern": filter_pattern,
+            "time_range": f"{datetime.fromtimestamp(start_ms/1000, tz=timezone.utc).isoformat()} to {datetime.fromtimestamp(end_ms/1000, tz=timezone.utc).isoformat()}",
+            "entry_count": len(formatted_entries),
+            "entries": formatted_entries
+        }
+        
+    except logs_client.exceptions.ResourceNotFoundException:
+        return {"error": f"Log group not found: {log_group}"}
+    except Exception as e:
+        logger.error(f"CloudWatch search error: {e}")
+        return {"error": f"Error searching logs: {str(e)}"}
+
+
 # ============================================================================
 # System Prompt
 # ============================================================================
@@ -1011,6 +1173,42 @@ query_dynamodb_table(
 - `production-kalshi-mention-event-rotation` - Rotation schedule for mention event monitoring
 
 **Trading strategy:** We use the Voice Trader system to listen to live audio and trade in real-time when words are detected.
+
+## Execution Log Search
+
+You can search CloudWatch logs to understand trade decisions and debug issues. This is useful when users ask "why did we trade X?" or "what happened at time Y?".
+
+**Access Rules:**
+- Non-admin users can search logs, but MUST include their username in the filter_pattern
+- The system automatically ensures users only see logs related to their own trading activity
+- When searching for a user, ALWAYS include their username (e.g., "jimc REGU" instead of just "REGU")
+
+**Available Log Groups:**
+- `/ecs/production-mention-market-monitor` - Main mention market monitoring (phase transitions, orderbook checks, trade signals)
+- `/ecs/kalshi-tis` - TIS (Trading Infrastructure Service) - order execution, fills
+- `/ecs/kalshi-quickbets` - QuickBets container trading activity
+- `/ecs/production-voice-mention-trader` - Voice trader (legacy)
+
+**How to trace a trade decision:**
+1. Get the trade from `production-kalshi-trades-v2` by market_ticker or order_id
+2. Note the `placed_at` timestamp (Unix seconds)
+3. Search `/ecs/production-mention-market-monitor` with:
+   - `filter_pattern`: the market_ticker (e.g., "KXEARNINGSMENTIONAXP-26JUN30-REGU")
+   - `start_time_utc`: Convert placed_at to ISO format, go ~2 minutes earlier
+   - `end_time_utc`: ~1 minute after placed_at
+
+**Log patterns to look for:**
+- `[P3→4]` - Phase 3 to 4 transition checks (market-by-market orderbook analysis)
+- `[TRADE-RECEIVED]` - Trade detected on WebSocket
+- `[PHASE-3-CHECK]` - Speech-end detection logic
+- `[SPEECH-END-RAMP-UP]` / `[SPEECH-END-BURST]` - Trade volume analysis
+- `ERROR` / `WARNING` - Issues and reconnections
+
+**Example: Trace why REGU triggered:**
+1. Query trades-v2 for market_ticker containing "REGU"
+2. Get placed_at timestamp
+3. Search logs with filter_pattern="REGU" around that time
+4. Look for phase transitions and orderbook state
 
 Current UTC timestamp: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC
 Note: US Eastern is currently {'EST (UTC-5)' if datetime.now(timezone.utc).month in [11, 12, 1, 2, 3] else 'EDT (UTC-4)'}.

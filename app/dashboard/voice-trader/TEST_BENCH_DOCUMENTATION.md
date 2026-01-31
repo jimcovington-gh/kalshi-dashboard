@@ -1,20 +1,62 @@
 # Voice Trader Test Bench Documentation
 
-**Location:** `/home/ubuntu/kalshi/kalshi-dashboard/app/dashboard/voice-trader/`  
-**URL:** Dashboard → Voice Trader tab (https://dashboard.apexmarkets.us/dashboard/voice-trader)  
+## ⚠️ IMPORTANT: There Are TWO Test Benches
 
-## File Structure
+### 1. EC2 Test Bench (PRIMARY - for testing)
+**URL:** https://voice.apexmarkets.us:8080/test  
+**Location:** `/home/ubuntu/kalshi/kalshi-market-capture/voice-trader/static/test.html`  
+**Purpose:** Multi-session testing, head-to-head comparisons, STT provider testing  
+**V2 Toggle:** Checkbox in header enables V2 pipeline (worker_new.py)  
+
+### 2. Dashboard Voice Trader Page (PRODUCTION UI)
+**URL:** https://dashboard.apexmarkets.us/dashboard/voice-trader  
+**Location:** `/home/ubuntu/kalshi/kalshi-dashboard/app/dashboard/voice-trader/`  
+**Purpose:** Production interface for live trading sessions  
+
+---
+
+## EC2 Test Bench Features
+
+The EC2 test bench at https://voice.apexmarkets.us:8080/test provides:
+
+### V2 Pipeline Toggle
+- **Checkbox in header** labeled "V2 Pipeline"
+- When checked, all sessions use `worker_new.py` (v2 pipeline)
+- When unchecked, sessions use `worker.py` (legacy)
+- Toggle turns green when V2 is enabled
+
+### Multi-Session Support
+- Launch multiple concurrent sessions
+- Compare Telnyx vs Twilio latency (head-to-head)
+- Each session has its own WebSocket connection
+
+### STT Provider Comparison
+- Head-to-head STT testing (Riva, AWS Transcribe, Deepgram, AssemblyAI)
+- Compare transcription latency across providers
+- Same audio sent to multiple providers simultaneously
+
+### Real-time Monitoring
+- Live transcripts with latency measurements
+- Audio chunk metrics
+- Word match detection
+- System logs per session
+
+---
+
+## Dashboard Voice Trader Page Structure
+
+**This section describes the production UI, NOT the test bench.**
 
 ```
 app/dashboard/voice-trader/
 ├── page.tsx                         # Version selector (dropdown)
 ├── TEST_BENCH_DOCUMENTATION.md      # This file
 └── components/
-    ├── TestBenchLegacy.tsx          # Legacy test bench (worker.py) - DO NOT MODIFY
-    └── TestBenchV2.tsx              # V2 test bench (worker_new.py) - for v2 development
+    ├── TestBenchLegacy.tsx          # Legacy production UI (worker.py)
+    └── TestBenchV2.tsx              # V2 production UI (worker_new.py) - marked BETA
 ```
 
-## Version Selector
+## Version Selector (Dashboard Only)
 
 The main `page.tsx` provides a dropdown in the top-right corner to switch between:
 - **Legacy (worker.py)**: Production-stable test bench

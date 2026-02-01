@@ -377,7 +377,7 @@ export default function AdminPage() {
               )}
             </h2>
             {tradingStatus && (
-              <div className="mt-2 text-sm text-gray-600">
+              <div className="mt-2 text-base text-gray-600">
                 {tradingStatus.trading_enabled ? (
                   <span className="text-green-700 font-medium">✓ Automated trading is ENABLED</span>
                 ) : (
@@ -389,7 +389,7 @@ export default function AdminPage() {
                   </p>
                 )}
                 {tradingStatus.triggered_at && (
-                  <p className="text-gray-400 text-xs mt-1">
+                  <p className="text-gray-400 text-sm mt-1">
                     Last changed: {new Date(tradingStatus.triggered_at).toLocaleString()}
                     {tradingStatus.triggered_by && ` by ${tradingStatus.triggered_by}`}
                   </p>
@@ -429,7 +429,7 @@ export default function AdminPage() {
               Manual trades through the dashboard will still work.
             </p>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-base font-medium text-gray-700 mb-1">
                 Reason (optional)
               </label>
               <input
@@ -466,16 +466,16 @@ export default function AdminPage() {
       {tradingStatus?.ideas && tradingStatus?.users && tradingStatus.users.length > 0 && (
         <div className="bg-white rounded-lg shadow p-4">
           <div className="flex justify-between items-center mb-3">
-            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
               🎛️ Trading Idea Controls
               {tradingStatus.shutdown_active && (
-                <span className="text-xs font-normal text-red-600">(Master shutdown active)</span>
+                <span className="text-base font-normal text-red-600">(Master shutdown active)</span>
               )}
             </h2>
             <button
               onClick={loadTradingStatus}
               disabled={tradingStatusLoading}
-              className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50"
+              className="px-2 py-1 text-base text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50"
             >
               🔄
             </button>
@@ -483,7 +483,7 @@ export default function AdminPage() {
           
           {/* Mobile-friendly responsive grid */}
           <div className="overflow-x-auto">
-            <table className="min-w-full text-xs">
+            <table className="min-w-full text-base">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-2 py-2 text-left font-semibold text-gray-700 sticky left-0 bg-gray-50">User</th>
@@ -516,7 +516,7 @@ export default function AdminPage() {
                             onClick={() => handleUserIdeaToggle(user.user_name, idea.idea_id, isEnabled)}
                             disabled={isLoading || isDisabledByMaster}
                             className={`
-                              px-3 py-1 rounded text-xs font-bold uppercase tracking-wide
+                              px-3 py-1 rounded text-base font-bold uppercase tracking-wide
                               transition-colors duration-200 min-w-[4rem]
                               ${isDisabledByMaster 
                                 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
@@ -541,7 +541,7 @@ export default function AdminPage() {
                       <button
                         onClick={() => setShowClearConfirm(user.user_name)}
                         disabled={clearingUser !== null}
-                        className="px-2 py-1 rounded text-xs font-bold text-orange-700 bg-orange-100 hover:bg-orange-200 border border-orange-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-2 py-1 rounded text-base font-bold text-orange-700 bg-orange-100 hover:bg-orange-200 border border-orange-300 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Stop Fargate task and clear all monitors for this user"
                       >
                         {clearingUser === user.user_name ? '...' : 'Clear'}
@@ -554,21 +554,21 @@ export default function AdminPage() {
           </div>
           
           {/* Legend */}
-          <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-500">
+          <div className="mt-3 flex flex-wrap gap-4 text-base text-gray-500">
             <div className="flex items-center gap-1">
-              <span className="px-2 py-0.5 rounded bg-green-500 text-white text-xs font-bold">ON</span>
+              <span className="px-2 py-0.5 rounded bg-green-500 text-white text-base font-bold">ON</span>
               <span>Trading enabled</span>
             </div>
             <div className="flex items-center gap-1">
-              <span className="px-2 py-0.5 rounded bg-red-500 text-white text-xs font-bold">OFF</span>
+              <span className="px-2 py-0.5 rounded bg-red-500 text-white text-base font-bold">OFF</span>
               <span>Trading disabled</span>
             </div>
             <div className="flex items-center gap-1">
-              <span className="px-2 py-0.5 rounded bg-gray-300 text-gray-500 text-xs font-bold">OFF</span>
+              <span className="px-2 py-0.5 rounded bg-gray-300 text-gray-500 text-base font-bold">OFF</span>
               <span>Blocked by master</span>
             </div>
             <div className="flex items-center gap-1 border-l pl-4 border-orange-200">
-              <span className="px-2 py-0.5 rounded bg-orange-100 text-orange-700 text-xs font-bold border border-orange-300">Clear</span>
+              <span className="px-2 py-0.5 rounded bg-orange-100 text-orange-700 text-base font-bold border border-orange-300">Clear</span>
               <span>Stop monitors &amp; Fargate task</span>
             </div>
           </div>
@@ -588,7 +588,7 @@ export default function AdminPage() {
               <li>Clear all active event monitors</li>
               <li>Mark events as cleared in the database</li>
             </ul>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-base text-gray-500 mb-4">
               The monitors can be re-launched by the TradingManager Lambda on the next scheduled run.
             </p>
             <div className="flex justify-end gap-3">
@@ -614,9 +614,9 @@ export default function AdminPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Active Monitors Compact Table */}
         <div className="bg-white rounded-lg shadow p-4 order-1">
-          <h2 className="text-lg font-bold text-gray-900 mb-2">🎯 Active Monitors</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">🎯 Active Monitors</h2>
           {mentionMonitors && mentionMonitors.monitors.length > 0 ? (
-            <table className="min-w-full text-xs">
+            <table className="min-w-full text-base">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-2 py-1 text-left font-medium text-gray-500">Event</th>
@@ -632,16 +632,16 @@ export default function AdminPage() {
                   <tr key={m.event_ticker}>
                     <td className="px-2 py-1">
                       <a href={buildEventUrl(m.event_ticker)} target="_blank" rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline font-mono text-xs">{m.event_ticker}</a>
+                        className="text-blue-600 hover:underline font-mono text-base">{m.event_ticker}</a>
                     </td>
                     <td className="px-2 py-1">{m.user_name}</td>
                     <td className="px-2 py-1 text-center">
-                      <span className={`px-1 py-0.5 rounded text-xs ${m.fargate_state === 'active' ? 'bg-green-100 text-green-700' : m.fargate_state === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>{m.fargate_state}</span>
+                      <span className={`px-1 py-0.5 rounded text-sm ${m.fargate_state === 'active' ? 'bg-green-100 text-green-700' : m.fargate_state === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>{m.fargate_state}</span>
                     </td>
                     <td className="px-2 py-1 text-center">
-                      <span className={`px-1 py-0.5 rounded text-xs ${m.phase === 'phase1' ? 'bg-yellow-100 text-yellow-700' : m.phase === 'phase2' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{m.phase}</span>
+                      <span className={`px-1 py-0.5 rounded text-sm ${m.phase === 'phase1' ? 'bg-yellow-100 text-yellow-700' : m.phase === 'phase2' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{m.phase}</span>
                     </td>
-                    <td className="px-2 py-1 text-gray-600 text-xs">
+                    <td className="px-2 py-1 text-gray-600 text-base">
                       {m.start_date ? formatRelativeTime(m.start_date) : '-'}
                     </td>
                     <td className="px-2 py-1 text-gray-600">{m.last_heartbeat ? formatTimeAgo(m.last_heartbeat) : '-'}</td>
@@ -650,15 +650,15 @@ export default function AdminPage() {
               </tbody>
             </table>
           ) : (
-            <div className="text-center py-4 text-gray-500 text-sm">No active monitors</div>
+            <div className="text-center py-4 text-gray-500 text-base">No active monitors</div>
           )}
         </div>
 
         {/* Upcoming Mention Events */}
         <div className="bg-white rounded-lg shadow p-4 order-2">
-          <h2 className="text-lg font-bold text-gray-900 mb-2">⏰ Upcoming Mentions (24h)</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">⏰ Upcoming Mentions (24h)</h2>
           {adminStats && adminStats.upcoming_mention_events && adminStats.upcoming_mention_events.length > 0 ? (
-            <table className="min-w-full text-xs">
+            <table className="min-w-full text-base">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-2 py-1 text-left font-medium text-gray-500">Event</th>
@@ -684,7 +684,7 @@ export default function AdminPage() {
               </tbody>
             </table>
           ) : (
-            <div className="text-center py-4 text-gray-500 text-sm">No upcoming mention events</div>
+            <div className="text-center py-4 text-gray-500 text-base">No upcoming mention events</div>
           )}
         </div>
       </div>
@@ -692,12 +692,12 @@ export default function AdminPage() {
       {/* Market Capture Runs Section */}
       <div className="bg-white rounded-lg shadow p-4">
         <div className="flex justify-between items-center mb-2">
-          <h2 className="text-lg font-bold text-gray-900">📊 Market Capture (2min)</h2>
+          <h2 className="text-xl font-bold text-gray-900">📊 Market Capture (2min)</h2>
           <button onClick={loadAdminStats} disabled={adminStatsLoading}
-            className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50">🔄</button>
+            className="px-2 py-1 text-base text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50">🔄</button>
         </div>
         {adminStats && adminStats.market_capture_runs.length > 0 && (
-          <table className="min-w-full text-xs">
+          <table className="min-w-full text-base">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-2 py-1 text-left font-medium text-gray-500">Time</th>
@@ -722,10 +722,10 @@ export default function AdminPage() {
 
       {/* Recent Orders Section - links to Kalshi */}
       <div className="bg-white rounded-lg shadow p-4">
-        <h2 className="text-lg font-bold text-gray-900 mb-2">📝 Recent Orders</h2>
+        <h2 className="text-xl font-bold text-gray-900 mb-2">📝 Recent Orders</h2>
         {adminStats && adminStats.recent_orders.length > 0 && (
           <div className="overflow-x-auto">
-            <table className="min-w-full text-xs">
+            <table className="min-w-full text-base">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '12%'}}>Time</th>
@@ -755,7 +755,7 @@ export default function AdminPage() {
                       </a>
                     </td>
                     <td className="px-2 py-1 text-center">
-                      <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${order.side === 'yes' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                      <span className={`px-1.5 py-0.5 rounded text-base font-semibold ${order.side === 'yes' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                         {order.side.toUpperCase()}
                       </span>
                     </td>
@@ -771,16 +771,16 @@ export default function AdminPage() {
           </div>
         )}
         {adminStats && adminStats.recent_orders.length === 0 && (
-          <div className="text-center py-4 text-gray-500 text-sm">No recent orders</div>
+          <div className="text-center py-4 text-gray-500 text-base">No recent orders</div>
         )}
       </div>
 
       {/* Recent Trades Section - links to trade details */}
       <div className="bg-white rounded-lg shadow p-4">
-        <h2 className="text-lg font-bold text-gray-900 mb-2">💰 Recent Trades</h2>
+        <h2 className="text-xl font-bold text-gray-900 mb-2">💰 Recent Trades</h2>
         {adminStats && adminStats.recent_trades.length > 0 && (
           <div className="overflow-x-auto">
-            <table className="min-w-full text-xs">
+            <table className="min-w-full text-base">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-2 py-1 text-left font-medium text-gray-500" style={{width: '12%'}}>Time</th>
@@ -811,7 +811,7 @@ export default function AdminPage() {
                       </a>
                     </td>
                     <td className="px-2 py-1 text-center">
-                      <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${trade.side === 'yes' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                      <span className={`px-1.5 py-0.5 rounded text-base font-semibold ${trade.side === 'yes' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                         {trade.side.toUpperCase()}
                       </span>
                     </td>
@@ -826,23 +826,23 @@ export default function AdminPage() {
           </div>
         )}
         {adminStats && adminStats.recent_trades.length === 0 && (
-          <div className="text-center py-4 text-gray-500 text-sm">No recent trades</div>
+          <div className="text-center py-4 text-gray-500 text-base">No recent trades</div>
         )}
       </div>
 
       {/* Voice Trader Containers Section */}
       <div className="bg-white rounded-lg shadow p-4">
         <div className="flex justify-between items-center mb-3">
-          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
             🎙️ Running Voice Trader Containers
           </h2>
           <button onClick={loadVoiceContainers} disabled={voiceContainersLoading}
-            className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50">🔄</button>
+            className="px-2 py-1 text-base text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50">🔄</button>
         </div>
 
         {voiceContainers && voiceContainers.containers.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="min-w-full text-xs">
+            <table className="min-w-full text-base">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-2 py-1 text-left font-medium text-gray-500">Session</th>
@@ -874,23 +874,23 @@ export default function AdminPage() {
                   
                   return (
                     <tr key={container.session_id}>
-                      <td className="px-2 py-1 whitespace-nowrap font-mono text-xs">
+                      <td className="px-2 py-1 whitespace-nowrap font-mono text-base">
                         {container.session_id}
                       </td>
                       <td className="px-2 py-1 whitespace-nowrap">
-                        <div className="font-medium text-gray-900 text-xs truncate max-w-[200px]" title={container.title}>
+                        <div className="font-medium text-gray-900 text-sm truncate max-w-[200px]" title={container.title}>
                           {container.title}
                         </div>
-                        <div className="text-gray-500 text-xs truncate max-w-[200px]">{container.event_ticker}</div>
+                        <div className="text-gray-500 text-sm truncate max-w-[200px]">{container.event_ticker}</div>
                       </td>
                       <td className="px-2 py-1 whitespace-nowrap text-gray-700">{container.user_name}</td>
                       <td className="px-2 py-1 text-center">
-                        <span className="px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-700">
+                        <span className="px-1.5 py-0.5 rounded text-sm bg-blue-100 text-blue-700">
                           {container.status}
                         </span>
                       </td>
                       <td className="px-2 py-1 text-center">
-                        <span className={`px-1.5 py-0.5 rounded text-xs ${callStateColor}`}>
+                        <span className={`px-1.5 py-0.5 rounded text-sm ${callStateColor}`}>
                           {container.call_state || 'unknown'}
                         </span>
                       </td>
@@ -899,14 +899,14 @@ export default function AdminPage() {
                         <div className="flex gap-1 justify-center">
                           <a
                             href={`/dashboard/voice-trader?session=${container.session_id}`}
-                            className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                            className="px-2 py-1 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
                           >
                             Monitor
                           </a>
                           <button
                             onClick={() => handleStopVoiceContainer(container.session_id)}
                             disabled={stoppingContainer === container.session_id}
-                            className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50"
+                            className="px-2 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50"
                           >
                             {stoppingContainer === container.session_id ? '...' : 'Stop'}
                           </button>
@@ -919,25 +919,25 @@ export default function AdminPage() {
             </table>
           </div>
         ) : voiceContainers ? (
-          <div className="text-center py-4 text-gray-500 text-sm">No running voice trader containers</div>
+          <div className="text-center py-4 text-gray-500 text-base">No running voice trader containers</div>
         ) : (
-          <div className="text-center py-4 text-gray-400 text-sm">Loading...</div>
+          <div className="text-center py-4 text-gray-400 text-base">Loading...</div>
         )}
       </div>
 
       {/* Volatile Watchlist Section - High-Confidence Volatility Tracking */}
       <div className="bg-white rounded-lg shadow p-4">
         <div className="flex justify-between items-center mb-3">
-          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
             📈 High-Confidence Volatility Watchlist
           </h2>
           <button onClick={loadVolatileWatchlist} disabled={volatileWatchlistLoading}
-            className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50">🔄</button>
+            className="px-2 py-1 text-base text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50">🔄</button>
         </div>
 
         {volatileWatchlist && volatileWatchlist.watchlist.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="min-w-full text-xs">
+            <table className="min-w-full text-base">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-1.5 py-1 text-left font-medium text-gray-500 whitespace-nowrap">Market</th>
@@ -970,7 +970,7 @@ export default function AdminPage() {
                   
                   return (
                     <tr key={market.market_ticker}>
-                      <td className="px-1.5 py-1 whitespace-nowrap font-mono text-xs">
+                      <td className="px-1.5 py-1 whitespace-nowrap font-mono text-base">
                         <a href={buildMarketUrlFromTicker(market.market_ticker)}
                           target="_blank" rel="noopener noreferrer"
                           className="text-blue-600 hover:underline">
@@ -978,7 +978,7 @@ export default function AdminPage() {
                         </a>
                       </td>
                       <td className="px-1.5 py-1 text-center">
-                        <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${sideColor}`}>
+                        <span className={`px-1.5 py-0.5 rounded text-base font-semibold ${sideColor}`}>
                           {market.trade_side}
                         </span>
                       </td>
@@ -990,7 +990,7 @@ export default function AdminPage() {
                           <>
                             <span className="text-blue-600 font-semibold">${lowestPrice.toFixed(2)}</span>
                             {dropFromHighest > 0 && (
-                              <span className="text-gray-500 text-xs ml-1">(↓{dropPercent}%)</span>
+                              <span className="text-gray-500 text-sm ml-1">(↓{dropPercent}%)</span>
                             )}
                           </>
                         ) : (
@@ -1006,31 +1006,31 @@ export default function AdminPage() {
               </tbody>
             </table>
             {volatileWatchlist.cleaned_up && volatileWatchlist.cleaned_up > 0 && (
-              <div className="text-xs text-gray-500 mt-2">
+              <div className="text-base text-gray-500 mt-2">
                 Cleaned up {volatileWatchlist.cleaned_up} stale entries
               </div>
             )}
           </div>
         ) : volatileWatchlist ? (
-          <div className="text-center py-4 text-gray-500 text-sm">No active watchlist entries</div>
+          <div className="text-center py-4 text-gray-500 text-base">No active watchlist entries</div>
         ) : (
-          <div className="text-center py-4 text-gray-400 text-sm">Loading...</div>
+          <div className="text-center py-4 text-gray-400 text-base">Loading...</div>
         )}
       </div>
 
       {/* Volatile Orders Section - Recent Dip-Buy Attempts */}
       <div className="bg-white rounded-lg shadow p-4">
         <div className="flex justify-between items-center mb-3">
-          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
             🎯 Volatile Dip-Buy Orders (24h)
           </h2>
           <button onClick={loadVolatileOrders} disabled={volatileOrdersLoading}
-            className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50">🔄</button>
+            className="px-2 py-1 text-base text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50">🔄</button>
         </div>
 
         {volatileOrders && volatileOrders.orders.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="min-w-full text-xs">
+            <table className="min-w-full text-base">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-1.5 py-1 text-left font-medium text-gray-500 whitespace-nowrap">Time</th>
@@ -1062,7 +1062,7 @@ export default function AdminPage() {
                   return (
                     <tr key={order.order_id}>
                       <td className="px-1.5 py-1 whitespace-nowrap text-gray-600">{ageStr} ago</td>
-                      <td className="px-1.5 py-1 whitespace-nowrap font-mono text-xs">
+                      <td className="px-1.5 py-1 whitespace-nowrap font-mono text-base">
                         <a href={buildMarketUrlFromTicker(order.market_ticker)}
                           target="_blank" rel="noopener noreferrer"
                           className="text-blue-600 hover:underline">
@@ -1071,12 +1071,12 @@ export default function AdminPage() {
                       </td>
                       <td className="px-1.5 py-1 text-center text-gray-700">{order.user_name}</td>
                       <td className="px-1.5 py-1 text-center">
-                        <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${sideColor}`}>
+                        <span className={`px-1.5 py-0.5 rounded text-base font-semibold ${sideColor}`}>
                           {order.side.toUpperCase()}
                         </span>
                       </td>
                       <td className="px-1.5 py-1 text-center">
-                        <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${statusColor}`}>
+                        <span className={`px-1.5 py-0.5 rounded text-base font-semibold ${statusColor}`}>
                           {order.order_status}
                         </span>
                       </td>
@@ -1091,19 +1091,19 @@ export default function AdminPage() {
                 })}
               </tbody>
             </table>
-            <div className="text-xs text-gray-500 mt-2">
+            <div className="text-base text-gray-500 mt-2">
               {volatileOrders.count} order{volatileOrders.count !== 1 ? 's' : ''} in last {volatileOrders.hours} hours
             </div>
           </div>
         ) : volatileOrders ? (
-          <div className="text-center py-4 text-gray-500 text-sm">No volatile orders in last 24 hours</div>
+          <div className="text-center py-4 text-gray-500 text-base">No volatile orders in last 24 hours</div>
         ) : (
-          <div className="text-center py-4 text-gray-400 text-sm">Loading...</div>
+          <div className="text-center py-4 text-gray-400 text-base">Loading...</div>
         )}
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-sm">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-base">
           {error}
         </div>
       )}

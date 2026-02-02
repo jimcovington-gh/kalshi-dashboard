@@ -63,7 +63,8 @@ def _extract_metadata_from_item(item: Dict, ticker: str) -> Dict[str, Any]:
         'series_ticker': item.get('series_ticker', {}).get('S', ''),
         # Field is 'status' in table, we return as 'market_status'
         'market_status': item.get('status', {}).get('S', 'unknown'),
-        'close_time': close_time_val
+        'close_time': close_time_val,
+        'strike': item.get('strike', {}).get('S', '')
     }
 
 
@@ -97,7 +98,7 @@ def batch_get_market_metadata(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
                     MARKET_METADATA_TABLE_NAME: {
                         'Keys': keys,
                         # Use actual field names from table: title, status (not market_title, market_status)
-                        'ProjectionExpression': 'market_ticker, title, event_ticker, series_ticker, #s, close_time',
+                        'ProjectionExpression': 'market_ticker, title, event_ticker, series_ticker, #s, close_time, strike',
                         'ExpressionAttributeNames': {'#s': 'status'}  # 'status' is reserved word
                     }
                 }
@@ -123,7 +124,7 @@ def batch_get_market_metadata(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
                     RequestItems={
                         MARKET_METADATA_TABLE_NAME: {
                             'Keys': unprocessed,
-                            'ProjectionExpression': 'market_ticker, title, event_ticker, series_ticker, #s, close_time',
+                            'ProjectionExpression': 'market_ticker, title, event_ticker, series_ticker, #s, close_time, strike',
                             'ExpressionAttributeNames': {'#s': 'status'}
                         }
                     }
@@ -327,7 +328,8 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
             'close_time': metadata.get('close_time', ''),
             'event_ticker': metadata.get('event_ticker', ''),
             'series_ticker': series,
-            'market_status': metadata.get('market_status', 'unknown')
+            'market_status': metadata.get('market_status', 'unknown'),
+            'strike': metadata.get('strike', '')
         })
 
     

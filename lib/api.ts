@@ -55,6 +55,7 @@ export interface Position {
   event_ticker?: string;
   series_ticker?: string;
   market_status?: string;
+  strike?: string;
 }
 
 export interface Portfolio {

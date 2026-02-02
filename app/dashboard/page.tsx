@@ -200,8 +200,9 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
   // Known status mappings
   const ACTIVE_STATUSES = ['active', 'open', 'unknown', 'initialized'];
   const INACTIVE_STATUSES = ['inactive'];
-  const DETERMINED_STATUSES = ['closed', 'determined', 'finalized'];
-  const ALL_KNOWN_STATUSES = [...ACTIVE_STATUSES, ...INACTIVE_STATUSES, ...DETERMINED_STATUSES];
+  const DETERMINED_STATUSES = ['determined'];  // Awaiting payout (result known, not yet settled)
+  const SETTLED_STATUSES = ['closed', 'finalized'];  // Awaiting settlement (being processed)
+  const ALL_KNOWN_STATUSES = [...ACTIVE_STATUSES, ...INACTIVE_STATUSES, ...DETERMINED_STATUSES, ...SETTLED_STATUSES];
 
   // Separate positions by market status
   const activePositions = portfolio.positions.filter(p => 
@@ -212,6 +213,9 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
   );
   const determinedPositions = portfolio.positions.filter(p => 
     p.market_status && DETERMINED_STATUSES.includes(p.market_status)
+  );
+  const settledPositions = portfolio.positions.filter(p => 
+    p.market_status && SETTLED_STATUSES.includes(p.market_status)
   );
   
   // Collect positions with unrecognized statuses (group by status)
@@ -237,6 +241,7 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
   const sortedActivePositions = sortByFillTime(activePositions);
   const sortedInactivePositions = sortByFillTime(inactivePositions);
   const sortedDeterminedPositions = sortByFillTime(determinedPositions);
+  const sortedSettledPositions = sortByFillTime(settledPositions);
 
   // Calculate group stats
   const activeStats = {
@@ -250,6 +255,10 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
   const determinedStats = {
     contracts: determinedPositions.reduce((sum, p) => sum + Math.abs(p.contracts), 0),
     value: determinedPositions.reduce((sum, p) => sum + p.market_value, 0)
+  };
+  const settledStats = {
+    contracts: settledPositions.reduce((sum, p) => sum + Math.abs(p.contracts), 0),
+    value: settledPositions.reduce((sum, p) => sum + p.market_value, 0)
   };
   
   // Calculate total positions shown (for "no positions" check)
@@ -288,18 +297,33 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
         />
       )}
 
-      {/* Determined/Closed Positions (awaiting settlement) */}
+      {/* Determined Positions (awaiting payout - result known) */}
       {determinedPositions.length > 0 && (
         <PositionsTable 
           positions={sortedDeterminedPositions} 
-          title="Awaiting Settlement" 
+          title="Awaiting Payout" 
           userName={portfolio.user_name}
-          badgeColor="gray"
+          badgeColor="blue"
           groupKey={`${userKey}-determined`}
           expandedGroups={expandedGroups}
           setExpandedGroups={setExpandedGroups}
           totalContracts={determinedStats.contracts}
           totalValue={determinedStats.value}
+        />
+      )}
+
+      {/* Settled Positions (awaiting settlement processing) */}
+      {settledPositions.length > 0 && (
+        <PositionsTable 
+          positions={sortedSettledPositions} 
+          title="Awaiting Settlement" 
+          userName={portfolio.user_name}
+          badgeColor="gray"
+          groupKey={`${userKey}-settled`}
+          expandedGroups={expandedGroups}
+          setExpandedGroups={setExpandedGroups}
+          totalContracts={settledStats.contracts}
+          totalValue={settledStats.value}
         />
       )}
 
@@ -327,7 +351,7 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
       })}
 
       {/* Show message if no positions */}
-      {activePositions.length === 0 && inactivePositions.length === 0 && determinedPositions.length === 0 && totalUnrecognized === 0 && (
+      {activePositions.length === 0 && inactivePositions.length === 0 && determinedPositions.length === 0 && settledPositions.length === 0 && totalUnrecognized === 0 && (
         <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
           No positions found
         </div>
@@ -340,7 +364,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
   positions: Position[]; 
   title: string; 
   userName: string;
-  badgeColor: 'green' | 'yellow' | 'gray';
+  badgeColor: 'green' | 'yellow' | 'gray' | 'blue';
   groupKey: string;
   expandedGroups: Set<string>;
   setExpandedGroups: (groups: Set<string>) => void;
@@ -348,9 +372,9 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
   totalValue: number;
 }) {
   const isExpanded = expandedGroups.has(groupKey);
-  const bgColor = badgeColor === 'green' ? 'bg-green-50' : badgeColor === 'yellow' ? 'bg-yellow-50' : 'bg-gray-50';
-  const borderColor = badgeColor === 'green' ? 'border-green-200' : badgeColor === 'yellow' ? 'border-yellow-300' : 'border-gray-300';
-  const headerBg = badgeColor === 'green' ? 'bg-green-100' : badgeColor === 'yellow' ? 'bg-yellow-100' : 'bg-gray-200';
+  const bgColor = badgeColor === 'green' ? 'bg-green-50' : badgeColor === 'yellow' ? 'bg-yellow-50' : badgeColor === 'blue' ? 'bg-blue-50' : 'bg-gray-50';
+  const borderColor = badgeColor === 'green' ? 'border-green-200' : badgeColor === 'yellow' ? 'border-yellow-300' : badgeColor === 'blue' ? 'border-blue-300' : 'border-gray-300';
+  const headerBg = badgeColor === 'green' ? 'bg-green-100' : badgeColor === 'yellow' ? 'bg-yellow-100' : badgeColor === 'blue' ? 'bg-blue-100' : 'bg-gray-200';
   
   const toggleExpanded = () => {
     const newExpanded = new Set(expandedGroups);
@@ -438,10 +462,10 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                     <td className="px-3 py-0.5 whitespace-nowrap">
                       {marketUrl ? (
                         <a href={marketUrl} target="_blank" rel="noopener noreferrer" className="text-base text-blue-600 hover:underline truncate max-w-md block">
-                          {position.market_title}
+                          {position.market_title}{position.strike ? ` - ${position.strike}` : ''}
                         </a>
                       ) : (
-                        <div className="text-base text-gray-500 truncate max-w-md">{position.market_title}</div>
+                        <div className="text-base text-gray-500 truncate max-w-md">{position.market_title}{position.strike ? ` - ${position.strike}` : ''}</div>
                       )}
                     </td>
                     <td className="px-3 py-0.5 whitespace-nowrap" style={{width: '7.5%'}}>
@@ -514,10 +538,10 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
               {/* Market Title */}
               {marketUrl ? (
                 <a href={marketUrl} target="_blank" rel="noopener noreferrer" className="text-base font-medium text-blue-600 hover:underline block mb-1.5">
-                  {position.market_title}
+                  {position.market_title}{position.strike ? ` - ${position.strike}` : ''}
                 </a>
               ) : (
-                <div className="text-base font-medium text-gray-900 mb-1.5">{position.market_title}</div>
+                <div className="text-base font-medium text-gray-900 mb-1.5">{position.market_title}{position.strike ? ` - ${position.strike}` : ''}</div>
               )}
               
               {/* Stats Grid - 40 columns for precise widths */}

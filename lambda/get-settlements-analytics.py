@@ -23,7 +23,8 @@ from collections import defaultdict
 
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 trades_table = dynamodb.Table(os.environ.get('TRADES_TABLE', 'production-kalshi-trades-v2'))
-market_metadata_table = dynamodb.Table(os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'))
+# Use traded-market-metadata for settlement analytics - it has no TTL (unlike market-metadata which expires 2 days after settlement)
+traded_market_metadata_table = dynamodb.Table(os.environ.get('TRADED_MARKET_METADATA_TABLE', 'production-kalshi-traded-market-metadata'))
 
 
 class DecimalEncoder(json.JSONEncoder):
@@ -156,8 +157,9 @@ def get_price_bucket(price: float) -> str:
 
 def get_market_metadata_batch(market_tickers: List[str]) -> Dict[str, Dict[str, Any]]:
     """
-    Batch fetch market metadata for multiple tickers.
-    Returns dict mapping ticker to metadata (yes_bid_dollars is final bid price).
+    Batch fetch market metadata for multiple tickers from traded-market-metadata.
+    This table has no TTL, so data persists indefinitely after settlement.
+    Returns dict mapping ticker to metadata (yes_bid_dollars is final bid price, title for display).
     """
     result = {}
     
@@ -171,22 +173,23 @@ def get_market_metadata_batch(market_tickers: List[str]) -> Dict[str, Dict[str, 
         try:
             response = dynamodb.batch_get_item(
                 RequestItems={
-                    market_metadata_table.name: {
+                    traded_market_metadata_table.name: {
                         'Keys': keys,
-                        'ProjectionExpression': 'market_ticker, yes_bid_dollars, no_bid_dollars'
+                        'ProjectionExpression': 'market_ticker, yes_bid_dollars, no_bid_dollars, title'
                     }
                 }
             )
             
-            for item in response.get('Responses', {}).get(market_metadata_table.name, []):
+            for item in response.get('Responses', {}).get(traded_market_metadata_table.name, []):
                 ticker = item.get('market_ticker')
                 if ticker:
                     result[ticker] = {
                         'yes_bid_dollars': float(item.get('yes_bid_dollars', 0) or 0),
-                        'no_bid_dollars': float(item.get('no_bid_dollars', 0) or 0)
+                        'no_bid_dollars': float(item.get('no_bid_dollars', 0) or 0),
+                        'title': item.get('title', '')
                     }
         except Exception as e:
-            print(f"Error fetching market metadata batch: {e}")
+            print(f"Error fetching traded market metadata batch: {e}")
             # Continue without metadata for this batch
     
     return result

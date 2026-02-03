@@ -93,6 +93,30 @@ def get_settled_trades(user_name: str, days: int = 30) -> List[Dict[str, Any]]:
     return items
 
 
+def safe_int_timestamp(value) -> int:
+    """
+    Safely convert a timestamp value to int.
+    Handles: int, Decimal, numeric strings, ISO datetime strings.
+    """
+    if value is None:
+        return 0
+    if isinstance(value, (int, float, Decimal)):
+        return int(value)
+    if isinstance(value, str):
+        # Try parsing as numeric string first
+        try:
+            return int(value)
+        except ValueError:
+            pass
+        # Try parsing as ISO datetime
+        try:
+            dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+            return int(dt.timestamp())
+        except (ValueError, AttributeError):
+            return 0
+    return 0
+
+
 def calculate_trade_outcome(trade: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Calculate outcome for a single trade"""
     
@@ -102,8 +126,8 @@ def calculate_trade_outcome(trade: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     purchase_price = float(trade.get('avg_fill_price', 0))
     settlement_result = trade.get('settlement_result', '')
     settlement_price = float(trade.get('settlement_price', 0))
-    settlement_time = int(trade.get('settlement_time', 0))
-    placed_at = int(trade.get('placed_at', 0))
+    settlement_time = safe_int_timestamp(trade.get('settlement_time'))
+    placed_at = safe_int_timestamp(trade.get('placed_at'))
     
     # Skip sells for now (focus on buys to settlement)
     if action == 'sell':

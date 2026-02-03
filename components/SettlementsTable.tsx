@@ -117,6 +117,20 @@ export default function SettlementsTable({
     const sortedGroups = Object.entries(groupedData)
       .sort((a, b) => b[1].profit - a[1].profit);
 
+    // Helper to format final bid comparison breakdown
+    const formatBidBreakdown = (above: number | undefined, equal: number | undefined, below: number | undefined) => {
+      if (above === undefined) return '-';
+      return (
+        <span className="text-xs">
+          <span className="text-green-600" title="Above entry">↑{above}</span>
+          {' / '}
+          <span className="text-gray-500" title="Equal to entry">={equal || 0}</span>
+          {' / '}
+          <span className="text-red-600" title="Below entry">↓{below || 0}</span>
+        </span>
+      );
+    };
+
     return (
       <div className="bg-white rounded-lg shadow overflow-hidden mb-6">
         <div className="px-4 py-3 border-b border-gray-200">
@@ -128,27 +142,51 @@ export default function SettlementsTable({
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   {groupBy === 'price_bucket' ? 'Price Range' : groupBy.charAt(0).toUpperCase() + groupBy.slice(1)}
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Trades</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Win Rate</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Profit</th>
+                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Trades</th>
+                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Win Rate</th>
+                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Profit</th>
+                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Average Entry Price">Avg Entry</th>
+                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Average Final Bid Price">Avg Final Bid</th>
+                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider" title="Contracts: Above/Equal/Below Entry">Bid vs Entry</th>
+                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="% of contracts where final bid < $0.90">% &lt;$0.90</th>
+                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Win rate for contracts where final bid < $0.90">WR &lt;$0.90</th>
+                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Average Duration (hours)">Avg Dur (h)</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {sortedGroups.map(([key, stats]) => (
                 <tr key={key} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{key}</td>
-                  <td className="px-4 py-3 text-sm text-right text-gray-500">
+                  <td className="px-3 py-3 text-sm font-medium text-gray-900">{key}</td>
+                  <td className="px-3 py-3 text-sm text-right text-gray-500">
                     {stats.trades}
                     <span className="text-xs ml-1">
                       (<span className="text-green-600">{stats.wins}</span>/<span className="text-red-600">{stats.losses}</span>)
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-right text-gray-900">{stats.win_rate.toFixed(1)}%</td>
-                  <td className={`px-4 py-3 text-sm text-right font-medium ${stats.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  <td className="px-3 py-3 text-sm text-right text-gray-900">{stats.win_rate.toFixed(1)}%</td>
+                  <td className={`px-3 py-3 text-sm text-right font-medium ${stats.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {formatCurrency(stats.profit)}
+                  </td>
+                  <td className="px-3 py-3 text-sm text-right text-gray-900">
+                    {stats.avg_entry_price !== undefined ? `$${stats.avg_entry_price.toFixed(3)}` : '-'}
+                  </td>
+                  <td className="px-3 py-3 text-sm text-right text-gray-900">
+                    {stats.avg_final_bid !== undefined && stats.avg_final_bid !== null ? `$${stats.avg_final_bid.toFixed(3)}` : '-'}
+                  </td>
+                  <td className="px-3 py-3 text-sm text-center">
+                    {formatBidBreakdown(stats.contracts_above_entry, stats.contracts_equal_entry, stats.contracts_below_entry)}
+                  </td>
+                  <td className="px-3 py-3 text-sm text-right text-gray-900">
+                    {stats.pct_final_bid_below_90 !== undefined && stats.pct_final_bid_below_90 !== null ? `${stats.pct_final_bid_below_90.toFixed(1)}%` : '-'}
+                  </td>
+                  <td className="px-3 py-3 text-sm text-right text-gray-900">
+                    {stats.win_rate_final_bid_below_90 !== undefined && stats.win_rate_final_bid_below_90 !== null ? `${stats.win_rate_final_bid_below_90.toFixed(1)}%` : '-'}
+                  </td>
+                  <td className="px-3 py-3 text-sm text-right text-gray-500">
+                    {stats.avg_duration_hours !== undefined ? stats.avg_duration_hours.toFixed(2) : '-'}
                   </td>
                 </tr>
               ))}

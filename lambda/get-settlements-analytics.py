@@ -23,6 +23,7 @@ from collections import defaultdict
 
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 trades_table = dynamodb.Table(os.environ.get('TRADES_TABLE', 'production-kalshi-trades-v2'))
+market_metadata_table = dynamodb.Table(os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'))
 
 
 class DecimalEncoder(json.JSONEncoder):
@@ -153,12 +154,61 @@ def get_price_bucket(price: float) -> str:
         return '0.99+'
 
 
+def get_market_metadata_batch(market_tickers: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Batch fetch market metadata for multiple tickers.
+    Returns dict mapping ticker to metadata (yes_bid_dollars is final bid price).
+    """
+    result = {}
+    
+    # DynamoDB BatchGetItem has a limit of 100 items per request
+    batch_size = 100
+    for i in range(0, len(market_tickers), batch_size):
+        batch_tickers = market_tickers[i:i + batch_size]
+        
+        keys = [{'market_ticker': ticker} for ticker in batch_tickers]
+        
+        try:
+            response = dynamodb.batch_get_item(
+                RequestItems={
+                    market_metadata_table.name: {
+                        'Keys': keys,
+                        'ProjectionExpression': 'market_ticker, yes_bid_dollars, no_bid_dollars'
+                    }
+                }
+            )
+            
+            for item in response.get('Responses', {}).get(market_metadata_table.name, []):
+                ticker = item.get('market_ticker')
+                if ticker:
+                    result[ticker] = {
+                        'yes_bid_dollars': float(item.get('yes_bid_dollars', 0) or 0),
+                        'no_bid_dollars': float(item.get('no_bid_dollars', 0) or 0)
+                    }
+        except Exception as e:
+            print(f"Error fetching market metadata batch: {e}")
+            # Continue without metadata for this batch
+    
+    return result
+
+
 def aggregate_trades(trades: List[Dict], group_by: str) -> Dict[str, Any]:
-    """Aggregate trades by specified dimension"""
+    """Aggregate trades by specified dimension with enhanced metrics"""
     
     groups = defaultdict(lambda: {
         'trades': 0, 'wins': 0, 'losses': 0,
-        'total_cost': 0, 'total_return': 0, 'profit': 0
+        'total_cost': 0, 'total_return': 0, 'profit': 0,
+        # New metrics
+        'total_contracts': 0,
+        'entry_price_sum': 0,  # For calculating average
+        'final_bid_sum': 0,    # For calculating average
+        'final_bid_count': 0,  # Count of trades with final bid data
+        'contracts_above_entry': 0,
+        'contracts_equal_entry': 0,
+        'contracts_below_entry': 0,
+        'contracts_final_bid_below_90': 0,
+        'wins_final_bid_below_90': 0,
+        'duration_sum': 0,     # For calculating average duration
     })
     
     for t in trades:
@@ -172,7 +222,13 @@ def aggregate_trades(trades: List[Dict], group_by: str) -> Dict[str, Any]:
             key = 'All'
             
         g = groups[key]
+        count = t.get('count', 1)
+        entry_price = t.get('purchase_price', 0)
+        final_bid = t.get('final_bid_price')  # May be None if no metadata
+        duration = t.get('duration_hours', 0)
+        
         g['trades'] += 1
+        g['total_contracts'] += count
         if t['won']:
             g['wins'] += 1
         else:
@@ -181,8 +237,37 @@ def aggregate_trades(trades: List[Dict], group_by: str) -> Dict[str, Any]:
         g['total_return'] += t['total_return']
         g['profit'] += t['profit']
         
+        # Entry price weighted by contracts
+        g['entry_price_sum'] += entry_price * count
+        
+        # Duration sum
+        g['duration_sum'] += duration
+        
+        # Final bid metrics (only if we have the data)
+        if final_bid is not None:
+            g['final_bid_sum'] += final_bid * count
+            g['final_bid_count'] += count
+            
+            # Compare final bid to entry price (with small tolerance for floating point)
+            if final_bid > entry_price + 0.001:
+                g['contracts_above_entry'] += count
+            elif final_bid < entry_price - 0.001:
+                g['contracts_below_entry'] += count
+            else:
+                g['contracts_equal_entry'] += count
+            
+            # Contracts where final bid < 0.90
+            if final_bid < 0.90:
+                g['contracts_final_bid_below_90'] += count
+                if t['won']:
+                    g['wins_final_bid_below_90'] += count
+        
     result = {}
     for key, g in groups.items():
+        total_contracts = g['total_contracts']
+        final_bid_count = g['final_bid_count']
+        contracts_below_90 = g['contracts_final_bid_below_90']
+        
         result[key] = {
             'trades': g['trades'],
             'wins': g['wins'],
@@ -190,7 +275,16 @@ def aggregate_trades(trades: List[Dict], group_by: str) -> Dict[str, Any]:
             'win_rate': round(g['wins'] / g['trades'] * 100, 1) if g['trades'] > 0 else 0,
             'total_cost': round(g['total_cost'], 2),
             'total_return': round(g['total_return'], 2),
-            'profit': round(g['profit'], 2)
+            'profit': round(g['profit'], 2),
+            # New metrics
+            'avg_entry_price': round(g['entry_price_sum'] / total_contracts, 3) if total_contracts > 0 else 0,
+            'avg_final_bid': round(g['final_bid_sum'] / final_bid_count, 3) if final_bid_count > 0 else None,
+            'contracts_above_entry': g['contracts_above_entry'],
+            'contracts_equal_entry': g['contracts_equal_entry'],
+            'contracts_below_entry': g['contracts_below_entry'],
+            'pct_final_bid_below_90': round(contracts_below_90 / final_bid_count * 100, 1) if final_bid_count > 0 else None,
+            'win_rate_final_bid_below_90': round(g['wins_final_bid_below_90'] / contracts_below_90 * 100, 1) if contracts_below_90 > 0 else None,
+            'avg_duration_hours': round(g['duration_sum'] / g['trades'], 2) if g['trades'] > 0 else 0,
         }
         
     return result
@@ -267,7 +361,11 @@ def lambda_handler(event, context):
                     'summary': {'total_profit': 0, 'win_rate': 0, 'wins': 0, 'losses': 0}
                 })
             }
-            
+        
+        # Fetch market metadata for all tickers to get final bid prices
+        unique_tickers = list(set(t.get('market_ticker', '') for t in trades if t.get('market_ticker')))
+        market_metadata = get_market_metadata_batch(unique_tickers)
+        
         # Process ALL trades for summary/grouping stats
         all_processed = []
         for trade in trades:
@@ -279,6 +377,15 @@ def lambda_handler(event, context):
             # Read category from trade (populated by TIS) or fall back to prefix
             category = trade.get('category', '') or get_category_from_ticker(ticker)
             
+            # Get final bid price from market metadata
+            # Use yes_bid for YES side trades, no_bid for NO side trades
+            metadata = market_metadata.get(ticker, {})
+            side = outcome.get('side', 'yes')
+            if side == 'yes':
+                final_bid_price = metadata.get('yes_bid_dollars')
+            else:
+                final_bid_price = metadata.get('no_bid_dollars')
+            
             all_processed.append({
                 'order_id': trade.get('order_id', ''),
                 'market_ticker': ticker,
@@ -286,6 +393,7 @@ def lambda_handler(event, context):
                 'category': category,
                 'placed_at': int(trade.get('placed_at', 0)),
                 'settlement_time': int(trade.get('settlement_time', 0)),
+                'final_bid_price': final_bid_price,
                 **outcome
             })
         

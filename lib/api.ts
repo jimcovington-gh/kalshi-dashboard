@@ -126,6 +126,15 @@ export interface GroupedStats {
   total_cost: number;
   total_return: number;
   profit: number;
+  // New enhanced metrics
+  avg_entry_price?: number;
+  avg_final_bid?: number | null;
+  contracts_above_entry?: number;
+  contracts_equal_entry?: number;
+  contracts_below_entry?: number;
+  pct_final_bid_below_90?: number | null;
+  win_rate_final_bid_below_90?: number | null;
+  avg_duration_hours?: number;
 }
 
 export interface SettlementsResponse {

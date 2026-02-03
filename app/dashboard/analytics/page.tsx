@@ -91,10 +91,10 @@ export default function AnalyticsPage() {
   async function loadLosingTrades() {
     setIsLoadingLosses(true);
     try {
-      // Always fetch last 30 days of losses regardless of period selector
+      // Fetch losses for the selected time period
       const data = await getSettlements(
         selectedUser,
-        '30d',
+        period,
         undefined,
         1,
         500,  // Get up to 500 losing trades
@@ -167,18 +167,7 @@ export default function AnalyticsPage() {
             isLoading={isLoading}
           />
 
-          {/* Losing Trades Table - Last 30 Days */}
-          <div className="mt-6">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Losing Trades (Last 30 Days)</h2>
-            <LosingTradesTable
-              trades={losingTrades}
-              totalLoss={totalLoss}
-              isLoading={isLoadingLosses}
-              userName={selectedUser}
-            />
-          </div>
-
-          {/* Settlements Table */}
+          {/* Settlements Table - moved above Losing Trades */}
           <div className="mt-6">
             <h2 className="text-xl font-bold text-gray-900 mb-4">All Trades to Settlement</h2>
             <SettlementsTable
@@ -194,6 +183,17 @@ export default function AnalyticsPage() {
               pageSize={settlementsData?.page_size || 100}
               totalPages={settlementsData?.total_pages || 0}
               onPageChange={setPage}
+            />
+          </div>
+
+          {/* Losing Trades Table - uses selected period */}
+          <div className="mt-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Losing Trades ({period === 'all' ? 'All Time' : `Last ${period.replace('d', ' Days')}`})</h2>
+            <LosingTradesTable
+              trades={losingTrades}
+              totalLoss={totalLoss}
+              isLoading={isLoadingLosses}
+              userName={selectedUser}
             />
           </div>
         </>

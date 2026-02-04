@@ -150,7 +150,7 @@ export default function SettlementsTable({
                 <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Profit</th>
                 <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Average Entry Price">Avg Entry</th>
                 <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Average Final Bid Price">Avg Final Bid</th>
-                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider" title="Contracts: Above/Equal/Below Entry">Bid vs Entry</th>
+                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider" title="Trades: Above/Equal/Below Entry">Bid vs Entry</th>
                 <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="% of contracts where final bid < $0.90">% &lt;$0.90</th>
                 <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Win rate for contracts where final bid < $0.90">WR &lt;$0.90</th>
                 <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" title="Average Duration (hours)">Avg Dur (h)</th>

@@ -93,30 +93,6 @@ def get_settled_trades(user_name: str, days: int = 30) -> List[Dict[str, Any]]:
     return items
 
 
-def safe_int_timestamp(value) -> int:
-    """
-    Safely convert a timestamp value to int.
-    Handles: int, Decimal, numeric strings, ISO datetime strings.
-    """
-    if value is None:
-        return 0
-    if isinstance(value, (int, float, Decimal)):
-        return int(value)
-    if isinstance(value, str):
-        # Try parsing as numeric string first
-        try:
-            return int(value)
-        except ValueError:
-            pass
-        # Try parsing as ISO datetime
-        try:
-            dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-            return int(dt.timestamp())
-        except (ValueError, AttributeError):
-            return 0
-    return 0
-
-
 def calculate_trade_outcome(trade: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Calculate outcome for a single trade"""
     
@@ -126,8 +102,8 @@ def calculate_trade_outcome(trade: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     purchase_price = float(trade.get('avg_fill_price', 0))
     settlement_result = trade.get('settlement_result', '')
     settlement_price = float(trade.get('settlement_price', 0))
-    settlement_time = safe_int_timestamp(trade.get('settlement_time'))
-    placed_at = safe_int_timestamp(trade.get('placed_at'))
+    settlement_time = int(trade.get('settlement_time', 0))
+    placed_at = int(trade.get('placed_at', 0))
     
     # Skip sells for now (focus on buys to settlement)
     if action == 'sell':
@@ -229,11 +205,12 @@ def aggregate_trades(trades: List[Dict], group_by: str) -> Dict[str, Any]:
         'total_contracts': 0,
         'entry_price_sum': 0,  # For calculating average
         'final_bid_sum': 0,    # For calculating average
-        'final_bid_count': 0,  # Count of trades with final bid data
-        'contracts_above_entry': 0,
-        'contracts_equal_entry': 0,
-        'contracts_below_entry': 0,
-        'contracts_final_bid_below_90': 0,
+        'final_bid_count': 0,  # Count of contracts with final bid data (for avg calculation)
+        'trades_with_final_bid': 0,  # Count of trades with final bid data
+        'trades_above_entry': 0,
+        'trades_equal_entry': 0,
+        'trades_below_entry': 0,
+        'trades_final_bid_below_90': 0,
         'wins_final_bid_below_90': 0,
         'duration_sum': 0,     # For calculating average duration
     })
@@ -274,26 +251,29 @@ def aggregate_trades(trades: List[Dict], group_by: str) -> Dict[str, Any]:
         if final_bid is not None:
             g['final_bid_sum'] += final_bid * count
             g['final_bid_count'] += count
+            g['trades_with_final_bid'] += 1
             
             # Compare final bid to entry price (with small tolerance for floating point)
+            # Count TRADES, not contracts
             if final_bid > entry_price + 0.001:
-                g['contracts_above_entry'] += count
+                g['trades_above_entry'] += 1
             elif final_bid < entry_price - 0.001:
-                g['contracts_below_entry'] += count
+                g['trades_below_entry'] += 1
             else:
-                g['contracts_equal_entry'] += count
+                g['trades_equal_entry'] += 1
             
-            # Contracts where final bid < 0.90
+            # Trades where final bid < 0.90
             if final_bid < 0.90:
-                g['contracts_final_bid_below_90'] += count
+                g['trades_final_bid_below_90'] += 1
                 if t['won']:
-                    g['wins_final_bid_below_90'] += count
+                    g['wins_final_bid_below_90'] += 1
         
     result = {}
     for key, g in groups.items():
         total_contracts = g['total_contracts']
         final_bid_count = g['final_bid_count']
-        contracts_below_90 = g['contracts_final_bid_below_90']
+        trades_with_final_bid = g['trades_with_final_bid']
+        trades_below_90 = g['trades_final_bid_below_90']
         
         result[key] = {
             'trades': g['trades'],
@@ -306,11 +286,16 @@ def aggregate_trades(trades: List[Dict], group_by: str) -> Dict[str, Any]:
             # New metrics
             'avg_entry_price': round(g['entry_price_sum'] / total_contracts, 3) if total_contracts > 0 else 0,
             'avg_final_bid': round(g['final_bid_sum'] / final_bid_count, 3) if final_bid_count > 0 else None,
-            'contracts_above_entry': g['contracts_above_entry'],
-            'contracts_equal_entry': g['contracts_equal_entry'],
-            'contracts_below_entry': g['contracts_below_entry'],
-            'pct_final_bid_below_90': round(contracts_below_90 / final_bid_count * 100, 1) if final_bid_count > 0 else None,
-            'win_rate_final_bid_below_90': round(g['wins_final_bid_below_90'] / contracts_below_90 * 100, 1) if contracts_below_90 > 0 else None,
+            # Renamed: trades not contracts
+            'trades_above_entry': g['trades_above_entry'],
+            'trades_equal_entry': g['trades_equal_entry'],
+            'trades_below_entry': g['trades_below_entry'],
+            # Keep old names for backward compatibility with frontend
+            'contracts_above_entry': g['trades_above_entry'],
+            'contracts_equal_entry': g['trades_equal_entry'],
+            'contracts_below_entry': g['trades_below_entry'],
+            'pct_final_bid_below_90': round(trades_below_90 / trades_with_final_bid * 100, 1) if trades_with_final_bid > 0 else None,
+            'win_rate_final_bid_below_90': round(g['wins_final_bid_below_90'] / trades_below_90 * 100, 1) if trades_below_90 > 0 else None,
             'avg_duration_hours': round(g['duration_sum'] / g['trades'], 2) if g['trades'] > 0 else 0,
         }
         

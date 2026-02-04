@@ -183,9 +183,12 @@ def get_market_metadata_batch(market_tickers: List[str]) -> Dict[str, Dict[str, 
             for item in response.get('Responses', {}).get(traded_market_metadata_table.name, []):
                 ticker = item.get('market_ticker')
                 if ticker:
+                    # Keep None for missing data, and treat 0 as invalid (no real bid is $0.00)
+                    yes_bid = item.get('yes_bid_dollars')
+                    no_bid = item.get('no_bid_dollars')
                     result[ticker] = {
-                        'yes_bid_dollars': float(item.get('yes_bid_dollars', 0) or 0),
-                        'no_bid_dollars': float(item.get('no_bid_dollars', 0) or 0),
+                        'yes_bid_dollars': float(yes_bid) if yes_bid and float(yes_bid) > 0 else None,
+                        'no_bid_dollars': float(no_bid) if no_bid and float(no_bid) > 0 else None,
                         'title': item.get('title', '')
                     }
         except Exception as e:
@@ -247,8 +250,8 @@ def aggregate_trades(trades: List[Dict], group_by: str) -> Dict[str, Any]:
         # Duration sum
         g['duration_sum'] += duration
         
-        # Final bid metrics (only if we have the data)
-        if final_bid is not None:
+        # Final bid metrics (only if we have valid data - not None or 0)
+        if final_bid is not None and final_bid > 0:
             g['final_bid_sum'] += final_bid * count
             g['final_bid_count'] += count
             g['trades_with_final_bid'] += 1

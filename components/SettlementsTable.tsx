@@ -1,8 +1,23 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { SettledTrade, GroupedStats, SettlementSummary } from '@/lib/api';
 import { format } from 'date-fns';
+
+// Grouped trade row (aggregated by settlement minute, market, side, idea, duration bucket, purchase price)
+interface GroupedTradeRow {
+  key: string;
+  settlement_minute: number; // Unix timestamp rounded to minute
+  market_ticker: string;
+  side: 'yes' | 'no';
+  idea_name: string;
+  duration_bucket: number; // Duration rounded to 0.1h
+  purchase_price: number; // Buy $ - grouped by this value
+  total_qty: number;
+  won: boolean; // All trades in group should have same result
+  total_profit: number;
+  trade_count: number; // Number of individual trades in this group
+}
 
 interface SettlementsTableProps {
   trades: SettledTrade[];
@@ -55,6 +70,46 @@ function formatDuration(hours: number): string {
   }
 }
 
+// Group trades by settlement minute, market, side, idea, duration bucket, and purchase price
+function groupTrades(trades: SettledTrade[]): GroupedTradeRow[] {
+  const groups = new Map<string, GroupedTradeRow>();
+  
+  for (const trade of trades) {
+    // Round settlement time to minute (60 seconds)
+    const settlementMinute = Math.floor(trade.settlement_time / 60) * 60;
+    // Round duration to 0.1h
+    const durationBucket = Math.round(trade.duration_hours * 10) / 10;
+    // Round purchase price to cents (2 decimal places)
+    const purchasePrice = Math.round(trade.purchase_price * 100) / 100;
+    
+    const key = `${settlementMinute}|${trade.market_ticker}|${trade.side}|${trade.idea_name || ''}|${durationBucket}|${purchasePrice}`;
+    
+    const existing = groups.get(key);
+    if (existing) {
+      existing.total_qty += trade.count;
+      existing.total_profit += trade.profit;
+      existing.trade_count += 1;
+    } else {
+      groups.set(key, {
+        key,
+        settlement_minute: settlementMinute,
+        market_ticker: trade.market_ticker,
+        side: trade.side,
+        idea_name: trade.idea_name || '-',
+        duration_bucket: durationBucket,
+        purchase_price: purchasePrice,
+        total_qty: trade.count,
+        won: trade.won,
+        total_profit: trade.profit,
+        trade_count: 1,
+      });
+    }
+  }
+  
+  // Sort by settlement time descending (most recent first)
+  return Array.from(groups.values()).sort((a, b) => b.settlement_minute - a.settlement_minute);
+}
+
 export default function SettlementsTable({
   trades,
   summary,
@@ -70,6 +125,9 @@ export default function SettlementsTable({
   onPageChange
 }: SettlementsTableProps) {
   const [showDetails, setShowDetails] = useState(false);
+  
+  // Memoize grouped trades
+  const groupedTrades = useMemo(() => groupTrades(trades), [trades]);
 
   // Summary card
   const SummaryCards = () => (
@@ -197,17 +255,22 @@ export default function SettlementsTable({
     );
   };
 
-  // Individual trades table
+  // Grouped trades table (aggregated by settlement minute, market, side, idea, duration, buy price)
   const TradesTable = () => (
     <div className="bg-white rounded-lg shadow overflow-hidden">
       <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center">
         <h3 className="text-lg font-medium text-gray-900">Recent Settled Trades</h3>
-        <button
-          onClick={() => setShowDetails(!showDetails)}
-          className="text-sm text-blue-600 hover:text-blue-800"
-        >
-          {showDetails ? 'Hide Details' : 'Show Details'}
-        </button>
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-gray-500">
+            {groupedTrades.length} groups from {trades.length} trades
+          </span>
+          <button
+            onClick={() => setShowDetails(!showDetails)}
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            {showDetails ? 'Hide Details' : 'Show Details'}
+          </button>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
@@ -216,10 +279,7 @@ export default function SettlementsTable({
               <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Settled</th>
               <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Market</th>
               {showDetails && (
-                <>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Idea</th>
-                </>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Idea</th>
               )}
               <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Side</th>
               <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
@@ -232,50 +292,52 @@ export default function SettlementsTable({
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {trades.slice(0, 100).map((trade) => {
-              const tradeUrl = `/dashboard/trades?ticker=${encodeURIComponent(trade.market_ticker)}${userName ? `&user_name=${encodeURIComponent(userName)}` : ''}`;
-              const kalshiUrl = buildKalshiUrl(trade.market_ticker);
+            {groupedTrades.slice(0, 100).map((row) => {
+              const kalshiUrl = buildKalshiUrl(row.market_ticker);
+              const tradeUrl = `/dashboard/trades?ticker=${encodeURIComponent(row.market_ticker)}${userName ? `&user_name=${encodeURIComponent(userName)}` : ''}`;
               
               return (
-              <tr key={trade.order_id} className={`hover:bg-gray-50 ${trade.won ? '' : 'bg-red-50'}`}>
+              <tr key={row.key} className={`hover:bg-gray-50 ${row.won ? '' : 'bg-red-50'}`}>
                 <td className="px-3 py-2 text-sm whitespace-nowrap">
                   <a href={tradeUrl} className="text-blue-600 hover:underline">
-                    {formatDate(trade.settlement_time)}
+                    {formatDate(row.settlement_minute)}
                   </a>
                 </td>
-                <td className="px-3 py-2 text-sm font-mono text-xs max-w-[200px] truncate" title={trade.market_ticker}>
+                <td className="px-3 py-2 text-sm font-mono text-xs max-w-[200px] truncate" title={row.market_ticker}>
                   <a href={kalshiUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                    {trade.market_ticker}
+                    {row.market_ticker}
                   </a>
                 </td>
                 {showDetails && (
-                  <>
-                    <td className="px-3 py-2 text-sm text-gray-500">{trade.category}</td>
-                    <td className="px-3 py-2 text-sm text-gray-500">{trade.idea_name || '-'}</td>
-                  </>
+                  <td className="px-3 py-2 text-sm text-gray-500">{row.idea_name}</td>
                 )}
                 <td className="px-3 py-2 text-center">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                    trade.side === 'yes' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    row.side === 'yes' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                   }`}>
-                    {trade.side.toUpperCase()}
+                    {row.side.toUpperCase()}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-sm text-right text-gray-900">{trade.count}</td>
-                <td className="px-3 py-2 text-sm text-right text-gray-900">${trade.purchase_price.toFixed(2)}</td>
+                <td className="px-3 py-2 text-sm text-right text-gray-900">
+                  {row.total_qty}
+                  {row.trade_count > 1 && (
+                    <span className="text-xs text-gray-400 ml-1">({row.trade_count})</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-sm text-right text-gray-900">${row.purchase_price.toFixed(2)}</td>
                 <td className="px-3 py-2 text-center">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                    trade.won ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    row.won ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                   }`}>
-                    {trade.won ? 'WIN' : 'LOSS'}
+                    {row.won ? 'WIN' : 'LOSS'}
                   </span>
                 </td>
-                <td className={`px-3 py-2 text-sm text-right font-medium ${trade.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {formatCurrency(trade.profit)}
+                <td className={`px-3 py-2 text-sm text-right font-medium ${row.total_profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {formatCurrency(row.total_profit)}
                 </td>
                 {showDetails && (
                   <td className="px-3 py-2 text-sm text-right text-gray-500">
-                    {formatDuration(trade.duration_hours)}
+                    {row.duration_bucket.toFixed(1)}h
                   </td>
                 )}
               </tr>
@@ -284,9 +346,9 @@ export default function SettlementsTable({
           </tbody>
         </table>
       </div>
-      {trades.length > 100 && (
+      {groupedTrades.length > 100 && (
         <div className="px-4 py-3 bg-gray-50 text-sm text-gray-500 flex justify-between items-center">
-          <span>Showing {((page - 1) * pageSize) + 1}-{Math.min(page * pageSize, totalTrades)} of {totalTrades} trades</span>
+          <span>Showing first 100 of {groupedTrades.length} groups</span>
           {totalPages > 1 && (
             <div className="flex items-center gap-2">
               <button

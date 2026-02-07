@@ -107,7 +107,7 @@ export default function TradesPage() {
         >
           <div className="px-4 md:px-6 py-3 md:py-4 bg-gray-50 border-b border-gray-200 flex flex-col md:flex-row md:justify-between md:items-center gap-2">
             <div>
-              <h3 className="text-base md:text-lg font-semibold text-gray-900">Trade #{idx + 1}</h3>
+              <h3 className="text-base md:text-lg font-semibold text-gray-900">Trade #{trades.length - idx}</h3>
               <p className="text-xs md:text-sm text-gray-600">
                 {(() => {
                   const date = parseTradeDate(trade.completed_at) || parseTradeDate(trade.placed_at);

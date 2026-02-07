@@ -90,7 +90,7 @@ export default function LosingTradesTable({
           <tbody className="bg-white divide-y divide-gray-200">
             {trades.map((trade) => {
               const kalshiUrl = buildKalshiUrl(trade.market_ticker);
-              const tradeUrl = userName ? `/dashboard/trade/${trade.order_id}?user=${userName}` : `/dashboard/trade/${trade.order_id}`;
+              const tradeUrl = `/dashboard/trades?ticker=${encodeURIComponent(trade.market_ticker)}${userName ? `&user_name=${encodeURIComponent(userName)}` : ''}`;
               
               return (
                 <tr key={trade.order_id} className="hover:bg-red-50">

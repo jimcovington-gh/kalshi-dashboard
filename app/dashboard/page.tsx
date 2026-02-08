@@ -82,6 +82,10 @@ export default function DashboardPage() {
       <div className="space-y-8">
         {portfolios.map((userPortfolio, userIdx) => {
           const totalContracts = userPortfolio.positions.reduce((sum, p) => sum + Math.abs(p.contracts), 0);
+          const maxReturn = (userPortfolio.cash_balance || 0) + userPortfolio.positions.reduce((sum, p) => {
+            const expectedValue = p.current_price >= 0.80 ? 0.999 : 0;
+            return sum + expectedValue * Math.abs(p.contracts);
+          }, 0);
           const userKey = userPortfolio.user_name;
           const isExpanded = expandedUsers.has(userKey);
           
@@ -122,8 +126,18 @@ export default function DashboardPage() {
                         <span className="ml-2 font-semibold">${(userPortfolio.cash_balance || 0).toFixed(2)}</span>
                       </div>
                       <div className="mt-1">
+                        <span className="text-blue-200">Contract Value:</span>
+                        <span className="ml-2 font-semibold">${(userPortfolio.total_position_value || 0).toFixed(2)}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div>
                         <span className="text-blue-200">Total:</span>
                         <span className="ml-2 font-semibold">${((userPortfolio.cash_balance || 0) + (userPortfolio.total_position_value || 0)).toFixed(2)}</span>
+                      </div>
+                      <div className="mt-1">
+                        <span className="text-blue-200">Max Return:</span>
+                        <span className="ml-2 font-semibold">${maxReturn.toFixed(2)}</span>
                       </div>
                     </div>
                   </div>
@@ -147,6 +161,10 @@ export default function DashboardPage() {
 
   // Regular user view - with summary header like admin sees
   const totalContracts = portfolio!.positions.reduce((sum, p) => sum + Math.abs(p.contracts), 0);
+  const maxReturn = (portfolio!.cash_balance || 0) + portfolio!.positions.reduce((sum, p) => {
+    const expectedValue = p.current_price >= 0.80 ? 0.999 : 0;
+    return sum + expectedValue * Math.abs(p.contracts);
+  }, 0);
   
   return (
     <div className="space-y-4">
@@ -173,8 +191,18 @@ export default function DashboardPage() {
                 <span className="ml-2 font-semibold">${(portfolio!.cash_balance || 0).toFixed(2)}</span>
               </div>
               <div className="mt-1">
+                <span className="text-blue-200">Contract Value:</span>
+                <span className="ml-2 font-semibold">${(portfolio!.total_position_value || 0).toFixed(2)}</span>
+              </div>
+            </div>
+            <div>
+              <div>
                 <span className="text-blue-200">Total:</span>
                 <span className="ml-2 font-semibold">${((portfolio!.cash_balance || 0) + (portfolio!.total_position_value || 0)).toFixed(2)}</span>
+              </div>
+              <div className="mt-1">
+                <span className="text-blue-200">Max Return:</span>
+                <span className="ml-2 font-semibold">${maxReturn.toFixed(2)}</span>
               </div>
             </div>
           </div>
@@ -450,7 +478,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                   const tradeUrl = `/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`;
 
                   return (
-                    <tr key={idx} className="hover:bg-gray-50">
+                    <tr key={idx} className={position.current_price < 0.99 ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-gray-50'}>
                       <td className="px-3 py-0.5 whitespace-nowrap" style={{width: '27.5%'}}>
                         <a href={tradeUrl} className="text-base text-blue-600 hover:underline">
                           {fillDateTime}
@@ -534,7 +562,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
           const tradeUrl = `/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`;
 
           return (
-            <div key={idx} className="bg-white rounded-lg shadow p-2.5">
+            <div key={idx} className={`rounded-lg shadow p-2.5 ${position.current_price < 0.99 ? 'bg-amber-50' : 'bg-white'}`}>
               {/* Market Title */}
               {marketUrl ? (
                 <a href={marketUrl} target="_blank" rel="noopener noreferrer" className="text-base font-medium text-blue-600 hover:underline block mb-1.5">

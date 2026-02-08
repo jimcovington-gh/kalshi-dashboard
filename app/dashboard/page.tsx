@@ -109,10 +109,10 @@ export default function DashboardPage() {
                   <h2 className="text-lg sm:text-xl font-bold">{userPortfolio.user_name}</h2>
                 </div>
                 <div className="grid grid-cols-3 gap-x-3 gap-y-0.5 text-xs sm:text-base sm:gap-x-6 sm:gap-y-1">
-                  <div><span className="text-blue-200">Pos:</span> <span className="font-semibold">{userPortfolio.position_count}</span></div>
+                  <div><span className="text-blue-200">Markets:</span> <span className="font-semibold">{userPortfolio.position_count}</span></div>
                   <div><span className="text-blue-200">Cash:</span> <span className="font-semibold">${(userPortfolio.cash_balance || 0).toFixed(0)}</span></div>
                   <div><span className="text-blue-200">Total:</span> <span className="font-semibold">${((userPortfolio.cash_balance || 0) + (userPortfolio.total_position_value || 0)).toFixed(0)}</span></div>
-                  <div><span className="text-blue-200">Ctrx:</span> <span className="font-semibold">{totalContracts}</span></div>
+                  <div><span className="text-blue-200">Contracts:</span> <span className="font-semibold">{totalContracts}</span></div>
                   <div><span className="text-blue-200">Value:</span> <span className="font-semibold">${(userPortfolio.total_position_value || 0).toFixed(0)}</span></div>
                   <div><span className="text-blue-200">Max:</span> <span className="font-semibold">${maxReturn.toFixed(0)}</span></div>
                 </div>
@@ -148,10 +148,10 @@ export default function DashboardPage() {
           <h2 className="text-lg sm:text-xl font-bold">{portfolio!.user_name}</h2>
         </div>
         <div className="grid grid-cols-3 gap-x-3 gap-y-0.5 text-xs sm:text-base sm:gap-x-6 sm:gap-y-1">
-          <div><span className="text-blue-200">Pos:</span> <span className="font-semibold">{portfolio!.position_count}</span></div>
+          <div><span className="text-blue-200">Markets:</span> <span className="font-semibold">{portfolio!.position_count}</span></div>
           <div><span className="text-blue-200">Cash:</span> <span className="font-semibold">${(portfolio!.cash_balance || 0).toFixed(0)}</span></div>
           <div><span className="text-blue-200">Total:</span> <span className="font-semibold">${((portfolio!.cash_balance || 0) + (portfolio!.total_position_value || 0)).toFixed(0)}</span></div>
-          <div><span className="text-blue-200">Ctrx:</span> <span className="font-semibold">{totalContracts}</span></div>
+          <div><span className="text-blue-200">Contracts:</span> <span className="font-semibold">{totalContracts}</span></div>
           <div><span className="text-blue-200">Value:</span> <span className="font-semibold">${(portfolio!.total_position_value || 0).toFixed(0)}</span></div>
           <div><span className="text-blue-200">Max:</span> <span className="font-semibold">${maxReturn.toFixed(0)}</span></div>
         </div>

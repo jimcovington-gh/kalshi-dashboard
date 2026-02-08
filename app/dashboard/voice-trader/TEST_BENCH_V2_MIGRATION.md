@@ -71,3 +71,4 @@ TestBenchV2.tsx has been completely rewritten to work with the v2 worker pipelin
 3. **Test with Legacy** - Select "Legacy" in dropdown to verify old worker still works
 4. **Test with V2** - Select "V2 Pipeline" to test new worker
 5. **Compare Behavior** - Run same event with both and compare results
+6. **Delete old portfolio snapshots table** (after 2026-02-10) - `production-kalshi-portfolio-snapshots` replaced by v2 table (PK=user_name). Verify zero DynamoDB reads for 48h, then delete table, remove `PortfolioSnapshotsTable` from `kalshi-market-capture/template.yaml`, remove old ARN from `kalshi-tis-TaskRole` DynamoDBAccess policy.

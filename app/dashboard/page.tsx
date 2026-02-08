@@ -93,7 +93,7 @@ export default function DashboardPage() {
             <div key={userIdx} className="border-2 border-blue-200 rounded-lg p-4 bg-blue-50/30">
               {/* User Header - Clickable */}
               <div 
-                className="bg-blue-600 text-white px-4 py-3 rounded-t-lg -mx-4 -mt-4 mb-4 cursor-pointer hover:bg-blue-700 transition-colors"
+                className="bg-blue-600 text-white px-3 py-2 sm:px-4 sm:py-3 rounded-t-lg -mx-4 -mt-4 mb-4 cursor-pointer hover:bg-blue-700 transition-colors"
                 onClick={() => {
                   const newExpanded = new Set(expandedUsers);
                   if (isExpanded) {
@@ -104,43 +104,17 @@ export default function DashboardPage() {
                   setExpandedUsers(newExpanded);
                 }}
               >
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">{isExpanded ? '▼' : '▶'}</span>
-                    <h2 className="text-xl font-bold">{userPortfolio.user_name}</h2>
-                  </div>
-                  <div className="flex gap-6 text-base">
-                    <div>
-                      <div>
-                        <span className="text-blue-200">Positions:</span>
-                        <span className="ml-2 font-semibold">{userPortfolio.position_count}</span>
-                      </div>
-                      <div className="mt-1">
-                        <span className="text-blue-200">Contracts:</span>
-                        <span className="ml-2 font-semibold">{totalContracts}</span>
-                      </div>
-                    </div>
-                    <div>
-                      <div>
-                        <span className="text-blue-200">Cash:</span>
-                        <span className="ml-2 font-semibold">${(userPortfolio.cash_balance || 0).toFixed(2)}</span>
-                      </div>
-                      <div className="mt-1">
-                        <span className="text-blue-200">Contract Value:</span>
-                        <span className="ml-2 font-semibold">${(userPortfolio.total_position_value || 0).toFixed(2)}</span>
-                      </div>
-                    </div>
-                    <div>
-                      <div>
-                        <span className="text-blue-200">Total:</span>
-                        <span className="ml-2 font-semibold">${((userPortfolio.cash_balance || 0) + (userPortfolio.total_position_value || 0)).toFixed(2)}</span>
-                      </div>
-                      <div className="mt-1">
-                        <span className="text-blue-200">Max Return:</span>
-                        <span className="ml-2 font-semibold">${maxReturn.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  </div>
+                <div className="flex items-center gap-2 mb-1 sm:mb-0">
+                  <span className="text-lg sm:text-2xl">{isExpanded ? '▼' : '▶'}</span>
+                  <h2 className="text-lg sm:text-xl font-bold">{userPortfolio.user_name}</h2>
+                </div>
+                <div className="grid grid-cols-3 gap-x-3 gap-y-0.5 text-xs sm:text-base sm:gap-x-6 sm:gap-y-1">
+                  <div><span className="text-blue-200">Pos:</span> <span className="font-semibold">{userPortfolio.position_count}</span></div>
+                  <div><span className="text-blue-200">Cash:</span> <span className="font-semibold">${(userPortfolio.cash_balance || 0).toFixed(0)}</span></div>
+                  <div><span className="text-blue-200">Total:</span> <span className="font-semibold">${((userPortfolio.cash_balance || 0) + (userPortfolio.total_position_value || 0)).toFixed(0)}</span></div>
+                  <div><span className="text-blue-200">Ctrx:</span> <span className="font-semibold">{totalContracts}</span></div>
+                  <div><span className="text-blue-200">Value:</span> <span className="font-semibold">${(userPortfolio.total_position_value || 0).toFixed(0)}</span></div>
+                  <div><span className="text-blue-200">Max:</span> <span className="font-semibold">${maxReturn.toFixed(0)}</span></div>
                 </div>
               </div>
               
@@ -169,43 +143,17 @@ export default function DashboardPage() {
   return (
     <div className="space-y-4">
       {/* User Summary Header */}
-      <div className="bg-blue-600 text-white px-4 py-3 rounded-lg">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-bold">{portfolio!.user_name}</h2>
-          </div>
-          <div className="flex gap-6 text-base">
-            <div>
-              <div>
-                <span className="text-blue-200">Positions:</span>
-                <span className="ml-2 font-semibold">{portfolio!.position_count}</span>
-              </div>
-              <div className="mt-1">
-                <span className="text-blue-200">Contracts:</span>
-                <span className="ml-2 font-semibold">{totalContracts}</span>
-              </div>
-            </div>
-            <div>
-              <div>
-                <span className="text-blue-200">Cash:</span>
-                <span className="ml-2 font-semibold">${(portfolio!.cash_balance || 0).toFixed(2)}</span>
-              </div>
-              <div className="mt-1">
-                <span className="text-blue-200">Contract Value:</span>
-                <span className="ml-2 font-semibold">${(portfolio!.total_position_value || 0).toFixed(2)}</span>
-              </div>
-            </div>
-            <div>
-              <div>
-                <span className="text-blue-200">Total:</span>
-                <span className="ml-2 font-semibold">${((portfolio!.cash_balance || 0) + (portfolio!.total_position_value || 0)).toFixed(2)}</span>
-              </div>
-              <div className="mt-1">
-                <span className="text-blue-200">Max Return:</span>
-                <span className="ml-2 font-semibold">${maxReturn.toFixed(2)}</span>
-              </div>
-            </div>
-          </div>
+      <div className="bg-blue-600 text-white px-3 py-2 sm:px-4 sm:py-3 rounded-lg">
+        <div className="flex items-center gap-2 mb-1 sm:mb-0">
+          <h2 className="text-lg sm:text-xl font-bold">{portfolio!.user_name}</h2>
+        </div>
+        <div className="grid grid-cols-3 gap-x-3 gap-y-0.5 text-xs sm:text-base sm:gap-x-6 sm:gap-y-1">
+          <div><span className="text-blue-200">Pos:</span> <span className="font-semibold">{portfolio!.position_count}</span></div>
+          <div><span className="text-blue-200">Cash:</span> <span className="font-semibold">${(portfolio!.cash_balance || 0).toFixed(0)}</span></div>
+          <div><span className="text-blue-200">Total:</span> <span className="font-semibold">${((portfolio!.cash_balance || 0) + (portfolio!.total_position_value || 0)).toFixed(0)}</span></div>
+          <div><span className="text-blue-200">Ctrx:</span> <span className="font-semibold">{totalContracts}</span></div>
+          <div><span className="text-blue-200">Value:</span> <span className="font-semibold">${(portfolio!.total_position_value || 0).toFixed(0)}</span></div>
+          <div><span className="text-blue-200">Max:</span> <span className="font-semibold">${maxReturn.toFixed(0)}</span></div>
         </div>
       </div>
       

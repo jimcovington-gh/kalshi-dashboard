@@ -82,9 +82,6 @@ export default function DashboardPage() {
       <div className="space-y-8">
         {portfolios.map((userPortfolio, userIdx) => {
           const totalContracts = userPortfolio.positions.reduce((sum, p) => sum + Math.abs(p.contracts), 0);
-          const hiddenValue = userPortfolio.positions
-            .filter(p => p.market_status === 'closed')
-            .reduce((sum, p) => sum + p.market_value, 0);
           const maxReturn = (userPortfolio.cash_balance || 0) + userPortfolio.positions.reduce((sum, p) => {
             const expectedValue = p.current_price >= 0.80 ? 0.999 : 0;
             return sum + expectedValue * Math.abs(p.contracts);
@@ -143,15 +140,6 @@ export default function DashboardPage() {
                         <span className="ml-2 font-semibold">${maxReturn.toFixed(2)}</span>
                       </div>
                     </div>
-                    {hiddenValue > 0 && (
-                    <div>
-                      <div>
-                        <span className="text-yellow-200">Hidden Value:</span>
-                        <span className="ml-2 font-semibold text-yellow-200">${hiddenValue.toFixed(2)}</span>
-                      </div>
-                      <div className="mt-1 text-xs text-blue-300">Closed, not on Kalshi app</div>
-                    </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -173,9 +161,6 @@ export default function DashboardPage() {
 
   // Regular user view - with summary header like admin sees
   const totalContracts = portfolio!.positions.reduce((sum, p) => sum + Math.abs(p.contracts), 0);
-  const hiddenValue = portfolio!.positions
-    .filter(p => p.market_status === 'closed')
-    .reduce((sum, p) => sum + p.market_value, 0);
   const maxReturn = (portfolio!.cash_balance || 0) + portfolio!.positions.reduce((sum, p) => {
     const expectedValue = p.current_price >= 0.80 ? 0.999 : 0;
     return sum + expectedValue * Math.abs(p.contracts);
@@ -220,15 +205,6 @@ export default function DashboardPage() {
                 <span className="ml-2 font-semibold">${maxReturn.toFixed(2)}</span>
               </div>
             </div>
-            {hiddenValue > 0 && (
-            <div>
-              <div>
-                <span className="text-yellow-200">Hidden Value:</span>
-                <span className="ml-2 font-semibold text-yellow-200">${hiddenValue.toFixed(2)}</span>
-              </div>
-              <div className="mt-1 text-xs text-blue-300">Closed, not on Kalshi app</div>
-            </div>
-            )}
           </div>
         </div>
       </div>

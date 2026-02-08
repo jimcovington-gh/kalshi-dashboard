@@ -478,7 +478,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                   const tradeUrl = `/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`;
 
                   return (
-                    <tr key={idx} className={position.current_price < 0.99 ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-gray-50'}>
+                    <tr key={idx} className={position.current_price <= 0.92 ? 'bg-red-100 hover:bg-red-150' : position.current_price <= 0.96 ? 'bg-amber-100 hover:bg-amber-200' : 'hover:bg-gray-50'}>
                       <td className="px-3 py-0.5 whitespace-nowrap" style={{width: '27.5%'}}>
                         <a href={tradeUrl} className="text-base text-blue-600 hover:underline">
                           {fillDateTime}
@@ -562,7 +562,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
           const tradeUrl = `/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`;
 
           return (
-            <div key={idx} className={`rounded-lg shadow p-2.5 ${position.current_price < 0.99 ? 'bg-amber-50' : 'bg-white'}`}>
+            <div key={idx} className={`rounded-lg shadow p-2.5 ${position.current_price <= 0.92 ? 'bg-red-100' : position.current_price <= 0.96 ? 'bg-amber-100' : 'bg-white'}`}>
               {/* Market Title */}
               {marketUrl ? (
                 <a href={marketUrl} target="_blank" rel="noopener noreferrer" className="text-base font-medium text-blue-600 hover:underline block mb-1.5">

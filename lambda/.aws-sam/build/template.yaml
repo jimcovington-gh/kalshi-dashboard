@@ -10,7 +10,7 @@ Globals:
       Variables:
         TRADES_TABLE: production-kalshi-trades-v2
         POSITIONS_TABLE: production-kalshi-market-positions
-        PORTFOLIO_TABLE: production-kalshi-portfolio-snapshots
+        PORTFOLIO_TABLE: production-kalshi-portfolio-snapshots-v2
         MARKET_METADATA_TABLE: production-kalshi-market-metadata
         CONFIG_BUCKET_NAME: production-kalshi-trading-config
 Parameters:
@@ -18,9 +18,18 @@ Parameters:
     Type: String
     Description: ARN of the Cognito User Pool for authentication
     Default: arn:aws:cognito-idp:us-east-1:355149669325:userpool/us-east-1_WEozUeojc
+  TISVpcSubnets:
+    Type: CommaDelimitedList
+    Default: subnet-0ba02a0291289ed61,subnet-00f42ffa626fb65bc
+    Description: Subnets for Lambdas that need TIS access (private subnets with NAT)
+  TISVpcSecurityGroups:
+    Type: CommaDelimitedList
+    Default: sg-07bca88870ac173f8
+    Description: Security group allowing TIS access (tis.production.local:8080)
   PortfolioFetcherLayerArn:
     Type: String
-    Description: ARN of the PortfolioFetcherLayer from kalshi-market-capture stack
+    Description: ARN of the PortfolioFetcherLayer (used by ai-chat for cryptography
+      deps)
     Default: ''
 Resources:
   DashboardApi:
@@ -79,32 +88,29 @@ Resources:
       FunctionName: dashboard-get-portfolio
       CodeUri: GetPortfolioFunction
       Handler: get-portfolio.lambda_handler
-      Description: Get portfolio data for user(s)
+      Description: Get portfolio data for user(s) via TIS
       AutoPublishAlias: live
       ProvisionedConcurrencyConfig:
         ProvisionedConcurrentExecutions: 1
+      VpcConfig:
+        SubnetIds:
+          Ref: TISVpcSubnets
+        SecurityGroupIds:
+          Ref: TISVpcSecurityGroups
       Layers:
       - Ref: SharedCodeLayer
-      - Ref: PortfolioFetcherLayerArn
       Environment:
         Variables:
-          RATE_LIMITER_TABLE_NAME: production-kalshi-rate-limiter
-          USER_SECRET_PREFIX: production/kalshi/users
-          KALSHI_API_BASE_URL: https://api.elections.kalshi.com
-          POSITIONS_LIVE_TABLE: production-kalshi-positions-live
+          TIS_ENDPOINT: http://tis.production.local:8080
       Policies:
       - DynamoDBReadPolicy:
           TableName: production-kalshi-market-positions
       - DynamoDBReadPolicy:
-          TableName: production-kalshi-positions-live
-      - DynamoDBReadPolicy:
-          TableName: production-kalshi-portfolio-snapshots
+          TableName: production-kalshi-portfolio-snapshots-v2
       - DynamoDBReadPolicy:
           TableName: production-kalshi-market-metadata
       - DynamoDBReadPolicy:
           TableName: production-kalshi-trades-v2
-      - DynamoDBCrudPolicy:
-          TableName: production-kalshi-rate-limiter
       - Statement:
         - Effect: Allow
           Action:
@@ -116,13 +122,9 @@ Resources:
       - Statement:
         - Effect: Allow
           Action:
-          - secretsmanager:GetSecretValue
-          Resource:
-          - arn:aws:secretsmanager:us-east-1:355149669325:secret:production/kalshi/users/*
-      - Statement:
-        - Effect: Allow
-          Action:
-          - secretsmanager:ListSecrets
+          - ec2:CreateNetworkInterface
+          - ec2:DescribeNetworkInterfaces
+          - ec2:DeleteNetworkInterface
           Resource: '*'
       Events:
         GetPortfolio:

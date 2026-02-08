@@ -1,11 +1,11 @@
-"""
-Lambda function to get portfolio data using PortfolioFetcherLayer + DynamoDB enrichment
+"""Lambda function to get portfolio data via TIS + DynamoDB enrichment
 Supports user-specific queries and admin queries across all users
 
 Architecture:
-1. Fetch fresh portfolio from Kalshi API via PortfolioFetcherLayer
-2. Enrich with historical data (fill prices from trades, market titles, etc.)
-3. Return combined view with current state + historical context
+1. Fetch positions from TIS API (positions-live DynamoDB via Cloud Map)
+2. Fetch prices + metadata from market-metadata DynamoDB
+3. Enrich with historical data (fill prices from trades-v2)
+4. Return combined view with current state + historical context
 """
 
 import json
@@ -16,7 +16,46 @@ from typing import Dict, List, Any, Optional
 import os
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
-from portfolio_fetcher import fetch_user_portfolio
+import urllib3
+
+# TIS endpoint - resolved via Cloud Map DNS inside VPC
+TIS_ENDPOINT = os.environ.get('TIS_ENDPOINT', 'http://tis.production.local:8080')
+
+# Connection pool (reuse across invocations)
+_http = None
+
+def get_http():
+    """Get or create HTTP connection pool."""
+    global _http
+    if _http is None:
+        _http = urllib3.PoolManager(
+            timeout=urllib3.Timeout(connect=5.0, read=30.0),
+            retries=urllib3.Retry(total=2, backoff_factor=0.5)
+        )
+    return _http
+
+
+def fetch_positions_from_tis(user_name: str) -> Dict[str, Any]:
+    """Fetch positions + cash balance from TIS API.
+    
+    Args:
+        user_name: Username to fetch positions for
+        
+    Returns:
+        Dict with 'positions' (list of position dicts) and 'cash_balance' dict
+        
+    Raises:
+        Exception on TIS communication failure
+    """
+    url = f"{TIS_ENDPOINT}/v1/positions/{user_name}?include_cash=true"
+    http = get_http()
+    
+    response = http.request('GET', url, headers={'Content-Type': 'application/json'})
+    
+    if response.status >= 400:
+        raise Exception(f"TIS GET /v1/positions/{user_name} failed: {response.status} {response.data.decode('utf-8')[:200]}")
+    
+    return json.loads(response.data.decode('utf-8'))
 
 # Configure logging
 logger = logging.getLogger()
@@ -24,9 +63,8 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 dynamodb_client = boto3.client('dynamodb', region_name='us-east-1')
-secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
 positions_table = dynamodb.Table(os.environ.get('POSITIONS_TABLE', 'production-kalshi-market-positions'))
-portfolio_table = dynamodb.Table(os.environ.get('PORTFOLIO_TABLE', 'production-kalshi-portfolio-snapshots'))
+portfolio_table = dynamodb.Table(os.environ.get('PORTFOLIO_TABLE', 'production-kalshi-portfolio-snapshots-v2'))
 market_metadata_table = dynamodb.Table(os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'))
 trades_table = dynamodb.Table(os.environ.get('TRADES_TABLE', 'production-kalshi-trades-v2'))
 
@@ -56,6 +94,21 @@ def _extract_metadata_from_item(item: Dict, ticker: str) -> Dict[str, Any]:
         elif 'S' in item['close_time']:
             close_time_val = item['close_time']['S']
     
+    # Extract last_price_dollars for price computation
+    last_price_dollars = None
+    if 'last_price_dollars' in item:
+        raw = item['last_price_dollars']
+        if 'N' in raw:
+            try:
+                last_price_dollars = float(raw['N'])
+            except (ValueError, TypeError):
+                pass
+        elif 'S' in raw:
+            try:
+                last_price_dollars = float(raw['S'])
+            except (ValueError, TypeError):
+                pass
+    
     return {
         # Field is 'title' in table, we return as 'market_title'
         'market_title': item.get('title', {}).get('S', ticker),
@@ -63,8 +116,11 @@ def _extract_metadata_from_item(item: Dict, ticker: str) -> Dict[str, Any]:
         'series_ticker': item.get('series_ticker', {}).get('S', ''),
         # Field is 'status' in table, we return as 'market_status'
         'market_status': item.get('status', {}).get('S', 'unknown'),
+        # Market result: 'yes' or 'no' if determined/settled, empty otherwise
+        'result': item.get('result', {}).get('S', ''),
         'close_time': close_time_val,
-        'strike': item.get('strike', {}).get('S', '')
+        'strike': item.get('strike', {}).get('S', ''),
+        'last_price_dollars': last_price_dollars
     }
 
 
@@ -98,7 +154,7 @@ def batch_get_market_metadata(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
                     MARKET_METADATA_TABLE_NAME: {
                         'Keys': keys,
                         # Use actual field names from table: title, status (not market_title, market_status)
-                        'ProjectionExpression': 'market_ticker, title, event_ticker, series_ticker, #s, close_time, strike',
+                        'ProjectionExpression': 'market_ticker, title, event_ticker, series_ticker, #s, close_time, strike, last_price_dollars',
                         'ExpressionAttributeNames': {'#s': 'status'}  # 'status' is reserved word
                     }
                 }
@@ -124,7 +180,7 @@ def batch_get_market_metadata(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
                     RequestItems={
                         MARKET_METADATA_TABLE_NAME: {
                             'Keys': unprocessed,
-                            'ProjectionExpression': 'market_ticker, title, event_ticker, series_ticker, #s, close_time, strike',
+                            'ProjectionExpression': 'market_ticker, title, event_ticker, series_ticker, #s, close_time, strike, last_price_dollars',
                             'ExpressionAttributeNames': {'#s': 'status'}
                         }
                     }
@@ -149,31 +205,33 @@ def batch_get_market_metadata(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
     return result
 
 
-def get_api_key_id(user_name: str) -> str:
-    """Helper to get api_key_id for a user (used for portfolio history queries)"""
+def get_users_from_tis() -> List[str]:
+    """Get list of active users from TIS status endpoint."""
     try:
-        secret_response = secretsmanager.get_secret_value(
-            SecretId=f'production/kalshi/users/{user_name}/metadata'
-        )
-        secret_data = json.loads(secret_response['SecretString'])
-        return secret_data['api_key_id']
+        url = f"{TIS_ENDPOINT}/v1/status"
+        http = get_http()
+        response = http.request('GET', url, headers={'Content-Type': 'application/json'})
+        if response.status >= 400:
+            logger.error(f"TIS /v1/status failed: {response.status}")
+            return []
+        data = json.loads(response.data.decode('utf-8'))
+        return data.get('monitors', {}).get('users', [])
     except Exception as e:
-        logger.error(f"Error getting api_key_id for user {user_name}: {e}")
-        raise
+        logger.error(f"Failed to get users from TIS: {e}")
+        return []
 
-def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, Any]:
+
+def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     """
-    Get current portfolio positions and values using positions-live (primary) or API (fallback)
+    Get current portfolio positions and values via TIS + market-metadata.
     
-    PHASE 7B Architecture (Cleanup):
-    Uses portfolio-layer's fetch_user_portfolio() which:
-    1. Tries positions-live table first (WebSocket-fed, real-time)
-    2. Falls back to REST API if positions-live is stale (>12h) or unavailable
-    Then enriches with fill price history from DynamoDB
+    Architecture:
+    1. TIS /v1/positions/{user} -> raw positions + cash from positions-live DynamoDB
+    2. market-metadata DynamoDB -> prices (last_price_dollars) + display fields
+    3. trades-v2 DynamoDB -> fill prices, fill times, idea names
     
     Args:
         user_name: Username to fetch portfolio for
-        api_key_id: Optional API key ID (unused, kept for backward compatibility)
     
     Returns:
         Dictionary with current portfolio state + historical enrichment
@@ -181,31 +239,32 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
     
     logger.info(f"Fetching portfolio for {user_name}")
     
-    # Use portfolio-layer's unified function (handles positions-live + REST fallback)
+    # STEP 1: Get positions + cash from TIS
     try:
-        portfolio = fetch_user_portfolio(
-            user_name=user_name,
-            user_secret_prefix='production/kalshi/users',
-            kalshi_base_url=os.environ.get('KALSHI_API_BASE_URL', 'https://api.elections.kalshi.com'),
-            rate_limiter_table_name=os.environ.get('RATE_LIMITER_TABLE_NAME', 'production-kalshi-rate-limiter'),
-            market_metadata_table_name=os.environ.get('MARKET_METADATA_TABLE', 'production-kalshi-market-metadata'),
-            positions_live_table_name=os.environ.get('POSITIONS_LIVE_TABLE', 'production-kalshi-positions-live'),
-            logger=logger
-        )
+        tis_data = fetch_positions_from_tis(user_name)
     except Exception as e:
-        logger.error(f"Failed to fetch portfolio for {user_name}: {e}", exc_info=True)
+        logger.error(f"Failed to fetch positions from TIS for {user_name}: {e}", exc_info=True)
         raise
     
-    cash_balance = portfolio['balance_dollars']
-    api_positions = portfolio['positions']
-    total_position_value = portfolio['total_portfolio_value'] - cash_balance
-    # Determine data source from log messages (positions-live logs "📊 Portfolio source: positions-live")
-    data_source = 'positions_live'  # Layer handles source selection internally
-    fetched_at = portfolio.get('fetched_at')
+    # Parse TIS response
+    cash_balance = 0.0
+    if tis_data.get('cash_balance'):
+        cash_balance = float(tis_data['cash_balance'].get('balance_dollars', 0))
     
-    logger.info(f"🔍 POSITION COUNT - Got {len(api_positions)} positions for {user_name} from {data_source}")
+    # Build raw positions dict: ticker -> position_count
+    raw_positions = {}
+    for pos in tis_data.get('positions', []):
+        ticker = pos.get('market_ticker', '')
+        position_count = int(pos.get('position', 0))
+        if ticker and position_count != 0:
+            raw_positions[ticker] = position_count
     
-    # STEP 2: Get fill prices AND fill times by querying each ticker in parallel
+    data_source = 'tis'
+    fetched_at = tis_data.get('timestamp', datetime.now(timezone.utc).isoformat())
+    
+    logger.info(f"🔍 POSITION COUNT - Got {len(raw_positions)} positions for {user_name} from TIS, cash=${cash_balance:.2f}")
+    
+    # STEP 1.5: Get fill prices AND fill times by querying each ticker in parallel
     def query_ticker_fill_data(ticker: str) -> tuple:
         """Query fill price and fill time for a single ticker using market_ticker-index.
         Returns (ticker, avg_fill_price, most_recent_fill_time, idea_name)
@@ -272,7 +331,7 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
     fill_prices = {}
     fill_times = {}
     idea_names = {}
-    tickers_to_query = list(api_positions.keys())
+    tickers_to_query = list(raw_positions.keys())
     
     if tickers_to_query:
         try:
@@ -292,8 +351,8 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
             logger.warning(f"Failed to fetch fill prices in parallel for {user_name}: {e}")
             fill_prices = {}
     
-    # STEP 2.5: Batch fetch market metadata from DynamoDB (portfolio layer doesn't include metadata)
-    # Use batch_get_item for efficiency - handles up to 100 items per batch
+    # STEP 2: Batch fetch market metadata + prices from DynamoDB
+    # This single batch fetch provides both display fields AND last_price_dollars for price computation
     market_metadata = {}
     if tickers_to_query:
         try:
@@ -303,17 +362,40 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
             logger.warning(f"Failed to batch fetch market metadata: {e}")
             market_metadata = {}
     
-    # STEP 3: Enrich positions with fill prices and market metadata
+    # STEP 3: Compute prices and enrich positions
     position_details = []
+    total_position_value = 0.0
     
-    for ticker, position_data in api_positions.items():
-        contracts = position_data['position']
-        market_value = position_data['market_value']
-        current_price = position_data['current_price']
+    for ticker, position_count in raw_positions.items():
+        contracts = position_count
         
-        # Get metadata from batch lookup (fallback to ticker-derived values if missing)
+        # Get metadata + price from batch lookup
         metadata = market_metadata.get(ticker, {})
         series = metadata.get('series_ticker') or (ticker.split('-')[0] if ticker else '')
+        
+        # Compute current_price from last_price_dollars
+        # If market has a result (determined/settled), use $1.00 or $0.00
+        market_result = metadata.get('result', '')
+        market_status = metadata.get('market_status', 'unknown')
+        side = 'yes' if contracts > 0 else 'no'
+        
+        if market_result in ('yes', 'no') and market_status in ('determined', 'finalized', 'settled'):
+            # Result is known: position is worth $1 if we're on the winning side, $0 otherwise
+            current_price = 1.0 if market_result == side else 0.0
+        else:
+            last_price = metadata.get('last_price_dollars')
+            if last_price is not None and last_price > 0:
+                if contracts > 0:
+                    current_price = last_price  # YES side
+                else:
+                    current_price = 1.0 - last_price  # NO side
+            else:
+                # Fallback: midpoint estimate if no price data
+                current_price = 0.5
+                logger.warning(f"No price data for {ticker} in market-metadata, using 0.5 estimate")
+        
+        market_value = abs(contracts) * current_price
+        total_position_value += market_value
         
         position_details.append({
             'ticker': ticker,
@@ -329,6 +411,7 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
             'event_ticker': metadata.get('event_ticker', ''),
             'series_ticker': series,
             'market_status': metadata.get('market_status', 'unknown'),
+            'result': metadata.get('result', ''),
             'strike': metadata.get('strike', '')
         })
 
@@ -362,7 +445,7 @@ def get_current_portfolio(user_name: str, api_key_id: str = None) -> Dict[str, A
         'position_count': len(position_details),
         'total_position_value': float(total_position_value),
         'positions': position_details,
-        'data_source': data_source,  # 'positions_live' or 'api_with_enrichment'
+        'data_source': data_source,  # 'tis'
         'fetched_at': fetched_at
     }
     
@@ -571,9 +654,10 @@ def compare_portfolios_log_diff(api_portfolio: Dict[str, Any], live_comparison: 
         logger.info(f"✓ COMPARISON: positions-live is fresh ({staleness:.1f} min old)")
 
 
-def get_portfolio_history(api_key_id: str, period: str = '24h') -> List[Dict[str, Any]]:
+def get_portfolio_history(user_name: str, period: str = '24h') -> List[Dict[str, Any]]:
     """Get portfolio snapshot history with efficient time-bucket sampling.
     
+    Queries portfolio-snapshots-v2 table by user_name (partition key).
     Instead of fetching all records and downsampling (slow for large datasets),
     we query one record per time bucket directly from DynamoDB.
     """
@@ -617,9 +701,9 @@ def get_portfolio_history(api_key_id: str, period: str = '24h') -> List[Dict[str
         try:
             # Query for the latest record in this bucket (scan backwards, limit 1)
             response = portfolio_table.query(
-                KeyConditionExpression='api_key_id = :api_key AND snapshot_ts BETWEEN :start_ts AND :end_ts',
+                KeyConditionExpression='user_name = :uname AND snapshot_ts BETWEEN :start_ts AND :end_ts',
                 ExpressionAttributeValues={
-                    ':api_key': api_key_id,
+                    ':uname': user_name,
                     ':start_ts': prev_bucket_ts,
                     ':end_ts': bucket_ts
                 },
@@ -638,9 +722,9 @@ def get_portfolio_history(api_key_id: str, period: str = '24h') -> List[Dict[str
         logger.info("Bucket queries returned no results, trying fallback")
         start_ts = int(start_time.timestamp() * 1000)
         response = portfolio_table.query(
-            KeyConditionExpression='api_key_id = :api_key AND snapshot_ts >= :start_ts',
+            KeyConditionExpression='user_name = :uname AND snapshot_ts >= :start_ts',
             ExpressionAttributeValues={
-                ':api_key': api_key_id,
+                ':uname': user_name,
                 ':start_ts': start_ts
             },
             Limit=200  # Cap at 200 records for fallback
@@ -701,11 +785,10 @@ def lambda_handler(event, context):
                 }
             
             # Get single user portfolio
-            api_key_id = get_api_key_id(requested_user)
-            portfolio = get_current_portfolio(requested_user, api_key_id)
+            portfolio = get_current_portfolio(requested_user)
             
             if include_history:
-                portfolio['history'] = get_portfolio_history(api_key_id, history_period)
+                portfolio['history'] = get_portfolio_history(requested_user, history_period)
             
             result = {
                 'user': requested_user,
@@ -716,20 +799,17 @@ def lambda_handler(event, context):
         else:
             # No user specified
             if is_admin:
-                # Admin can see all users - get list from S3 config
+                # Admin can see all users - get list from TIS
                 print("DEBUG: Admin with no user specified - getting all users")
-                from s3_config_loader import get_all_enabled_users
-                
-                all_users = get_all_enabled_users()
+                all_users = get_users_from_tis()
                 print(f"DEBUG: Found {len(all_users)} users: {all_users}")
                 portfolios = []
                 
                 for user in all_users:
                     try:
-                        api_key_id = get_api_key_id(user)
-                        portfolio = get_current_portfolio(user, api_key_id)
+                        portfolio = get_current_portfolio(user)
                         if include_history:
-                            portfolio['history'] = get_portfolio_history(api_key_id, history_period)
+                            portfolio['history'] = get_portfolio_history(user, history_period)
                         portfolios.append(portfolio)
                     except Exception as e:
                         print(f"Error fetching portfolio for {user}: {e}")
@@ -749,11 +829,10 @@ def lambda_handler(event, context):
                         'body': json.dumps({'error': 'Authentication required'})
                     }
                 
-                api_key_id = get_api_key_id(current_user)
-                portfolio = get_current_portfolio(current_user, api_key_id)
+                portfolio = get_current_portfolio(current_user)
                 
                 if include_history:
-                    portfolio['history'] = get_portfolio_history(api_key_id, history_period)
+                    portfolio['history'] = get_portfolio_history(current_user, history_period)
                 
                 result = {
                     'user': current_user,

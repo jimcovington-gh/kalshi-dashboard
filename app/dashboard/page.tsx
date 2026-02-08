@@ -82,6 +82,9 @@ export default function DashboardPage() {
       <div className="space-y-8">
         {portfolios.map((userPortfolio, userIdx) => {
           const totalContracts = userPortfolio.positions.reduce((sum, p) => sum + Math.abs(p.contracts), 0);
+          const hiddenValue = userPortfolio.positions
+            .filter(p => p.market_status === 'closed')
+            .reduce((sum, p) => sum + p.market_value, 0);
           const maxReturn = (userPortfolio.cash_balance || 0) + userPortfolio.positions.reduce((sum, p) => {
             const expectedValue = p.current_price >= 0.80 ? 0.999 : 0;
             return sum + expectedValue * Math.abs(p.contracts);
@@ -140,6 +143,15 @@ export default function DashboardPage() {
                         <span className="ml-2 font-semibold">${maxReturn.toFixed(2)}</span>
                       </div>
                     </div>
+                    {hiddenValue > 0 && (
+                    <div>
+                      <div>
+                        <span className="text-yellow-200">Hidden Value:</span>
+                        <span className="ml-2 font-semibold text-yellow-200">${hiddenValue.toFixed(2)}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-blue-300">Closed, not on Kalshi app</div>
+                    </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -161,6 +173,9 @@ export default function DashboardPage() {
 
   // Regular user view - with summary header like admin sees
   const totalContracts = portfolio!.positions.reduce((sum, p) => sum + Math.abs(p.contracts), 0);
+  const hiddenValue = portfolio!.positions
+    .filter(p => p.market_status === 'closed')
+    .reduce((sum, p) => sum + p.market_value, 0);
   const maxReturn = (portfolio!.cash_balance || 0) + portfolio!.positions.reduce((sum, p) => {
     const expectedValue = p.current_price >= 0.80 ? 0.999 : 0;
     return sum + expectedValue * Math.abs(p.contracts);
@@ -205,6 +220,15 @@ export default function DashboardPage() {
                 <span className="ml-2 font-semibold">${maxReturn.toFixed(2)}</span>
               </div>
             </div>
+            {hiddenValue > 0 && (
+            <div>
+              <div>
+                <span className="text-yellow-200">Hidden Value:</span>
+                <span className="ml-2 font-semibold text-yellow-200">${hiddenValue.toFixed(2)}</span>
+              </div>
+              <div className="mt-1 text-xs text-blue-300">Closed, not on Kalshi app</div>
+            </div>
+            )}
           </div>
         </div>
       </div>
@@ -229,8 +253,9 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
   const ACTIVE_STATUSES = ['active', 'open', 'unknown', 'initialized'];
   const INACTIVE_STATUSES = ['inactive'];
   const DETERMINED_STATUSES = ['determined'];  // Awaiting payout (result known, not yet settled)
-  const SETTLED_STATUSES = ['closed', 'finalized'];  // Awaiting settlement (being processed)
-  const ALL_KNOWN_STATUSES = [...ACTIVE_STATUSES, ...INACTIVE_STATUSES, ...DETERMINED_STATUSES, ...SETTLED_STATUSES];
+  const CLOSED_STATUSES = ['closed'];  // Closed but not yet determined (hidden from Kalshi mobile app)
+  const SETTLED_STATUSES = ['finalized'];  // Awaiting settlement (being processed)
+  const ALL_KNOWN_STATUSES = [...ACTIVE_STATUSES, ...INACTIVE_STATUSES, ...DETERMINED_STATUSES, ...CLOSED_STATUSES, ...SETTLED_STATUSES];
 
   // Separate positions by market status
   const activePositions = portfolio.positions.filter(p => 
@@ -241,6 +266,9 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
   );
   const determinedPositions = portfolio.positions.filter(p => 
     p.market_status && DETERMINED_STATUSES.includes(p.market_status)
+  );
+  const closedPositions = portfolio.positions.filter(p => 
+    p.market_status && CLOSED_STATUSES.includes(p.market_status)
   );
   const settledPositions = portfolio.positions.filter(p => 
     p.market_status && SETTLED_STATUSES.includes(p.market_status)
@@ -269,6 +297,7 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
   const sortedActivePositions = sortByFillTime(activePositions);
   const sortedInactivePositions = sortByFillTime(inactivePositions);
   const sortedDeterminedPositions = sortByFillTime(determinedPositions);
+  const sortedClosedPositions = sortByFillTime(closedPositions);
   const sortedSettledPositions = sortByFillTime(settledPositions);
 
   // Calculate group stats
@@ -283,6 +312,10 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
   const determinedStats = {
     contracts: determinedPositions.reduce((sum, p) => sum + Math.abs(p.contracts), 0),
     value: determinedPositions.reduce((sum, p) => sum + p.market_value, 0)
+  };
+  const closedStats = {
+    contracts: closedPositions.reduce((sum, p) => sum + Math.abs(p.contracts), 0),
+    value: closedPositions.reduce((sum, p) => sum + p.market_value, 0)
   };
   const settledStats = {
     contracts: settledPositions.reduce((sum, p) => sum + Math.abs(p.contracts), 0),
@@ -340,6 +373,21 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
         />
       )}
 
+      {/* Closed Positions (closed but not yet determined - hidden from Kalshi mobile app) */}
+      {closedPositions.length > 0 && (
+        <PositionsTable 
+          positions={sortedClosedPositions} 
+          title="Closed" 
+          userName={portfolio.user_name}
+          badgeColor="yellow"
+          groupKey={`${userKey}-closed`}
+          expandedGroups={expandedGroups}
+          setExpandedGroups={setExpandedGroups}
+          totalContracts={closedStats.contracts}
+          totalValue={closedStats.value}
+        />
+      )}
+
       {/* Settled Positions (awaiting settlement processing) */}
       {settledPositions.length > 0 && (
         <PositionsTable 
@@ -379,7 +427,7 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
       })}
 
       {/* Show message if no positions */}
-      {activePositions.length === 0 && inactivePositions.length === 0 && determinedPositions.length === 0 && settledPositions.length === 0 && totalUnrecognized === 0 && (
+      {activePositions.length === 0 && inactivePositions.length === 0 && determinedPositions.length === 0 && closedPositions.length === 0 && settledPositions.length === 0 && totalUnrecognized === 0 && (
         <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
           No positions found
         </div>

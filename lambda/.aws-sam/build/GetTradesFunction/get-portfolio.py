@@ -365,6 +365,7 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     # STEP 3: Compute prices and enrich positions
     position_details = []
     total_position_value = 0.0
+    settled_positions_skipped = 0
     
     for ticker, position_count in raw_positions.items():
         contracts = position_count
@@ -379,9 +380,19 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
         market_status = metadata.get('market_status', 'unknown')
         side = 'yes' if contracts > 0 else 'no'
         
-        if market_result in ('yes', 'no') and market_status in ('determined', 'finalized', 'settled'):
-            # Result is known: position is worth $1 if we're on the winning side, $0 otherwise
+        # CRITICAL FIX: If market is finalized/settled, the settlement payout is
+        # ALREADY included in cash_balance. Including these positions in
+        # total_position_value would double-count them. Value them at $0 for the
+        # total, but still show them in the positions list for visibility.
+        if market_status in ('finalized', 'settled'):
+            current_price = 0.0
+            market_value = 0.0
+            settled_positions_skipped += 1
+        elif market_result in ('yes', 'no') and market_status in ('determined',):
+            # Result is known but not yet settled: position is worth $1 if we're on the winning side, $0 otherwise
             current_price = 1.0 if market_result == side else 0.0
+            market_value = abs(contracts) * current_price
+            total_position_value += market_value
         else:
             last_price = metadata.get('last_price_dollars')
             if last_price is not None and last_price > 0:
@@ -393,9 +404,8 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
                 # Fallback: midpoint estimate if no price data
                 current_price = 0.5
                 logger.warning(f"No price data for {ticker} in market-metadata, using 0.5 estimate")
-        
-        market_value = abs(contracts) * current_price
-        total_position_value += market_value
+            market_value = abs(contracts) * current_price
+            total_position_value += market_value
         
         position_details.append({
             'ticker': ticker,
@@ -417,6 +427,8 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
 
     
     logger.info(f"🔍 POSITION COUNT - After enrichment loop: {len(position_details)} positions")
+    if settled_positions_skipped > 0:
+        logger.info(f"🔍 SETTLED POSITIONS: {settled_positions_skipped} positions valued at $0 (settlement already in cash)")
     logger.info(f"🔍 ENRICHED TICKERS: {sorted([p['ticker'] for p in position_details])}")
     
     # DEBUG: Log market_status distribution

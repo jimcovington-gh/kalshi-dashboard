@@ -176,9 +176,9 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
   // Known status mappings
   const ACTIVE_STATUSES = ['active', 'open', 'unknown', 'initialized'];
   const INACTIVE_STATUSES = ['inactive'];
-  const DETERMINED_STATUSES = ['determined'];  // Awaiting payout (result known, not yet settled)
-  const CLOSED_STATUSES = ['closed'];  // Closed but not yet determined (hidden from Kalshi mobile app)
-  const SETTLED_STATUSES = ['finalized'];  // Awaiting settlement (being processed)
+  const DETERMINED_STATUSES = ['determined'];  // Result known, awaiting payout
+  const CLOSED_STATUSES = ['closed'];  // Closed but not yet determined
+  const SETTLED_STATUSES = ['finalized', 'settled'];  // Cash received, fully resolved
   const ALL_KNOWN_STATUSES = [...ACTIVE_STATUSES, ...INACTIVE_STATUSES, ...DETERMINED_STATUSES, ...CLOSED_STATUSES, ...SETTLED_STATUSES];
 
   // Separate positions by market status
@@ -252,11 +252,11 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
   return (
     <div className="space-y-3 md:space-y-4">
 
-      {/* Active Positions */}
+      {/* Open Positions */}
       {activePositions.length > 0 && (
         <PositionsTable 
           positions={sortedActivePositions} 
-          title="Active Positions" 
+          title="Open" 
           userName={portfolio.user_name}
           badgeColor="green"
           groupKey={`${userKey}-active`}
@@ -282,11 +282,11 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
         />
       )}
 
-      {/* Determined Positions (awaiting payout - result known) */}
+      {/* Determined Positions (result known, awaiting payout) */}
       {determinedPositions.length > 0 && (
         <PositionsTable 
           positions={sortedDeterminedPositions} 
-          title="Awaiting Payout" 
+          title="Determined" 
           userName={portfolio.user_name}
           badgeColor="blue"
           groupKey={`${userKey}-determined`}
@@ -312,11 +312,11 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
         />
       )}
 
-      {/* Settled Positions (awaiting settlement processing) */}
+      {/* Settled Positions (cash received, fully resolved) */}
       {settledPositions.length > 0 && (
         <PositionsTable 
           positions={sortedSettledPositions} 
-          title="Awaiting Settlement" 
+          title="Settled" 
           userName={portfolio.user_name}
           badgeColor="gray"
           groupKey={`${userKey}-settled`}

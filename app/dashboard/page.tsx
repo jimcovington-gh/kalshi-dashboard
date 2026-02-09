@@ -81,9 +81,11 @@ export default function DashboardPage() {
     return (
       <div className="space-y-8">
         {portfolios.map((userPortfolio, userIdx) => {
-          const EXCLUDED_FROM_TOTALS = ['finalized', 'settled', 'determined'];
+          const EXCLUDED_FROM_TOTALS = ['finalized', 'settled'];
           const totalContracts = userPortfolio.positions.filter(p => !EXCLUDED_FROM_TOTALS.includes(p.market_status || '')).reduce((sum, p) => sum + Math.abs(p.contracts), 0);
           const maxReturn = (userPortfolio.cash_balance || 0) + userPortfolio.positions.filter(p => !EXCLUDED_FROM_TOTALS.includes(p.market_status || '')).reduce((sum, p) => {
+            // current_price already reflects position side (1-YES_price for NO positions)
+            // So won positions have high current_price, lost positions have low current_price
             const expectedValue = p.current_price >= 0.80 ? 0.999 : 0;
             return sum + expectedValue * Math.abs(p.contracts);
           }, 0);
@@ -135,9 +137,11 @@ export default function DashboardPage() {
   }
 
   // Regular user view - with summary header like admin sees
-  const EXCLUDED_FROM_TOTALS = ['finalized', 'settled', 'determined'];
+  const EXCLUDED_FROM_TOTALS = ['finalized', 'settled'];
   const totalContracts = portfolio!.positions.filter(p => !EXCLUDED_FROM_TOTALS.includes(p.market_status || '')).reduce((sum, p) => sum + Math.abs(p.contracts), 0);
   const maxReturn = (portfolio!.cash_balance || 0) + portfolio!.positions.filter(p => !EXCLUDED_FROM_TOTALS.includes(p.market_status || '')).reduce((sum, p) => {
+    // current_price already reflects position side (1-YES_price for NO positions)
+    // So won positions have high current_price, lost positions have low current_price
     const expectedValue = p.current_price >= 0.80 ? 0.999 : 0;
     return sum + expectedValue * Math.abs(p.contracts);
   }, 0);

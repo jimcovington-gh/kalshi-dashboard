@@ -85,10 +85,13 @@ def get_settled_trades(user_name: str, days: int = 30) -> List[Dict[str, Any]]:
         items.extend(response.get('Items', []))
         
     # Filter by days if not 'all'
+    # Use settlement_time (when profit/loss was realized) not placed_at (when trade was made).
+    # This ensures "7d" shows trades whose outcomes affected the portfolio this week,
+    # matching the Weekly Performance chart which measures portfolio value change.
     if days < 365:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         cutoff_ts = int(cutoff.timestamp())
-        items = [t for t in items if int(t.get('placed_at', 0)) >= cutoff_ts]
+        items = [t for t in items if int(t.get('settlement_time', 0)) >= cutoff_ts]
     
     return items
 

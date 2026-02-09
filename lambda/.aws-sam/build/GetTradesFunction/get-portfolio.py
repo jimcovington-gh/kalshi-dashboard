@@ -252,12 +252,15 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
         cash_balance = float(tis_data['cash_balance'].get('balance_dollars', 0))
     
     # Build raw positions dict: ticker -> position_count
+    # Also capture market_status from positions-live (TIS returns this from DynamoDB)
     raw_positions = {}
+    positions_live_status = {}  # ticker -> market_status from positions-live table
     for pos in tis_data.get('positions', []):
         ticker = pos.get('market_ticker', '')
         position_count = int(pos.get('position', 0))
         if ticker and position_count != 0:
             raw_positions[ticker] = position_count
+            positions_live_status[ticker] = pos.get('market_status', '')
     
     data_source = 'tis'
     fetched_at = tis_data.get('timestamp', datetime.now(timezone.utc).isoformat())
@@ -377,7 +380,10 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
         # Compute current_price from last_price_dollars
         # If market has a result (determined/settled), use $1.00 or $0.00
         market_result = metadata.get('result', '')
-        market_status = metadata.get('market_status', 'unknown')
+        # Use positions-live market_status as primary (TIS syncs from Kalshi API),
+        # fall back to market-metadata status. This is critical because market-metadata
+        # may show 'closed' while positions-live correctly shows 'finalized'/'settled'.
+        market_status = positions_live_status.get(ticker, '') or metadata.get('market_status', 'unknown')
         side = 'yes' if contracts > 0 else 'no'
         
         # CRITICAL FIX: If market is finalized/settled, the settlement payout is
@@ -420,7 +426,7 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
             'close_time': metadata.get('close_time', ''),
             'event_ticker': metadata.get('event_ticker', ''),
             'series_ticker': series,
-            'market_status': metadata.get('market_status', 'unknown'),
+            'market_status': market_status,
             'result': metadata.get('result', ''),
             'strike': metadata.get('strike', '')
         })

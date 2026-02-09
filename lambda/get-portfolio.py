@@ -255,12 +255,21 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     # Also capture market_status from positions-live (TIS returns this from DynamoDB)
     raw_positions = {}
     positions_live_status = {}  # ticker -> market_status from positions-live table
+    positions_live_settlement = {}  # ticker -> settlement data from TIS reconciliation
     for pos in tis_data.get('positions', []):
         ticker = pos.get('market_ticker', '')
         position_count = int(pos.get('position', 0))
         if ticker and position_count != 0:
             raw_positions[ticker] = position_count
             positions_live_status[ticker] = pos.get('market_status', '')
+            # Capture settlement data if TIS has reconciled it
+            if 'settlement_revenue' in pos:
+                positions_live_settlement[ticker] = {
+                    'revenue': pos.get('settlement_revenue'),
+                    'time': pos.get('settlement_time'),
+                    'price': pos.get('settlement_price'),
+                    'result': pos.get('market_result', '')
+                }
     
     data_source = 'tis'
     fetched_at = tis_data.get('timestamp', datetime.now(timezone.utc).isoformat())
@@ -378,6 +387,7 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     position_details = []
     total_position_value = 0.0
     total_settled_value = 0.0
+    total_determined_value = 0.0
     settled_positions_skipped = 0
     
     for ticker, position_count in raw_positions.items():
@@ -399,12 +409,31 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
         # Initialize settlement fields (only populated for finalized/settled)
         settlement_price = None
         settlement_value = None
+        settlement_revenue = None  # Actual cash disbursed by Kalshi (from settlements API)
+        
+        # Check if TIS has settlement data from the settlements API reconciliation.
+        # This is the ACTUAL cash Kalshi paid out — more accurate than computed values.
+        tis_settlement = positions_live_settlement.get(ticker)
         
         # CRITICAL FIX: If market is finalized/settled, the settlement payout is
         # ALREADY included in cash_balance. Including these positions in
         # total_position_value would double-count them. Value them at $0 for the
         # total, but compute settlement_value for display purposes.
-        if market_status in ('finalized', 'settled'):
+        if tis_settlement is not None:
+            # TIS has confirmed this position was paid out by Kalshi.
+            # Use actual revenue from settlements API.
+            current_price = 0.0
+            market_value = 0.0
+            settled_positions_skipped += 1
+            market_status = 'settled'  # Override — we know Kalshi paid it
+            settlement_revenue = tis_settlement.get('revenue', 0)
+            settlement_price = tis_settlement.get('price', 0)
+            settlement_value = settlement_revenue  # Use actual cash disbursed
+            total_settled_value += settlement_value
+            # Use result from TIS settlement if metadata doesn't have it
+            if not market_result:
+                market_result = tis_settlement.get('result', '')
+        elif market_status in ('finalized', 'settled'):
             current_price = 0.0
             market_value = 0.0
             settled_positions_skipped += 1
@@ -419,9 +448,11 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
                 total_settled_value += settlement_value
         elif market_result in ('yes', 'no') and market_status in ('determined',):
             # Result is known but not yet settled: position is worth $1 if we're on the winning side, $0 otherwise
+            # NOT included in total_position_value — determined positions are awaiting payout
+            # and should not inflate the active portfolio total shown in the banner
             current_price = 1.0 if market_result == side else 0.0
             market_value = abs(contracts) * current_price
-            total_position_value += market_value
+            total_determined_value += market_value
         else:
             last_price = metadata.get('last_price_dollars')
             if last_price is not None and last_price > 0:
@@ -450,10 +481,11 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
             'event_ticker': metadata.get('event_ticker', ''),
             'series_ticker': series,
             'market_status': market_status,
-            'result': metadata.get('result', ''),
+            'result': market_result or metadata.get('result', ''),
             'strike': metadata.get('strike', ''),
             'settlement_price': settlement_price,
             'settlement_value': settlement_value,
+            'settlement_revenue': settlement_revenue,
         })
 
     
@@ -487,6 +519,7 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
         'cash_balance': cash_balance,
         'position_count': len(position_details),
         'total_position_value': float(total_position_value),
+        'total_determined_value': float(total_determined_value),
         'total_settled_value': float(total_settled_value),
         'positions': position_details,
         'data_source': data_source,  # 'tis'

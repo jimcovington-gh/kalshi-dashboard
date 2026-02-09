@@ -59,6 +59,7 @@ export interface Position {
   strike?: string;
   settlement_price?: number;
   settlement_value?: number;
+  settlement_revenue?: number;  // Actual cash disbursed by Kalshi (from settlements API)
 }
 
 export interface Portfolio {
@@ -66,6 +67,7 @@ export interface Portfolio {
   cash_balance: number;
   position_count: number;
   total_position_value: number;
+  total_determined_value?: number;
   total_settled_value?: number;
   positions: Position[];
   history?: any[];

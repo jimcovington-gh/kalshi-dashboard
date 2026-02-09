@@ -81,9 +81,9 @@ export default function DashboardPage() {
     return (
       <div className="space-y-8">
         {portfolios.map((userPortfolio, userIdx) => {
-          const SETTLED = ['finalized', 'settled'];
-          const totalContracts = userPortfolio.positions.filter(p => !SETTLED.includes(p.market_status || '')).reduce((sum, p) => sum + Math.abs(p.contracts), 0);
-          const maxReturn = (userPortfolio.cash_balance || 0) + userPortfolio.positions.filter(p => !SETTLED.includes(p.market_status || '')).reduce((sum, p) => {
+          const EXCLUDED_FROM_TOTALS = ['finalized', 'settled', 'determined'];
+          const totalContracts = userPortfolio.positions.filter(p => !EXCLUDED_FROM_TOTALS.includes(p.market_status || '')).reduce((sum, p) => sum + Math.abs(p.contracts), 0);
+          const maxReturn = (userPortfolio.cash_balance || 0) + userPortfolio.positions.filter(p => !EXCLUDED_FROM_TOTALS.includes(p.market_status || '')).reduce((sum, p) => {
             const expectedValue = p.current_price >= 0.80 ? 0.999 : 0;
             return sum + expectedValue * Math.abs(p.contracts);
           }, 0);
@@ -135,9 +135,9 @@ export default function DashboardPage() {
   }
 
   // Regular user view - with summary header like admin sees
-  const SETTLED_FILTER = ['finalized', 'settled'];
-  const totalContracts = portfolio!.positions.filter(p => !SETTLED_FILTER.includes(p.market_status || '')).reduce((sum, p) => sum + Math.abs(p.contracts), 0);
-  const maxReturn = (portfolio!.cash_balance || 0) + portfolio!.positions.filter(p => !SETTLED_FILTER.includes(p.market_status || '')).reduce((sum, p) => {
+  const EXCLUDED_FROM_TOTALS = ['finalized', 'settled', 'determined'];
+  const totalContracts = portfolio!.positions.filter(p => !EXCLUDED_FROM_TOTALS.includes(p.market_status || '')).reduce((sum, p) => sum + Math.abs(p.contracts), 0);
+  const maxReturn = (portfolio!.cash_balance || 0) + portfolio!.positions.filter(p => !EXCLUDED_FROM_TOTALS.includes(p.market_status || '')).reduce((sum, p) => {
     const expectedValue = p.current_price >= 0.80 ? 0.999 : 0;
     return sum + expectedValue * Math.abs(p.contracts);
   }, 0);
@@ -284,6 +284,21 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
         />
       )}
 
+      {/* Closed Positions (closed but not yet determined) */}
+      {closedPositions.length > 0 && (
+        <PositionsTable 
+          positions={sortedClosedPositions} 
+          title="Closed" 
+          userName={portfolio.user_name}
+          badgeColor="yellow"
+          groupKey={`${userKey}-closed`}
+          expandedGroups={expandedGroups}
+          setExpandedGroups={setExpandedGroups}
+          totalContracts={closedStats.contracts}
+          totalValue={closedStats.value}
+        />
+      )}
+
       {/* Determined Positions (result known, awaiting payout) */}
       {determinedPositions.length > 0 && (
         <PositionsTable 
@@ -296,21 +311,6 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
           setExpandedGroups={setExpandedGroups}
           totalContracts={determinedStats.contracts}
           totalValue={determinedStats.value}
-        />
-      )}
-
-      {/* Closed Positions (closed but not yet determined - hidden from Kalshi mobile app) */}
-      {closedPositions.length > 0 && (
-        <PositionsTable 
-          positions={sortedClosedPositions} 
-          title="Closed" 
-          userName={portfolio.user_name}
-          badgeColor="yellow"
-          groupKey={`${userKey}-closed`}
-          expandedGroups={expandedGroups}
-          setExpandedGroups={setExpandedGroups}
-          totalContracts={closedStats.contracts}
-          totalValue={closedStats.value}
         />
       )}
 

@@ -270,10 +270,11 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     # STEP 1.5: Get fill prices AND fill times by querying each ticker in parallel
     def query_ticker_fill_data(ticker: str) -> tuple:
         """Query fill price and fill time for a single ticker using market_ticker-index.
-        Returns (ticker, avg_fill_price, most_recent_fill_time, idea_name)
+        Returns (ticker, avg_fill_price, most_recent_fill_time, idea_name, settlement_result)
         
         Calculates volume-weighted average price (VWAP) from individual fills
-        across all trades for accurate pricing when multiple fills at different prices."""
+        across all trades for accurate pricing when multiple fills at different prices.
+        Also extracts settlement_result from trades (written by TIS at settlement time)."""
         try:
             response = trades_table.query(
                 IndexName='market_ticker-index',
@@ -321,19 +322,25 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
                 else:
                     idea_name = None
                 
+                # Get settlement_result from trades (TIS writes this at settlement time)
+                # settlement_result is the winning SIDE ("yes" or "no"), not whether this trader won
+                settlement_results = [t.get('settlement_result') for t in items if t.get('settlement_result')]
+                settlement_result = settlement_results[0] if settlement_results else None
+                
                 if total_contracts > 0:
                     # Round to 3 decimal places (tenth of a cent)
                     vwap = round(total_cost / total_contracts, 3)
-                    return ticker, vwap, most_recent_fill, idea_name
-            return ticker, None, None, None
+                    return ticker, vwap, most_recent_fill, idea_name, settlement_result
+            return ticker, None, None, None, None
         except Exception as e:
             logger.warning(f"Failed to query fill data for {ticker}: {e}")
-            return ticker, None, None, None
+            return ticker, None, None, None, None
     
     # Query fill data in parallel (10 workers provides good balance)
     fill_prices = {}
     fill_times = {}
     idea_names = {}
+    settlement_results = {}
     tickers_to_query = list(raw_positions.keys())
     
     if tickers_to_query:
@@ -341,13 +348,15 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
             with ThreadPoolExecutor(max_workers=10) as executor:
                 results = list(executor.map(query_ticker_fill_data, tickers_to_query))
             
-            for ticker, avg_price, fill_time, idea_name in results:
+            for ticker, avg_price, fill_time, idea_name, settlement_result in results:
                 if avg_price is not None:
                     fill_prices[ticker] = avg_price
                 if fill_time is not None:
                     fill_times[ticker] = fill_time
                 if idea_name is not None:
                     idea_names[ticker] = idea_name
+                if settlement_result is not None:
+                    settlement_results[ticker] = settlement_result
             
             logger.info(f"Calculated fill data for {len(fill_prices)}/{len(tickers_to_query)} tickers using parallel queries")
         except Exception as e:
@@ -368,6 +377,7 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
     # STEP 3: Compute prices and enrich positions
     position_details = []
     total_position_value = 0.0
+    total_settled_value = 0.0
     settled_positions_skipped = 0
     
     for ticker, position_count in raw_positions.items():
@@ -386,14 +396,27 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
         market_status = positions_live_status.get(ticker, '') or metadata.get('market_status', 'unknown')
         side = 'yes' if contracts > 0 else 'no'
         
+        # Initialize settlement fields (only populated for finalized/settled)
+        settlement_price = None
+        settlement_value = None
+        
         # CRITICAL FIX: If market is finalized/settled, the settlement payout is
         # ALREADY included in cash_balance. Including these positions in
         # total_position_value would double-count them. Value them at $0 for the
-        # total, but still show them in the positions list for visibility.
+        # total, but compute settlement_value for display purposes.
         if market_status in ('finalized', 'settled'):
             current_price = 0.0
             market_value = 0.0
             settled_positions_skipped += 1
+            
+            # Determine settlement outcome from market metadata result or trade settlement data
+            # settlement_results dict contains the winning SIDE ("yes"/"no") from trades-v2
+            result = market_result or settlement_results.get(ticker, '')
+            if result:
+                won = (side == result)  # Did our side win?
+                settlement_price = 1.0 if won else 0.0
+                settlement_value = abs(contracts) * settlement_price
+                total_settled_value += settlement_value
         elif market_result in ('yes', 'no') and market_status in ('determined',):
             # Result is known but not yet settled: position is worth $1 if we're on the winning side, $0 otherwise
             current_price = 1.0 if market_result == side else 0.0
@@ -428,13 +451,15 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
             'series_ticker': series,
             'market_status': market_status,
             'result': metadata.get('result', ''),
-            'strike': metadata.get('strike', '')
+            'strike': metadata.get('strike', ''),
+            'settlement_price': settlement_price,
+            'settlement_value': settlement_value,
         })
 
     
     logger.info(f"🔍 POSITION COUNT - After enrichment loop: {len(position_details)} positions")
     if settled_positions_skipped > 0:
-        logger.info(f"🔍 SETTLED POSITIONS: {settled_positions_skipped} positions valued at $0 (settlement already in cash)")
+        logger.info(f"🔍 SETTLED POSITIONS: {settled_positions_skipped} positions valued at $0 (settlement already in cash), total settled: ${total_settled_value:.2f}")
     logger.info(f"🔍 ENRICHED TICKERS: {sorted([p['ticker'] for p in position_details])}")
     
     # DEBUG: Log market_status distribution
@@ -462,6 +487,7 @@ def get_current_portfolio(user_name: str) -> Dict[str, Any]:
         'cash_balance': cash_balance,
         'position_count': len(position_details),
         'total_position_value': float(total_position_value),
+        'total_settled_value': float(total_settled_value),
         'positions': position_details,
         'data_source': data_source,  # 'tis'
         'fetched_at': fetched_at

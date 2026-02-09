@@ -81,8 +81,9 @@ export default function DashboardPage() {
     return (
       <div className="space-y-8">
         {portfolios.map((userPortfolio, userIdx) => {
-          const totalContracts = userPortfolio.positions.reduce((sum, p) => sum + Math.abs(p.contracts), 0);
-          const maxReturn = (userPortfolio.cash_balance || 0) + userPortfolio.positions.reduce((sum, p) => {
+          const SETTLED = ['finalized', 'settled'];
+          const totalContracts = userPortfolio.positions.filter(p => !SETTLED.includes(p.market_status || '')).reduce((sum, p) => sum + Math.abs(p.contracts), 0);
+          const maxReturn = (userPortfolio.cash_balance || 0) + userPortfolio.positions.filter(p => !SETTLED.includes(p.market_status || '')).reduce((sum, p) => {
             const expectedValue = p.current_price >= 0.80 ? 0.999 : 0;
             return sum + expectedValue * Math.abs(p.contracts);
           }, 0);
@@ -134,8 +135,9 @@ export default function DashboardPage() {
   }
 
   // Regular user view - with summary header like admin sees
-  const totalContracts = portfolio!.positions.reduce((sum, p) => sum + Math.abs(p.contracts), 0);
-  const maxReturn = (portfolio!.cash_balance || 0) + portfolio!.positions.reduce((sum, p) => {
+  const SETTLED_FILTER = ['finalized', 'settled'];
+  const totalContracts = portfolio!.positions.filter(p => !SETTLED_FILTER.includes(p.market_status || '')).reduce((sum, p) => sum + Math.abs(p.contracts), 0);
+  const maxReturn = (portfolio!.cash_balance || 0) + portfolio!.positions.filter(p => !SETTLED_FILTER.includes(p.market_status || '')).reduce((sum, p) => {
     const expectedValue = p.current_price >= 0.80 ? 0.999 : 0;
     return sum + expectedValue * Math.abs(p.contracts);
   }, 0);
@@ -243,7 +245,7 @@ function PortfolioContent({ portfolio, expandedGroups, setExpandedGroups, userKe
   };
   const settledStats = {
     contracts: settledPositions.reduce((sum, p) => sum + Math.abs(p.contracts), 0),
-    value: settledPositions.reduce((sum, p) => sum + p.market_value, 0)
+    value: settledPositions.reduce((sum, p) => sum + (p.settlement_value || 0), 0)
   };
   
   // Calculate total positions shown (for "no positions" check)
@@ -450,7 +452,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                   const tradeUrl = `/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`;
 
                   return (
-                    <tr key={idx} className={position.current_price <= 0.92 ? 'bg-red-100 hover:bg-red-150' : position.current_price <= 0.96 ? 'bg-amber-100 hover:bg-amber-200' : 'hover:bg-gray-50'}>
+                    <tr key={idx} className={position.settlement_price != null ? 'hover:bg-gray-50' : position.current_price <= 0.92 ? 'bg-red-100 hover:bg-red-150' : position.current_price <= 0.96 ? 'bg-amber-100 hover:bg-amber-200' : 'hover:bg-gray-50'}>
                       <td className="px-3 py-0.5 whitespace-nowrap" style={{width: '27.5%'}}>
                         <a href={tradeUrl} className="text-base text-blue-600 hover:underline">
                           {fillDateTime}
@@ -486,15 +488,21 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                       {position.fill_price ? `$${position.fill_price.toFixed(3)}` : '-'}
                     </td>
                     <td className="px-3 py-0.5 whitespace-nowrap text-right text-xl font-semibold">
-                      <span className={`${
-                        position.current_price >= 0.95
-                          ? 'text-green-600'
-                          : position.current_price >= 0.85
-                          ? 'text-orange-600'
-                          : 'text-red-600'
-                      }`}>
-                        ${position.current_price.toFixed(2)}
-                      </span>
+                      {position.settlement_price != null ? (
+                        <span className={position.settlement_price >= 1.0 ? 'text-green-600' : 'text-red-600'}>
+                          ${position.settlement_price.toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className={`${
+                          position.current_price >= 0.95
+                            ? 'text-green-600'
+                            : position.current_price >= 0.85
+                            ? 'text-orange-600'
+                            : 'text-red-600'
+                        }`}>
+                          ${position.current_price.toFixed(2)}
+                        </span>
+                      )}
                     </td>
                     </tr>
                   );
@@ -534,7 +542,7 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
           const tradeUrl = `/dashboard/trades?ticker=${position.ticker}&user_name=${userName}`;
 
           return (
-            <div key={idx} className={`rounded-lg shadow p-2.5 ${position.current_price <= 0.92 ? 'bg-red-100' : position.current_price <= 0.96 ? 'bg-amber-100' : 'bg-white'}`}>
+            <div key={idx} className={`rounded-lg shadow p-2.5 ${position.settlement_price != null ? 'bg-white' : position.current_price <= 0.92 ? 'bg-red-100' : position.current_price <= 0.96 ? 'bg-amber-100' : 'bg-white'}`}>
               {/* Market Title */}
               {marketUrl ? (
                 <a href={marketUrl} target="_blank" rel="noopener noreferrer" className="text-base font-medium text-blue-600 hover:underline block mb-1.5">
@@ -578,15 +586,21 @@ function PositionsTable({ positions, title, userName, badgeColor, groupKey, expa
                 </div>
                 <div className="col-span-5">
                   <div className="text-gray-500 mb-0.5">Price</div>
-                  <div className={`font-semibold ${
-                    position.current_price >= 0.95
-                      ? 'text-green-600'
-                      : position.current_price >= 0.85
-                      ? 'text-orange-600'
-                      : 'text-red-600'
-                  }`}>
-                    ${position.current_price.toFixed(2)}
-                  </div>
+                  {position.settlement_price != null ? (
+                    <div className={`font-semibold ${position.settlement_price >= 1.0 ? 'text-green-600' : 'text-red-600'}`}>
+                      ${position.settlement_price.toFixed(2)}
+                    </div>
+                  ) : (
+                    <div className={`font-semibold ${
+                      position.current_price >= 0.95
+                        ? 'text-green-600'
+                        : position.current_price >= 0.85
+                        ? 'text-orange-600'
+                        : 'text-red-600'
+                    }`}>
+                      ${position.current_price.toFixed(2)}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

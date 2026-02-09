@@ -57,6 +57,8 @@ export interface Position {
   market_status?: string;
   result?: string;
   strike?: string;
+  settlement_price?: number;
+  settlement_value?: number;
 }
 
 export interface Portfolio {
@@ -64,6 +66,7 @@ export interface Portfolio {
   cash_balance: number;
   position_count: number;
   total_position_value: number;
+  total_settled_value?: number;
   positions: Position[];
   history?: any[];
 }

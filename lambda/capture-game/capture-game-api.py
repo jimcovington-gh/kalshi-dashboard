@@ -366,15 +366,13 @@ def get_available_games():
                     milestone = find_milestone_for_event(event_ticker, all_milestones, now_ts)
                     
                     if milestone:
-                        # Parse milestone start time
-                        start_str = milestone.get('start_date', '')
-                        if start_str:
+                        # Use milestone start timestamp directly (already parsed to int)
+                        start_timestamp = milestone.get('start_timestamp')
+                        if start_timestamp:
                             try:
-                                start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
-                                start_timestamp = int(start_dt.timestamp())
-                                
                                 # Update event with accurate time
                                 evt['event_timestamp'] = start_timestamp
+                                start_dt = datetime.fromtimestamp(start_timestamp, tz=timezone.utc)
                                 est_time = start_dt - timedelta(hours=5)
                                 evt['event_time'] = est_time.strftime('%a %b %-d @ %-I:%M %p EST')
                                 
@@ -394,9 +392,9 @@ def get_available_games():
                                 
                                 # Cache to DynamoDB
                                 update_event_start_date(event_ticker, start_timestamp)
-                                print(f"Updated {event_ticker} with milestone start time: {start_str}")
+                                print(f"Updated {event_ticker} with milestone start time: {start_timestamp}")
                             except Exception as e:
-                                print(f"Error parsing milestone start_date '{start_str}': {e}")
+                                print(f"Error applying milestone start time for {event_ticker}: {e}")
             except Exception as e:
                 print(f"Error fetching milestones (will use estimates): {e}")
                 import traceback

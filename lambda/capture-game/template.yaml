@@ -187,6 +187,54 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt CaptureQueueCheckerRule.Arn
 
+  # EventBridge Rule: Auto-queue NCAA games every 30 minutes
+  CaptureAutoQueueRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: capture-auto-queue
+      Description: Automatically discover and queue NCAA basketball games for capture
+      ScheduleExpression: 'rate(30 minutes)'
+      State: ENABLED
+      Targets:
+        - Id: CaptureAutoQueue
+          Arn: !GetAtt CaptureAutoQueueFunction.Arn
+
+  # Lambda: Capture Auto-Queue (EventBridge triggered)
+  CaptureAutoQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: capture-auto-queue
+      CodeUri: ./
+      Handler: capture-auto-queue.lambda_handler
+      Timeout: 60
+      Description: Auto-discover and queue NCAA basketball games for capture
+      Environment:
+        Variables:
+          EVENT_METADATA_TABLE: production-kalshi-event-metadata
+          CAPTURE_TABLE: production-sports-feeder-state
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+              Resource:
+                - arn:aws:dynamodb:us-east-1:355149669325:table/production-kalshi-event-metadata
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource:
+                - arn:aws:dynamodb:us-east-1:355149669325:table/production-sports-feeder-state
+
+  # Permission for EventBridge to invoke the auto-queue Lambda
+  CaptureAutoQueuePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CaptureAutoQueueFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CaptureAutoQueueRule.Arn
+
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL
@@ -195,3 +243,7 @@ Outputs:
   CaptureGameApiFunctionArn:
     Description: Capture Game API Lambda ARN
     Value: !GetAtt CaptureGameApiFunction.Arn
+  
+  CaptureAutoQueueFunctionArn:
+    Description: Capture Auto-Queue Lambda ARN
+    Value: !GetAtt CaptureAutoQueueFunction.Arn

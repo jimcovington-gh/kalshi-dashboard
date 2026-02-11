@@ -1216,14 +1216,14 @@ We capture tick-level market and game state data during live NCAA basketball gam
 
 **Storage Location:**
 - S3 Bucket: `production-kalshi-trading-captures`
-- Folder structure: `KXNCAAMBGAME-{date}{matchup}/` (e.g., `KXNCAAMBGAME-26FEB10MARQVILL/`)
-- Files: `{timestamp}_capture.jsonl` (JSONL format - one JSON object per line)
+- Folder structure: `KXNCAAMBGAME-{{date}}{{matchup}}/` (e.g., `KXNCAAMBGAME-26FEB10MARQVILL/`)
+- Files: `{{timestamp}}_capture.jsonl` (JSONL format - one JSON object per line)
 - Files marked `_INCOMPLETE` are from interrupted captures
 
 **Event Ticker Naming:**
-- `KXNCAAMBGAME-{date}{matchup}` - Win market (who wins the game)
-- `KXNCAAMBSPREAD-{date}{matchup}` - Spread market (point spread)
-- `KXNCAAMBTOTAL-{date}{matchup}` - Total/Over-Under market (combined score)
+- `KXNCAAMBGAME-{{date}}{{matchup}}` - Win market (who wins the game)
+- `KXNCAAMBSPREAD-{{date}}{{matchup}}` - Spread market (point spread)
+- `KXNCAAMBTOTAL-{{date}}{{matchup}}` - Total/Over-Under market (combined score)
 - Date format: `26FEB10` = February 10, 2026
 - Matchup format: `MARQVILL` = Marquette at Villanova (visitor + home abbreviated)
 

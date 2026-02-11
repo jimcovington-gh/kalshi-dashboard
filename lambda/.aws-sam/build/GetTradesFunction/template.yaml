@@ -598,15 +598,14 @@ Resources:
           LOG_LEVEL: INFO
           CONVERSATIONS_BUCKET: production-kalshi-trading-config
       Policies:
-        # Bedrock access for Claude Opus 4.6 via cross-region inference
+        # Bedrock access for Claude Opus 4.6 direct model access in us-west-2 (1M context)
         - Statement:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
                 - bedrock:Converse
               Resource:
-                - 'arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-6-v1'
-                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-opus-4-6-v1'
+                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-4-6-v1'
         # AWS Marketplace permissions required for Claude Opus 4.6 subscription
         - Statement:
             - Effect: Allow

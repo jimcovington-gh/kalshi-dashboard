@@ -42,7 +42,8 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
 # AWS clients
-bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
+# Bedrock in us-west-2 for direct model access with 1M context window
+bedrock = boto3.client('bedrock-runtime', region_name='us-west-2')
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 dynamodb_client = boto3.client('dynamodb', region_name='us-east-1')
 s3 = boto3.client('s3', region_name='us-east-1')
@@ -50,10 +51,10 @@ secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
 logs_client = boto3.client('logs', region_name='us-east-1')
 
 # Configuration
-# Claude Opus 4.6 via cross-region inference profile (1M context window)
-MODEL_ID = 'us.anthropic.claude-opus-4-6-v1'
+# Claude Opus 4.6 direct model access in us-west-2 (1M context window)
+MODEL_ID = 'anthropic.claude-opus-4-6-v1'
 MAX_TOKENS = 64000  # Claude Opus 4.6 supports up to 64K output tokens
-MAX_INPUT_TOKENS = 950000  # Claude Opus 4.6 supports 1M context (preview), leave room for output
+MAX_INPUT_TOKENS = 950000  # Claude Opus 4.6 supports 1M context, leave room for output
 INTERNAL_RATE_LIMIT = 10  # requests per second
 HIGH_CALL_WARNING_THRESHOLD = 50
 

@@ -779,6 +779,111 @@ Resources:
     Metadata:
       BuildMethod: python3.12
       SamResourceId: SharedCodeLayer
+  CopilotProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-copilot-proxy
+      CodeUri: CopilotProxyFunction
+      Handler: copilot-proxy.lambda_handler
+      Description: Proxy dashboard chat to GitHub Copilot via VS Code extension
+      Timeout: 300
+      MemorySize: 256
+      VpcConfig:
+        SubnetIds:
+          Ref: TISVpcSubnets
+        SecurityGroupIds:
+          Ref: TISVpcSecurityGroups
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+          DEVICE_TOKENS_TABLE: production-kalshi-device-tokens
+          SECURITY_AUDIT_TABLE: production-kalshi-security-audit
+          SNS_ALERT_TOPIC:
+            Fn::Sub: arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts
+          VSCODE_EXTENSION_URL: http://172.31.41.120:9876
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: production-kalshi-device-tokens
+      - DynamoDBCrudPolicy:
+          TableName: production-kalshi-security-audit
+      - Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:Query
+          Resource:
+          - Fn::Sub: arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/production-kalshi-device-tokens/index/*
+      - Statement:
+        - Effect: Allow
+          Action:
+          - sns:Publish
+          Resource:
+          - Fn::Sub: arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts
+      Events:
+        CopilotProxy:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /copilot-proxy
+            Method: POST
+    Metadata:
+      SamResourceId: CopilotProxyFunction
+  DeviceManagementFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-device-management
+      CodeUri: DeviceManagementFunction
+      Handler: device-management.lambda_handler
+      Description: Admin API for managing device tokens
+      Timeout: 30
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+          DEVICE_TOKENS_TABLE: production-kalshi-device-tokens
+          SECURITY_AUDIT_TABLE: production-kalshi-security-audit
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: production-kalshi-device-tokens
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-security-audit
+      - Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:Query
+          Resource:
+          - Fn::Sub: arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/production-kalshi-device-tokens/index/*
+          - Fn::Sub: arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/production-kalshi-security-audit/index/*
+      Events:
+        ListDevices:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /admin/devices
+            Method: GET
+        GenerateToken:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /admin/devices
+            Method: POST
+        RevokeToken:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /admin/devices/{token_partial}
+            Method: DELETE
+        SecurityAudit:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /admin/security-audit
+            Method: GET
+    Metadata:
+      SamResourceId: DeviceManagementFunction
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL

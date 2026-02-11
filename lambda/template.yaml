@@ -767,6 +767,111 @@ Resources:
     Metadata:
       BuildMethod: python3.12
 
+  # Lambda: Copilot Proxy - Authenticated proxy to VS Code Copilot extension
+  CopilotProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-copilot-proxy
+      CodeUri: ./
+      Handler: copilot-proxy.lambda_handler
+      Description: Proxy dashboard chat to GitHub Copilot via VS Code extension
+      Timeout: 300  # 5 minutes - Copilot can take time for complex queries
+      MemorySize: 256
+      # VPC config required to reach EC2 at 172.31.41.120:9876
+      VpcConfig:
+        SubnetIds: !Ref TISVpcSubnets
+        SecurityGroupIds: !Ref TISVpcSecurityGroups
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+          DEVICE_TOKENS_TABLE: production-kalshi-device-tokens
+          SECURITY_AUDIT_TABLE: production-kalshi-security-audit
+          SNS_ALERT_TOPIC: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts'
+          VSCODE_EXTENSION_URL: 'http://172.31.41.120:9876'
+      Policies:
+        # DynamoDB access for device tokens
+        - DynamoDBCrudPolicy:
+            TableName: production-kalshi-device-tokens
+        # DynamoDB write for security audit logs
+        - DynamoDBCrudPolicy:
+            TableName: production-kalshi-security-audit
+        # Query on device token index
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/production-kalshi-device-tokens/index/*'
+        # SNS publish for security alerts
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource:
+                - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts'
+      Events:
+        CopilotProxy:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /copilot-proxy
+            Method: POST
+
+  # Lambda: Device Management - Admin API for device tokens
+  DeviceManagementFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-device-management
+      CodeUri: ./
+      Handler: device-management.lambda_handler
+      Description: Admin API for managing device tokens
+      Timeout: 30
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+          DEVICE_TOKENS_TABLE: production-kalshi-device-tokens
+          SECURITY_AUDIT_TABLE: production-kalshi-security-audit
+      Policies:
+        # DynamoDB access for device tokens
+        - DynamoDBCrudPolicy:
+            TableName: production-kalshi-device-tokens
+        # DynamoDB read for security audit logs
+        - DynamoDBReadPolicy:
+            TableName: production-kalshi-security-audit
+        # Query on indexes
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/production-kalshi-device-tokens/index/*'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/production-kalshi-security-audit/index/*'
+      Events:
+        ListDevices:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /admin/devices
+            Method: GET
+        GenerateToken:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /admin/devices
+            Method: POST
+        RevokeToken:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /admin/devices/{token_partial}
+            Method: DELETE
+        SecurityAudit:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /admin/security-audit
+            Method: GET
+
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL

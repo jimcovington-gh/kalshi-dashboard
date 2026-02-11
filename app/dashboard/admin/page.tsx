@@ -358,6 +358,17 @@ export default function AdminPage() {
 
   return (
     <div className="space-y-6">
+      {/* Admin Navigation */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
+        <a
+          href="/dashboard/admin/devices"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+        >
+          🔐 Device Management
+        </a>
+      </div>
+
       {/* Trading Status Control Panel */}
       <div className={`rounded-lg shadow p-6 ${
         tradingStatus?.trading_enabled === false 

@@ -1158,3 +1158,205 @@ export async function deleteConversation(id: string): Promise<boolean> {
     return false;
   }
 }
+
+// ============== Device Management API ==============
+
+export interface DeviceToken {
+  token_partial: string;
+  user_name: string;
+  device_name: string;
+  created_at: string | null;
+  created_by: string;
+  last_used_at: string | null;
+  revoked: boolean;
+  revoked_at: string | null;
+  revoked_by: string | null;
+}
+
+export interface DeviceListResponse {
+  devices: DeviceToken[];
+}
+
+export interface GenerateTokenResponse {
+  token: string;  // Full token - only shown once!
+  user_name: string;
+  device_name: string;
+  message: string;
+}
+
+export interface SecurityAuditEntry {
+  timestamp: string;
+  reason: string;
+  ip_address: string;
+  user_name: string | null;
+  device_token_partial: string | null;
+  user_agent: string;
+}
+
+export interface SecurityAuditResponse {
+  failed_attempts: SecurityAuditEntry[];
+  total_count: number;
+  days_queried: number;
+}
+
+/**
+ * List all registered devices (admin only)
+ */
+export async function listDevices(): Promise<DeviceListResponse> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: '/admin/devices',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    return data as unknown as DeviceListResponse;
+  } catch (error) {
+    console.error('Error listing devices:', error);
+    throw error;
+  }
+}
+
+/**
+ * Generate a new device token (admin only)
+ */
+export async function generateDeviceToken(userName: string, deviceName: string): Promise<GenerateTokenResponse> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = post({
+      apiName: 'DashboardAPI',
+      path: '/admin/devices',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: {
+          user_name: userName,
+          device_name: deviceName,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    return data as unknown as GenerateTokenResponse;
+  } catch (error) {
+    console.error('Error generating device token:', error);
+    throw error;
+  }
+}
+
+/**
+ * Revoke a device token (admin only)
+ */
+export async function revokeDeviceToken(tokenPartial: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    // Use POST with method override since Amplify API doesn't support delete body well
+    const restOperation = post({
+      apiName: 'DashboardAPI',
+      path: `/admin/devices/${tokenPartial}`,
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-HTTP-Method-Override': 'DELETE',
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    return data as unknown as { success: boolean; message: string };
+  } catch (error) {
+    console.error('Error revoking device token:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get security audit log (admin only)
+ */
+export async function getSecurityAudit(days: number = 7): Promise<SecurityAuditResponse> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: `/admin/security-audit?days=${days}`,
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    return data as unknown as SecurityAuditResponse;
+  } catch (error) {
+    console.error('Error fetching security audit:', error);
+    throw error;
+  }
+}
+
+// ============== Copilot Proxy API ==============
+
+export interface CopilotChatResponse {
+  response: string;
+  conversation_id: string;
+  model: string;
+}
+
+/**
+ * Send a message to Copilot via the proxy (requires device token)
+ */
+export async function sendCopilotMessage(
+  message: string,
+  deviceToken: string,
+  conversationId?: string,
+  includeContext: boolean = true
+): Promise<CopilotChatResponse> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    const bodyObj = {
+      message,
+      include_context: includeContext,
+      ...(conversationId && { conversation_id: conversationId }),
+    };
+
+    const restOperation = post({
+      apiName: 'DashboardAPI',
+      path: '/copilot-proxy',
+      options: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-Device-Token': deviceToken,
+        },
+        body: bodyObj as unknown as Record<string, string>,
+      },
+    });
+
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    return data as unknown as CopilotChatResponse;
+  } catch (error) {
+    console.error('Error sending Copilot message:', error);
+    throw error;
+  }
+}

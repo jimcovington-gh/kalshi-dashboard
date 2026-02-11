@@ -624,6 +624,12 @@ Resources:
           Resource:
           - arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-6-v1
           - Fn::Sub: arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-opus-4-6-v1
+      - Statement:
+        - Effect: Allow
+          Action:
+          - aws-marketplace:ViewSubscriptions
+          - aws-marketplace:Subscribe
+          Resource: '*'
       - DynamoDBReadPolicy:
           TableName: production-kalshi-event-archive
       - DynamoDBReadPolicy:

@@ -607,6 +607,13 @@ Resources:
               Resource:
                 - 'arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-6-v1'
                 - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-opus-4-6-v1'
+        # AWS Marketplace permissions required for Claude Opus 4.6 subscription
+        - Statement:
+            - Effect: Allow
+              Action:
+                - aws-marketplace:ViewSubscriptions
+                - aws-marketplace:Subscribe
+              Resource: '*'
         # Read-only DynamoDB access to all kalshi tables
         - DynamoDBReadPolicy:
             TableName: production-kalshi-event-archive

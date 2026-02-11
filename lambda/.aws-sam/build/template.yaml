@@ -622,8 +622,8 @@ Resources:
           - bedrock:InvokeModel
           - bedrock:Converse
           Resource:
-          - arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0
-          - Fn::Sub: arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+          - arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-6-v1
+          - Fn::Sub: arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-opus-4-6-v1
       - DynamoDBReadPolicy:
           TableName: production-kalshi-event-archive
       - DynamoDBReadPolicy:

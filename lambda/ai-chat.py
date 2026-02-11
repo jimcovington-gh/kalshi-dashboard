@@ -50,10 +50,10 @@ secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
 logs_client = boto3.client('logs', region_name='us-east-1')
 
 # Configuration
-# Claude Sonnet 4.5 via cross-region inference profile
-MODEL_ID = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0'
-MAX_TOKENS = 64000  # Claude Sonnet 4.5 supports up to 64K output tokens
-MAX_INPUT_TOKENS = 190000  # Claude Sonnet has 200K context, leave room for output
+# Claude Opus 4.6 via cross-region inference profile (1M context window)
+MODEL_ID = 'us.anthropic.claude-opus-4-6-v1'
+MAX_TOKENS = 64000  # Claude Opus 4.6 supports up to 64K output tokens
+MAX_INPUT_TOKENS = 950000  # Claude Opus 4.6 supports 1M context (preview), leave room for output
 INTERNAL_RATE_LIMIT = 10  # requests per second
 HIGH_CALL_WARNING_THRESHOLD = 50
 
@@ -1209,6 +1209,80 @@ You can search CloudWatch logs to understand trade decisions and debug issues. T
 2. Get placed_at timestamp
 3. Search logs with filter_pattern="REGU" around that time
 4. Look for phase transitions and orderbook state
+
+## NCAA Basketball Game Capture Data
+
+We capture tick-level market and game state data during live NCAA basketball games for analysis and strategy development.
+
+**Storage Location:**
+- S3 Bucket: `production-kalshi-trading-captures`
+- Folder structure: `KXNCAAMBGAME-{date}{matchup}/` (e.g., `KXNCAAMBGAME-26FEB10MARQVILL/`)
+- Files: `{timestamp}_capture.jsonl` (JSONL format - one JSON object per line)
+- Files marked `_INCOMPLETE` are from interrupted captures
+
+**Event Ticker Naming:**
+- `KXNCAAMBGAME-{date}{matchup}` - Win market (who wins the game)
+- `KXNCAAMBSPREAD-{date}{matchup}` - Spread market (point spread)
+- `KXNCAAMBTOTAL-{date}{matchup}` - Total/Over-Under market (combined score)
+- Date format: `26FEB10` = February 10, 2026
+- Matchup format: `MARQVILL` = Marquette at Villanova (visitor + home abbreviated)
+
+**Data Schema (each line is a JSON object):**
+```json
+{{
+  "ts": 1770777006260,        // Unix timestamp in MILLISECONDS
+  "win": {{                   // Win market prices (who wins)
+    "yes_bid": 0.54,          // Best bid for YES
+    "yes_ask": 0.55,          // Best ask for YES
+    "last": 0.55              // Last trade price
+  }},
+  "spread": {{                // Spread market prices (selected most liquid spread line)
+    "yes_bid": 0.01,
+    "yes_ask": 0.06,
+    "last": 0.04
+  }},
+  "total": {{                 // Total/O-U market prices (selected most liquid total line)
+    "yes_bid": 0.84,
+    "yes_ask": 0.96,
+    "last": 0.91
+  }},
+  "game": {{                  // Live game state from sports feed
+    "home": 66,               // Home team score
+    "away": 69,               // Away team score  
+    "period": "half2",        // "half1", "half2", or "halftime"
+    "clock": "4:00",          // Time remaining in period
+    "status": "inprogress"    // "scheduled", "inprogress", "final"
+  }}
+}}
+```
+
+**Querying Capture Data:**
+- Use `read_s3_file` to fetch capture files
+- These are JSONL files (newline-delimited JSON), NOT regular JSON arrays
+- Files can be large (50MB+ for full games) - use `max_bytes` parameter
+- Each line is independent - parse line by line
+
+**Example: Get recent data from a game:**
+```
+read_s3_file(
+  bucket="production-kalshi-trading-captures",
+  key="KXNCAAMBGAME-26FEB10MARQVILL/2026-02-11T00-30-46_capture.jsonl",
+  max_bytes=50000  // Get ~50KB sample
+)
+```
+
+**Auto-Queue System:**
+Games are automatically queued for capture via Lambda (`production-capture-game-auto-queue`):
+- Runs every 30 minutes
+- Scans Kalshi for NCAA basketball events (series: KXNCAAMBGAME)
+- Queues games scheduled within the next 4 hours
+- State tracked in DynamoDB `production-sports-feeder-state` table
+
+**Analysis Use Cases:**
+- Study price movements relative to game events (scores, timeouts, fouls)
+- Compare win/spread/total correlations during different game phases
+- Identify profitable patterns (e.g., endgame pullback opportunities)
+- Backtest trading strategies against historical tick data
 
 Current UTC timestamp: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC
 Note: US Eastern is currently {'EST (UTC-5)' if datetime.now(timezone.utc).month in [11, 12, 1, 2, 3] else 'EDT (UTC-4)'}.

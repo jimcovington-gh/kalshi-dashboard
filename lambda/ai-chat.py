@@ -42,8 +42,8 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
 # AWS clients
-# Bedrock in us-west-2 for direct model access with 1M context window
-bedrock = boto3.client('bedrock-runtime', region_name='us-west-2')
+# Bedrock in us-east-1 for direct model access with 1M context window
+bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 dynamodb_client = boto3.client('dynamodb', region_name='us-east-1')
 s3 = boto3.client('s3', region_name='us-east-1')

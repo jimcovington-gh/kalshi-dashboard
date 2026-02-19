@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   sendAIChatMessageStreaming, 
+  sendCopilotMessage,
   ChatMessage,
   AIChatStreamDone,
   ToolCall,
@@ -80,6 +81,10 @@ function generateConversationId(): string {
 // Local storage key for current conversation
 const CURRENT_CONVERSATION_KEY = 'ai-chat-current-conversation';
 const CONVERSATION_ID_KEY = 'ai-chat-conversation-id';
+const DEVICE_TOKEN_KEY = 'ai-chat-device-token';
+const CHAT_MODE_KEY = 'ai-chat-mode';
+
+type ChatMode = 'bedrock' | 'copilot';
 
 export default function AIChatPage() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -94,6 +99,11 @@ export default function AIChatPage() {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
+  const [chatMode, setChatMode] = useState<ChatMode>('copilot');
+  const [deviceToken, setDeviceToken] = useState<string>('');
+  const [showTokenDialog, setShowTokenDialog] = useState(false);
+  const [tokenInput, setTokenInput] = useState('');
+  const [copilotConversationId, setCopilotConversationId] = useState<string | undefined>();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -102,6 +112,14 @@ export default function AIChatPage() {
   useEffect(() => {
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     setSpeechSupported(!!SpeechRecognitionAPI);
+  }, []);
+
+  // Load device token and chat mode from localStorage
+  useEffect(() => {
+    const savedToken = localStorage.getItem(DEVICE_TOKEN_KEY);
+    const savedMode = localStorage.getItem(CHAT_MODE_KEY) as ChatMode | null;
+    if (savedToken) setDeviceToken(savedToken);
+    if (savedMode === 'bedrock' || savedMode === 'copilot') setChatMode(savedMode);
   }, []);
 
   // Initialize speech recognition
@@ -224,6 +242,12 @@ export default function AIChatPage() {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
+    // If Copilot mode and no device token, prompt for it
+    if (chatMode === 'copilot' && !deviceToken) {
+      setShowTokenDialog(true);
+      return;
+    }
+
     const userMessage = input.trim();
     setInput('');
     setError(null);
@@ -247,48 +271,85 @@ export default function AIChatPage() {
     setMessages(prev => [...prev, loadingMessage]);
     setIsLoading(true);
 
-    // Build conversation history for API
-    const apiMessages: ChatMessage[] = messages.map(m => ({
-      role: m.role,
-      content: m.content,
-    }));
-    apiMessages.push({ role: 'user', content: userMessage });
-
-    // Send streaming request
-    await sendAIChatMessageStreaming(
-      apiMessages,
-      // onProgress
-      (progressContent: string) => {
-        setProgress(progressContent);
-      },
-      // onDone
-      (response: AIChatStreamDone) => {
+    if (chatMode === 'copilot') {
+      // Copilot mode - send through proxy
+      setProgress('Sending to Copilot...');
+      try {
+        const response = await sendCopilotMessage(
+          userMessage,
+          deviceToken,
+          copilotConversationId,
+          true
+        );
+        setCopilotConversationId(response.conversation_id);
         setMessages(prev => {
           const updated = [...prev];
           updated[updated.length - 1] = {
             role: 'assistant',
-            content: response.content,
+            content: response.response,
             timestamp: new Date(),
             isLoading: false,
-            toolCalls: response.tool_calls,
           };
           return updated;
         });
-        setIsLoading(false);
-        setProgress('');
-        inputRef.current?.focus();
-      },
-      // onError
-      (errorMessage: string) => {
-        console.error('AI Chat error:', errorMessage);
-        setError(errorMessage);
-        // Remove loading message on error
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to get Copilot response';
+        console.error('Copilot error:', errorMessage);
+        // Check for device token errors
+        if (errorMessage.includes('MISSING_DEVICE_TOKEN') || errorMessage.includes('UNKNOWN_TOKEN') || errorMessage.includes('REVOKED_TOKEN')) {
+          setError('Device token is invalid or revoked. Please enter a new token.');
+          setDeviceToken('');
+          localStorage.removeItem(DEVICE_TOKEN_KEY);
+        } else if (errorMessage.includes('EXTENSION_UNAVAILABLE')) {
+          setError('Copilot proxy extension is not running. Ensure VS Code is open with the extension active.');
+        } else {
+          setError(errorMessage);
+        }
         setMessages(prev => prev.slice(0, -1));
+      } finally {
         setIsLoading(false);
         setProgress('');
         inputRef.current?.focus();
       }
-    );
+    } else {
+      // Bedrock mode - existing streaming behavior
+      const apiMessages: ChatMessage[] = messages.map(m => ({
+        role: m.role,
+        content: m.content,
+      }));
+      apiMessages.push({ role: 'user', content: userMessage });
+
+      await sendAIChatMessageStreaming(
+        apiMessages,
+        (progressContent: string) => {
+          setProgress(progressContent);
+        },
+        (response: AIChatStreamDone) => {
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              role: 'assistant',
+              content: response.content,
+              timestamp: new Date(),
+              isLoading: false,
+              toolCalls: response.tool_calls,
+            };
+            return updated;
+          });
+          setIsLoading(false);
+          setProgress('');
+          inputRef.current?.focus();
+        },
+        (errorMessage: string) => {
+          console.error('AI Chat error:', errorMessage);
+          setError(errorMessage);
+          setMessages(prev => prev.slice(0, -1));
+          setIsLoading(false);
+          setProgress('');
+          inputRef.current?.focus();
+        }
+      );
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -304,9 +365,33 @@ export default function AIChatPage() {
     setError(null);
     setProgress('');
     setConversationId(generateConversationId());
+    setCopilotConversationId(undefined);
     localStorage.removeItem(CURRENT_CONVERSATION_KEY);
     localStorage.removeItem(CONVERSATION_ID_KEY);
     inputRef.current?.focus();
+  }
+
+  function handleModeSwitch(mode: ChatMode) {
+    setChatMode(mode);
+    localStorage.setItem(CHAT_MODE_KEY, mode);
+    // If switching to copilot and no token, prompt
+    if (mode === 'copilot' && !deviceToken) {
+      setShowTokenDialog(true);
+    }
+  }
+
+  function handleSaveDeviceToken() {
+    if (!tokenInput.trim()) return;
+    const token = tokenInput.trim();
+    setDeviceToken(token);
+    localStorage.setItem(DEVICE_TOKEN_KEY, token);
+    setTokenInput('');
+    setShowTokenDialog(false);
+  }
+
+  function handleClearDeviceToken() {
+    setDeviceToken('');
+    localStorage.removeItem(DEVICE_TOKEN_KEY);
   }
 
   async function handleSaveConversation() {
@@ -358,9 +443,59 @@ export default function AIChatPage() {
       <div className="flex justify-between items-center mb-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">🤖 AI Data Assistant</h1>
-          <p className="text-sm text-gray-600">
-            Ask questions about your trading data, positions, and system configuration
-          </p>
+          <div className="flex items-center gap-3 mt-1">
+            {/* Mode Toggle */}
+            <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+              <button
+                onClick={() => handleModeSwitch('copilot')}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                  chatMode === 'copilot'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Copilot
+              </button>
+              <button
+                onClick={() => handleModeSwitch('bedrock')}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                  chatMode === 'bedrock'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Bedrock
+              </button>
+            </div>
+            {/* Device Token Status (Copilot mode) */}
+            {chatMode === 'copilot' && (
+              <div className="flex items-center gap-1.5">
+                {deviceToken ? (
+                  <>
+                    <span className="inline-block w-2 h-2 bg-green-500 rounded-full"></span>
+                    <span className="text-xs text-gray-500">Device linked</span>
+                    <button
+                      onClick={handleClearDeviceToken}
+                      className="text-xs text-red-400 hover:text-red-600 ml-1"
+                      title="Remove device token"
+                    >
+                      ✕
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setShowTokenDialog(true)}
+                    className="text-xs text-amber-600 hover:text-amber-800"
+                  >
+                    ⚠ Enter device token
+                  </button>
+                )}
+              </div>
+            )}
+            <span className="text-xs text-gray-400">
+              {chatMode === 'copilot' ? 'via GitHub Copilot' : 'via AWS Bedrock'}
+            </span>
+          </div>
         </div>
         <div className="flex gap-2">
           <button
@@ -413,6 +548,43 @@ export default function AIChatPage() {
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
               >
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Device Token Dialog */}
+      {showTokenDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-96 shadow-xl">
+            <h3 className="text-lg font-semibold mb-2">Enter Device Token</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Enter the device token assigned to this device by an admin.
+              This links your browser to the Copilot proxy.
+            </p>
+            <input
+              type="text"
+              value={tokenInput}
+              onChange={(e) => setTokenInput(e.target.value)}
+              placeholder="XXXX-XXXX-XXXX-XXXX"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md mb-4 font-mono text-center tracking-wider"
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleSaveDeviceToken()}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setShowTokenDialog(false); setTokenInput(''); }}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveDeviceToken}
+                disabled={!tokenInput.trim()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+              >
+                Save Token
               </button>
             </div>
           </div>

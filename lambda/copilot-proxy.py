@@ -19,6 +19,7 @@ import logging
 import uuid
 import urllib.request
 import urllib.error
+import base64
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
@@ -41,6 +42,60 @@ AUDIT_TTL_DAYS = 90
 device_tokens_table = dynamodb.Table(DEVICE_TOKENS_TABLE)
 security_audit_table = dynamodb.Table(SECURITY_AUDIT_TABLE)
 
+# Read-only system prompt injected for non-admin tokens
+READ_ONLY_SYSTEM_PROMPT = """You are a read-only assistant for the Kalshi trading system.
+
+STRICT RULES - FOLLOW THESE WITHOUT EXCEPTION:
+1. NEVER write code that modifies existing files, databases, tables, or infrastructure.
+2. NEVER write AWS CLI commands that modify resources (no put-item, update-item, delete-item, batch-write, s3 cp/mv/rm/sync, lambda update-function, cloudformation deploy, etc.).
+3. NEVER write shell commands that modify files (no sed -i, no > file redirects, no rm, no git checkout/reset/revert/push/commit).
+4. NEVER suggest stopping, restarting, or redeploying any running service.
+5. You MAY create NEW standalone note or documentation files when explicitly asked.
+6. You MAY read and explain existing code, CloudWatch logs, and data.
+7. You MAY write read-only queries: DynamoDB Scan/Query/GetItem with --query, aws describe-*, aws list-*, SELECT statements.
+8. If asked to do something that would modify the system, politely decline and offer a read-only alternative.
+
+You have context about this codebase. Use it to answer questions about system state, data, and architecture."""
+
+# Dangerous patterns to flag in responses for read_only users
+import re
+DANGEROUS_PATTERNS = [
+    (r'aws\s+dynamodb\s+(put-item|update-item|delete-item|batch-write-item)', 'DynamoDB write'),
+    (r'aws\s+s3\s+(cp|mv|rm|sync)\s', 'S3 write'),
+    (r'aws\s+lambda\s+(update-function|create-function|delete-function)', 'Lambda modification'),
+    (r'aws\s+cloudformation\s+(deploy|delete-stack|update-stack)', 'CloudFormation modification'),
+    (r'sam\s+(deploy|build)', 'SAM deployment'),
+    (r'git\s+(checkout|reset|revert|push|commit)', 'Git write operation'),
+    (r'\.put_item\(|\.update_item\(|\.delete_item\(|\.batch_write_item\(', 'DynamoDB write call'),
+    (r'rm\s+-rf|rm\s+-r\b', 'File deletion'),
+    (r'sed\s+-i\b', 'File modification'),
+]
+
+
+def scan_response_for_danger(text: str) -> list:
+    """Return list of dangerous pattern matches found in response text."""
+    matches = []
+    for pattern, label in DANGEROUS_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            matches.append(label)
+    return matches
+
+
+def parse_jwt_claims(token: str) -> Dict[str, Any]:
+    """Decode JWT payload without signature verification (used for Function URL path).
+    Security note: we rely on device token as primary secret; JWT sub just provides
+    user binding. Attacker would need a valid high-entropy device token to exploit this.
+    """
+    try:
+        parts = token.split('.')
+        if len(parts) != 3:
+            return {}
+        payload = parts[1]
+        payload += '=' * (4 - len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return {}
+
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Handle incoming chat requests from the dashboard."""
@@ -49,7 +104,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         # Extract user from Cognito JWT (already validated by API Gateway authorizer)
         claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
-        user_name = claims.get('cognito:username') or claims.get('sub')
+        # Always use 'sub' (UUID) as the identity — it's stable and always present in JWTs
+        # When called via Function URL (no API Gateway authorizer), parse JWT from header
+        if not claims:
+            headers = event.get('headers', {})
+            auth_header = headers.get('authorization') or headers.get('Authorization', '')
+            if auth_header.startswith('Bearer '):
+                claims = parse_jwt_claims(auth_header[7:])
+        user_name = claims.get('sub') or claims.get('cognito:username')
         
         if not user_name:
             return error_response(401, 'UNAUTHORIZED', 'Authentication required')
@@ -58,6 +120,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         headers = event.get('headers', {})
         # Headers are case-insensitive in HTTP, but API Gateway may lowercase them
         device_token = headers.get('x-device-token') or headers.get('X-Device-Token')
+        if device_token:
+            device_token = device_token.strip().upper()
         
         if not device_token:
             log_failed_attempt(
@@ -66,7 +130,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 ip_address=get_client_ip(event),
                 user_agent=headers.get('user-agent', 'unknown')
             )
-            return error_response(403, 'MISSING_DEVICE_TOKEN', 'Device token required in X-Device-Token header')
+            return error_response(404, 'NOT_FOUND', 'Not found')
         
         # Validate device token
         validation_result = validate_device_token(device_token, user_name)
@@ -79,15 +143,22 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 device_token_partial=mask_token(device_token)
             )
             
-            # Send SNS alert for suspicious activity
-            send_security_alert(
-                f"Failed device token validation: {validation_result['reason']}",
-                user_name=user_name,
-                ip=get_client_ip(event),
-                token_partial=mask_token(device_token)
-            )
+            # Send SNS alert for suspicious activity (fire-and-forget, don't block response)
+            # Note: Lambda is in VPC so SNS may not be reachable without VPC endpoint
+            try:
+                import threading
+                t = threading.Thread(target=send_security_alert, kwargs=dict(
+                    message=f"Failed device token validation: {validation_result['reason']}",
+                    user_name=user_name,
+                    ip=get_client_ip(event),
+                    token_partial=mask_token(device_token)
+                ))
+                t.daemon = True
+                t.start()
+            except Exception:
+                pass
             
-            return error_response(403, validation_result['reason'].upper(), validation_result['message'])
+            return error_response(404, 'NOT_FOUND', 'Not found')
         
         # Parse request body
         try:
@@ -101,10 +172,22 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         conversation_id = body.get('conversation_id')
         include_context = body.get('include_context', True)
+        permissions = validation_result.get('permissions', 'read_only')
+        
+        # Inject system prompt for non-admin users
+        system_prompt = None if permissions == 'admin' else READ_ONLY_SYSTEM_PROMPT
         
         # Proxy request to VS Code extension
         try:
-            response = proxy_to_vscode(message, conversation_id, include_context)
+            response = proxy_to_vscode(message, conversation_id, include_context, system_prompt, permissions)
+            
+            # Response filtering: warn if read_only response contains dangerous patterns
+            if permissions != 'admin':
+                dangers = scan_response_for_danger(response.get('response', ''))
+                if dangers:
+                    warning = f"\n\n---\n⛔ **GUARDRAIL WARNING**: This response contains potentially destructive operations ({', '.join(dangers)}). Do NOT execute these commands."
+                    response['response'] = response.get('response', '') + warning
+                    logger.warning(f"Dangerous patterns in response for read_only user: {dangers}")
             
             # Update last_used_at for the device token
             update_token_last_used(device_token)
@@ -144,14 +227,27 @@ def validate_device_token(token: str, user_name: str) -> Dict[str, Any]:
                 'message': 'Device token has been revoked'
             }
         
-        if item.get('user_name') != user_name:
+        # Validate that the JWT sub matches the sub this token was bound to at creation.
+        # Tokens without cognito_sub (legacy) are rejected — require re-generation.
+        token_sub = item.get('cognito_sub')
+        if not token_sub:
+            return {
+                'valid': False,
+                'reason': 'token_missing_sub',
+                'message': 'Token predates identity binding. Please generate a new token.'
+            }
+        if token_sub != user_name:  # user_name here is actually the JWT sub (UUID)
             return {
                 'valid': False,
                 'reason': 'token_user_mismatch',
-                'message': 'Device token is not associated with this user'
+                'message': 'Token does not belong to this user'
             }
         
-        return {'valid': True, 'device_name': item.get('device_name', 'Unknown')}
+        return {
+            'valid': True,
+            'device_name': item.get('device_name', 'Unknown'),
+            'permissions': item.get('permissions', 'read_only')
+        }
         
     except Exception as e:
         logger.error(f"Error validating device token: {e}")
@@ -175,7 +271,7 @@ def update_token_last_used(token: str) -> None:
         logger.warning(f"Failed to update last_used_at for token: {e}")
 
 
-def proxy_to_vscode(message: str, conversation_id: Optional[str], include_context: bool) -> Dict[str, Any]:
+def proxy_to_vscode(message: str, conversation_id: Optional[str], include_context: bool, system_prompt: Optional[str] = None, permissions: str = 'read_only') -> Dict[str, Any]:
     """Proxy the chat request to the VS Code extension."""
     payload = {
         'message': message,
@@ -183,6 +279,9 @@ def proxy_to_vscode(message: str, conversation_id: Optional[str], include_contex
     }
     if conversation_id:
         payload['conversation_id'] = conversation_id
+    if system_prompt:
+        payload['system_prompt'] = system_prompt
+    payload['permissions'] = permissions
     
     data = json.dumps(payload).encode('utf-8')
     

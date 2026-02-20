@@ -1323,6 +1323,7 @@ export interface CopilotChatResponse {
 
 /**
  * Send a message to Copilot via the proxy (requires device token)
+ * Uses Lambda Function URL directly to bypass API Gateway's 29s timeout.
  */
 export async function sendCopilotMessage(
   message: string,
@@ -1340,21 +1341,23 @@ export async function sendCopilotMessage(
       ...(conversationId && { conversation_id: conversationId }),
     };
 
-    const restOperation = post({
-      apiName: 'DashboardAPI',
-      path: '/copilot-proxy',
-      options: {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'X-Device-Token': deviceToken,
-        },
-        body: bodyObj as unknown as Record<string, string>,
+    // Use Lambda Function URL directly — no 29s API Gateway timeout
+    const COPILOT_FUNCTION_URL = 'https://d3jialkwncmhg7dv62r7rzvrnu0iynfz.lambda-url.us-east-1.on.aws/';
+    const response = await fetch(COPILOT_FUNCTION_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Device-Token': deviceToken,
       },
+      body: JSON.stringify(bodyObj),
     });
 
-    const response = await restOperation.response;
-    const data = await response.body.json();
-    return data as unknown as CopilotChatResponse;
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    return data as CopilotChatResponse;
   } catch (error) {
     console.error('Error sending Copilot message:', error);
     throw error;

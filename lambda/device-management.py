@@ -30,10 +30,12 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
 # AWS clients
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+cognito = boto3.client('cognito-idp', region_name='us-east-1')
 
 # Configuration from environment
 DEVICE_TOKENS_TABLE = os.environ.get('DEVICE_TOKENS_TABLE', 'production-kalshi-device-tokens')
 SECURITY_AUDIT_TABLE = os.environ.get('SECURITY_AUDIT_TABLE', 'production-kalshi-security-audit')
+COGNITO_USER_POOL_ID = os.environ.get('COGNITO_USER_POOL_ID', 'us-east-1_WEozUeojc')
 
 # Admins who can manage devices
 ADMIN_USERS = {'jimc', 'andrew', 'admin'}
@@ -133,15 +135,22 @@ def generate_token(event: Dict[str, Any], admin_user: str) -> Dict[str, Any]:
     if not device_name:
         return error_response(400, 'MISSING_DEVICE', 'device_name is required')
     
+    # Look up the Cognito sub for this user_name (preferred_username)
+    cognito_sub = lookup_cognito_sub(user_name)
+    if not cognito_sub:
+        return error_response(400, 'USER_NOT_FOUND',
+            f"No Cognito user found with preferred_username '{user_name}'")
+    
     try:
         # Generate a secure random token: XXXX-XXXX-XXXX-XXXX format
         token = generate_secure_token()
         now = int(time.time())
         
-        # Store in DynamoDB
+        # Store in DynamoDB - cognito_sub binds this token to a specific Cognito identity
         device_tokens_table.put_item(Item={
             'token': token,
             'user_name': user_name,
+            'cognito_sub': cognito_sub,
             'device_name': device_name,
             'created_at': now,
             'created_by': admin_user,
@@ -164,6 +173,26 @@ def generate_token(event: Dict[str, Any], admin_user: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error generating token: {e}", exc_info=True)
         return error_response(500, 'GENERATION_ERROR', str(e))
+
+
+def lookup_cognito_sub(preferred_username: str) -> str | None:
+    """Look up a user's Cognito sub by their preferred_username."""
+    try:
+        response = cognito.list_users(
+            UserPoolId=COGNITO_USER_POOL_ID,
+            Filter=f'preferred_username = "{preferred_username}"',
+            Limit=1
+        )
+        users = response.get('Users', [])
+        if not users:
+            return None
+        for attr in users[0].get('Attributes', []):
+            if attr['Name'] == 'sub':
+                return attr['Value']
+        return None
+    except Exception as e:
+        logger.error(f"Error looking up Cognito sub for {preferred_username}: {e}")
+        return None
 
 
 def revoke_token(token_partial: str, admin_user: str) -> Dict[str, Any]:

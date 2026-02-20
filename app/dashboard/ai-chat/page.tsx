@@ -382,7 +382,7 @@ export default function AIChatPage() {
 
   function handleSaveDeviceToken() {
     if (!tokenInput.trim()) return;
-    const token = tokenInput.trim();
+    const token = tokenInput.trim().toUpperCase();
     setDeviceToken(token);
     localStorage.setItem(DEVICE_TOKEN_KEY, token);
     setTokenInput('');

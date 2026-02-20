@@ -45,7 +45,7 @@ Resources:
       StageName: prod
       Cors:
         AllowMethods: "'GET,POST,OPTIONS'"
-        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token,X-Device-Token'"
         AllowOrigin: "'*'"
         MaxAge: "'600'"
       Auth:
@@ -787,7 +787,7 @@ Resources:
           DEVICE_TOKENS_TABLE: production-kalshi-device-tokens
           SECURITY_AUDIT_TABLE: production-kalshi-security-audit
           SNS_ALERT_TOPIC: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts'
-          VSCODE_EXTENSION_URL: 'http://172.31.41.120:9876'
+          VSCODE_EXTENSION_URL: 'http://172.31.23.162:9876'
       Policies:
         # DynamoDB access for device tokens
         - DynamoDBCrudPolicy:
@@ -816,6 +816,18 @@ Resources:
             RestApiId: !Ref DashboardApi
             Path: /copilot-proxy
             Method: POST
+      # Function URL bypasses API Gateway's 29s timeout for long-running Copilot requests
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+            - '*'
+          AllowHeaders:
+            - 'Content-Type'
+            - 'Authorization'
+            - 'X-Device-Token'
+          AllowMethods:
+            - 'POST'
 
   # Lambda: Device Management - Admin API for device tokens
   DeviceManagementFunction:
@@ -831,6 +843,7 @@ Resources:
           LOG_LEVEL: INFO
           DEVICE_TOKENS_TABLE: production-kalshi-device-tokens
           SECURITY_AUDIT_TABLE: production-kalshi-security-audit
+          COGNITO_USER_POOL_ID: us-east-1_WEozUeojc
       Policies:
         # DynamoDB access for device tokens
         - DynamoDBCrudPolicy:
@@ -846,6 +859,13 @@ Resources:
               Resource:
                 - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/production-kalshi-device-tokens/index/*'
                 - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/production-kalshi-security-audit/index/*'
+        # Cognito user lookup for binding tokens to identities
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:ListUsers
+              Resource:
+                - !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/us-east-1_WEozUeojc'
       Events:
         ListDevices:
           Type: Api
@@ -876,6 +896,10 @@ Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL
     Value: !Sub 'https://${DashboardApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+
+  CopilotProxyFunctionUrl:
+    Description: Lambda Function URL for copilot-proxy (no 29s timeout limit)
+    Value: !GetAtt CopilotProxyFunctionUrl.FunctionUrl
   
   GetTradesFunctionArn:
     Description: Get Trades Lambda ARN

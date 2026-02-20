@@ -39,7 +39,7 @@ Resources:
       StageName: prod
       Cors:
         AllowMethods: '''GET,POST,OPTIONS'''
-        AllowHeaders: '''Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'''
+        AllowHeaders: '''Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token,X-Device-Token'''
         AllowOrigin: '''*'''
         MaxAge: '''600'''
       Auth:
@@ -800,7 +800,7 @@ Resources:
           SECURITY_AUDIT_TABLE: production-kalshi-security-audit
           SNS_ALERT_TOPIC:
             Fn::Sub: arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts
-          VSCODE_EXTENSION_URL: http://172.31.41.120:9876
+          VSCODE_EXTENSION_URL: http://172.31.23.162:9876
       Policies:
       - DynamoDBCrudPolicy:
           TableName: production-kalshi-device-tokens
@@ -826,6 +826,17 @@ Resources:
               Ref: DashboardApi
             Path: /copilot-proxy
             Method: POST
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+          - '*'
+          AllowHeaders:
+          - Content-Type
+          - Authorization
+          - X-Device-Token
+          AllowMethods:
+          - POST
     Metadata:
       SamResourceId: CopilotProxyFunction
   DeviceManagementFunction:
@@ -841,6 +852,7 @@ Resources:
           LOG_LEVEL: INFO
           DEVICE_TOKENS_TABLE: production-kalshi-device-tokens
           SECURITY_AUDIT_TABLE: production-kalshi-security-audit
+          COGNITO_USER_POOL_ID: us-east-1_WEozUeojc
       Policies:
       - DynamoDBCrudPolicy:
           TableName: production-kalshi-device-tokens
@@ -853,6 +865,12 @@ Resources:
           Resource:
           - Fn::Sub: arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/production-kalshi-device-tokens/index/*
           - Fn::Sub: arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/production-kalshi-security-audit/index/*
+      - Statement:
+        - Effect: Allow
+          Action:
+          - cognito-idp:ListUsers
+          Resource:
+          - Fn::Sub: arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/us-east-1_WEozUeojc
       Events:
         ListDevices:
           Type: Api
@@ -889,6 +907,12 @@ Outputs:
     Description: API Gateway endpoint URL
     Value:
       Fn::Sub: https://${DashboardApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+  CopilotProxyFunctionUrl:
+    Description: Lambda Function URL for copilot-proxy (no 29s timeout limit)
+    Value:
+      Fn::GetAtt:
+      - CopilotProxyFunctionUrl
+      - FunctionUrl
   GetTradesFunctionArn:
     Description: Get Trades Lambda ARN
     Value:

@@ -99,7 +99,7 @@ export default function AIChatPage() {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
-  const [chatMode, setChatMode] = useState<ChatMode>('copilot');
+  const [chatMode, setChatMode] = useState<ChatMode>('bedrock');
   const [deviceToken, setDeviceToken] = useState<string>('');
   const [showTokenDialog, setShowTokenDialog] = useState(false);
   const [tokenInput, setTokenInput] = useState('');

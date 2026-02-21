@@ -1355,7 +1355,8 @@ export async function sendCopilotMessage(
 
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.error || `HTTP ${response.status}`);
+      // Use error code (e.g., 'EXTENSION_UNAVAILABLE') if present so the caller can match on it
+      throw new Error(data.code || data.error || `HTTP ${response.status}`);
     }
     return data as CopilotChatResponse;
   } catch (error) {

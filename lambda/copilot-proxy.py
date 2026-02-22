@@ -35,7 +35,9 @@ sns = boto3.client('sns', region_name='us-east-1')
 DEVICE_TOKENS_TABLE = os.environ.get('DEVICE_TOKENS_TABLE', 'production-kalshi-device-tokens')
 SECURITY_AUDIT_TABLE = os.environ.get('SECURITY_AUDIT_TABLE', 'production-kalshi-security-audit')
 SNS_ALERT_TOPIC = os.environ.get('SNS_ALERT_TOPIC', '')
-VSCODE_EXTENSION_URL = os.environ.get('VSCODE_EXTENSION_URL', 'http://172.31.41.120:9876')
+VSCODE_EXTENSION_URL = os.environ.get('VSCODE_EXTENSION_URL', '')
+if not VSCODE_EXTENSION_URL:
+    raise RuntimeError('VSCODE_EXTENSION_URL environment variable is not set. Cannot start without a configured extension URL.')
 AUDIT_TTL_DAYS = 90
 
 # DynamoDB tables

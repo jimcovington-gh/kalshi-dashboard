@@ -1042,8 +1042,10 @@ export function TestBenchV2() {
       await fetch(`${EC2_BASE}/stop/${encodeURIComponent(sessionId)}`, {
         method: 'POST',
       });
-
-      // Reset state
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      // Always navigate back to lobby regardless of stop success/failure
       setPageState('events');
       setSelectedEvent(null);
       setSessionId(null);
@@ -1053,10 +1055,7 @@ export function TestBenchV2() {
       setWords([]);
       setTranscript([]);
       setSystemLog([]);
-      setError(null);
       setWsUrl(null);
-    } catch (err) {
-      setError((err as Error).message);
     }
   };
 

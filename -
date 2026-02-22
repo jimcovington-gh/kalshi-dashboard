@@ -1,0 +1,1 @@
+{"statusCode": 401, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Device-Token"}, "body": "{\"error\": \"Authentication required\", \"code\": \"UNAUTHORIZED\"}"}

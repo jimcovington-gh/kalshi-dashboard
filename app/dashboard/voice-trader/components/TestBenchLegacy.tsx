@@ -143,6 +143,24 @@ const VOICE_TRADER_HOST = process.env.NEXT_PUBLIC_VOICE_TRADER_HOST || 'voice.ap
 const EC2_BASE = `https://${VOICE_TRADER_HOST}:8080`;  // Direct EC2 endpoint
 const WS_BASE = `wss://${VOICE_TRADER_HOST}:8765`;  // WebSocket endpoint
 
+// Satellite channel picker thumbnail — auto-refreshes JPEG snapshot every 5s
+function SatSnapshotImg({ streamId, ec2Base }: { streamId: number; ec2Base: string }) {
+  const [ts, setTs] = React.useState(Date.now());
+  React.useEffect(() => {
+    const iv = setInterval(() => setTs(Date.now()), 5000);
+    return () => clearInterval(iv);
+  }, []);
+  return (
+    <img
+      src={`${ec2Base}/satellite/snapshot/${streamId}?t=${ts}`}
+      className="w-full aspect-video object-cover bg-black"
+      alt=""
+      style={{ minHeight: '90px' }}
+      onError={e => { (e.currentTarget as HTMLImageElement).style.opacity = '0.2'; }}
+    />
+  );
+}
+
 export function TestBenchLegacy() {
   const router = useRouter();
   const [pageState, setPageState] = useState<PageState>('loading');
@@ -152,10 +170,17 @@ export function TestBenchLegacy() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   
   // Setup form state
-  const [audioSource, setAudioSource] = useState<'phone' | 'web'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
+
+  // Satellite TV channel picker
+  interface SatStream { stream_id: number; channel_name: string; status: string; thumb_url: string; }
+  const [satStreams, setSatStreams] = useState<SatStream[]>([]);
+  const [satLoading, setSatLoading] = useState(false);
+  const [satError, setSatError] = useState<string | null>(null);
+  const [selectedSatStreamId, setSelectedSatStreamId] = useState<number | null>(null);
   const [scheduledStart, setScheduledStart] = useState('');
   const [dryRun, setDryRun] = useState(false);  // Dry run mode - no real trades
   
@@ -1401,6 +1426,10 @@ export function TestBenchLegacy() {
       setError('Web URL is required');
       return;
     }
+    if (audioSource === 'satellite' && selectedSatStreamId === null) {
+      setError('Please select a satellite channel');
+      return;
+    }
     
     // Check if EC2 server is responding
     if (ec2Status?.status !== 'running') {
@@ -1433,7 +1462,7 @@ export function TestBenchLegacy() {
         session_id: selectedEvent.event_ticker,  // Required by EC2 API
         event_ticker: selectedEvent.event_ticker,
         user_name: 'jimc',  // TODO: Get from auth
-        audio_source: audioSource,  // Required by server
+        audio_source: audioSource === 'satellite' ? 'satellite_transcript' : audioSource,
       };
       
       // Add audio source specific fields
@@ -1444,6 +1473,8 @@ export function TestBenchLegacy() {
         }
       } else if (audioSource === 'web') {
         body.stream_url = webUrl;
+      } else if (audioSource === 'satellite') {
+        body.satellite_stream_id = selectedSatStreamId;
       }
       
       // Add dry_run flag
@@ -2122,7 +2153,7 @@ export function TestBenchLegacy() {
         <div className="bg-gray-800 rounded-lg p-6 max-w-xl">
           <h2 className="text-xl font-semibold mb-4">Audio Source</h2>
           
-          <div className="flex gap-4 mb-6">
+          <div className="flex gap-3 mb-6 flex-wrap">
             <button
               className={`px-4 py-2 rounded ${audioSource === 'phone' ? 'bg-blue-600' : 'bg-gray-700'}`}
               onClick={() => setAudioSource('phone')}
@@ -2134,6 +2165,21 @@ export function TestBenchLegacy() {
               onClick={() => setAudioSource('web')}
             >
               🌐 Web Stream
+            </button>
+            <button
+              className={`px-4 py-2 rounded ${audioSource === 'satellite' ? 'bg-blue-600' : 'bg-gray-700'}`}
+              onClick={() => {
+                setAudioSource('satellite');
+                setSatError(null);
+                setSatLoading(true);
+                setSelectedSatStreamId(null);
+                fetch(`${EC2_BASE}/satellite/streams`)
+                  .then(r => r.json())
+                  .then(d => { setSatStreams(d.streams || []); setSatLoading(false); })
+                  .catch(() => { setSatError('Could not reach satellite server'); setSatLoading(false); });
+              }}
+            >
+              📡 Satellite TV
             </button>
           </div>
           
@@ -2176,6 +2222,64 @@ export function TestBenchLegacy() {
               <p className="text-xs text-gray-500 mt-1">
                 ⚠️ Web streams may have 5-15 second delay. Phone is recommended.
               </p>
+            </div>
+          )}
+
+          {audioSource === 'satellite' && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm text-gray-400">Select Channel</label>
+                <button
+                  onClick={() => {
+                    setSatLoading(true); setSatError(null); setSelectedSatStreamId(null);
+                    fetch(`${EC2_BASE}/satellite/streams`)
+                      .then(r => r.json())
+                      .then(d => { setSatStreams(d.streams || []); setSatLoading(false); })
+                      .catch(() => { setSatError('Could not reach satellite server'); setSatLoading(false); });
+                  }}
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                >↺ Refresh</button>
+              </div>
+              {satLoading && (
+                <div className="text-sm text-gray-400 py-4 text-center">Loading streams…</div>
+              )}
+              {satError && (
+                <div className="text-sm text-red-400 py-2">{satError}</div>
+              )}
+              {!satLoading && !satError && satStreams.length === 0 && (
+                <div className="text-sm text-gray-500 py-4 text-center">
+                  No active streams — start a channel on the satellite server first.
+                </div>
+              )}
+              {!satLoading && satStreams.length > 0 && (
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  {satStreams.map(s => (
+                    <button
+                      key={s.stream_id}
+                      onClick={() => setSelectedSatStreamId(s.stream_id)}
+                      className={`relative rounded-lg overflow-hidden border-2 transition-colors text-left ${
+                        selectedSatStreamId === s.stream_id
+                          ? 'border-green-500'
+                          : 'border-gray-600 hover:border-gray-400'
+                      }`}
+                    >
+                      <SatSnapshotImg streamId={s.stream_id} ec2Base={EC2_BASE} />
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/70 px-2 py-1">
+                        <div className="text-xs font-medium truncate">{s.channel_name}</div>
+                        <div className="text-xs text-gray-400">Stream {s.stream_id}</div>
+                      </div>
+                      {selectedSatStreamId === s.stream_id && (
+                        <div className="absolute top-1 right-1 bg-green-500 rounded-full w-4 h-4 flex items-center justify-center text-xs">✓</div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {selectedSatStreamId !== null && (
+                <p className="text-xs text-green-400 mt-2">
+                  ✓ Stream {selectedSatStreamId} selected — Riva transcripts will feed directly to Voice Trader
+                </p>
+              )}
             </div>
           )}
           
@@ -2228,7 +2332,7 @@ export function TestBenchLegacy() {
           <div className="mt-8">
             <button
               onClick={handleLaunch}
-              disabled={launching}
+              disabled={launching || (audioSource === 'phone' && !phoneNumber) || (audioSource === 'web' && !webUrl) || (audioSource === 'satellite' && selectedSatStreamId === null)}
               className={`w-full font-bold py-3 px-4 rounded ${
                 launching 
                   ? 'bg-gray-600 cursor-not-allowed' 

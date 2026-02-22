@@ -19,15 +19,15 @@ type TestBenchVersion = 'legacy' | 'v2';
 const STORAGE_KEY = 'voice-trader-test-bench-version';
 
 export default function VoiceTraderPage() {
-  // Initialize from localStorage or default to 'legacy'
-  const [version, setVersion] = useState<TestBenchVersion>('legacy');
+  // Initialize from localStorage or default to 'v2'
+  const [version, setVersion] = useState<TestBenchVersion>('v2');
   const [loaded, setLoaded] = useState(false);
 
   // Load saved preference on mount
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'v2') {
-      setVersion('v2');
+    if (saved === 'legacy') {
+      setVersion('legacy');
     }
     setLoaded(true);
   }, []);

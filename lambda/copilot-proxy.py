@@ -385,8 +385,6 @@ def error_response(status_code: int, error_code: str, message: str) -> Dict[str,
         'statusCode': status_code,
         'headers': {
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Device-Token'
         },
         'body': json.dumps({
             'error': message,
@@ -401,8 +399,6 @@ def success_response(data: Dict[str, Any]) -> Dict[str, Any]:
         'statusCode': 200,
         'headers': {
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Device-Token'
         },
         'body': json.dumps(data)
     }

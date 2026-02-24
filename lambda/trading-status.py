@@ -28,7 +28,7 @@ CONFIG_BUCKET = 'production-kalshi-trading-config'
 # checks the base 'mention-market' toggle for all phases.
 TRADING_IDEAS = [
     {'idea_id': 'buffett', 'display_name': 'Buffett', 'description': 'Position accumulation at better prices'},
-    {'idea_id': 'hicon:original', 'display_name': 'High Confidence', 'description': 'Automated high-confidence trades'},
+    {'idea_id': 'hicon', 'display_name': 'High Confidence', 'description': 'Automated high-confidence trades'},
     {'idea_id': 'mention-market', 'display_name': 'Mention Markets', 'description': 'All mention market phases (1-4)'},
     {'idea_id': 'quickbets', 'display_name': 'QuickBets', 'description': 'Manual quick betting interface'},
     {'idea_id': 'jumps', 'display_name': 'Jumps', 'description': 'Price jump detection trading'},

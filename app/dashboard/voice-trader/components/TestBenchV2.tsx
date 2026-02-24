@@ -1305,6 +1305,25 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Phone Number</label>
+                  <div className="flex gap-2 mb-2">
+                    {[
+                      { label: 'C-SPAN Radio', number: '+12026268888' },
+                      { label: 'C-SPAN TV', number: '+16056154174' },
+                    ].map(p => (
+                      <button
+                        key={p.number}
+                        type="button"
+                        onClick={() => setPhoneNumber(p.number)}
+                        className={`px-3 py-1 rounded text-xs font-medium transition ${
+                          phoneNumber === p.number
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-600 hover:bg-gray-500 text-gray-300'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
                   <input
                     type="text"
                     value={phoneNumber}

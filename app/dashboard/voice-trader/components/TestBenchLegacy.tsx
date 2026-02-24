@@ -161,10 +161,11 @@ function SatSnapshotImg({ streamId, ec2Base }: { streamId: number; ec2Base: stri
   );
 }
 
-export function TestBenchLegacy() {
+export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string } = {}) {
   const router = useRouter();
   const [pageState, setPageState] = useState<PageState>('loading');
   const [events, setEvents] = useState<MentionEvent[]>([]);
+  const autoEventHandled = useRef(false);
   const [selectedEvent, setSelectedEvent] = useState<MentionEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -523,7 +524,20 @@ export function TestBenchLegacy() {
       }
     }
     
-    fetchEvents();
+    fetchEvents().then(() => {
+      // Auto-select event from URL param (e.g. ?event=TICKER opened in new window)
+      if (autoEventTicker && !autoEventHandled.current) {
+        autoEventHandled.current = true;
+        setEvents(prev => {
+          const match = prev.find(e => e.event_ticker === autoEventTicker);
+          if (match) {
+            setSelectedEvent(match);
+            setPageState('setup');
+          }
+          return prev;
+        });
+      }
+    });
     fetchRunningContainers();
     fetchEC2Status();
     fetchRivaStatus();
@@ -2075,7 +2089,19 @@ export function TestBenchLegacy() {
               >
                 <div className="flex justify-between items-start">
                   <div>
-                    <h3 className="text-lg font-semibold">{event.title}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-semibold">{event.title}</h3>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          window.open(`/dashboard/voice-trader?event=${encodeURIComponent(event.event_ticker)}`, '_blank', 'noopener');
+                        }}
+                        className="text-xs bg-blue-600 hover:bg-blue-500 px-2 py-0.5 rounded transition"
+                        title="Open in new window"
+                      >
+                        ↗ New Window
+                      </button>
+                    </div>
                     <p className="text-gray-400 text-sm">{event.event_ticker}</p>
                   </div>
                   <div className="text-right">

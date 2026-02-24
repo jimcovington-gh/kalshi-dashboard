@@ -10,7 +10,8 @@
  * The selection is persisted in localStorage so users return to their preferred version.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { TestBenchLegacy } from './components/TestBenchLegacy';
 import { TestBenchV2 } from './components/TestBenchV2';
 
@@ -18,10 +19,12 @@ type TestBenchVersion = 'legacy' | 'v2';
 
 const STORAGE_KEY = 'voice-trader-test-bench-version';
 
-export default function VoiceTraderPage() {
+function VoiceTraderPageInner() {
   // Initialize from localStorage or default to 'v2'
   const [version, setVersion] = useState<TestBenchVersion>('v2');
   const [loaded, setLoaded] = useState(false);
+  const searchParams = useSearchParams();
+  const autoEventTicker = searchParams.get('event') || undefined;
 
   // Load saved preference on mount
   useEffect(() => {
@@ -66,7 +69,19 @@ export default function VoiceTraderPage() {
       </div>
 
       {/* Render the selected test bench */}
-      {version === 'legacy' ? <TestBenchLegacy /> : <TestBenchV2 />}
+      {version === 'legacy' ? <TestBenchLegacy autoEventTicker={autoEventTicker} /> : <TestBenchV2 autoEventTicker={autoEventTicker} />}
     </div>
+  );
+}
+
+export default function VoiceTraderPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-screen">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+      </div>
+    }>
+      <VoiceTraderPageInner />
+    </Suspense>
   );
 }

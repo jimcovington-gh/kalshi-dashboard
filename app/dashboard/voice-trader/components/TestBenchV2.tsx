@@ -518,7 +518,7 @@ function SatSnapshotImg({ streamId, ec2Base }: { streamId: number; ec2Base: stri
 // Main Component
 // =============================================================================
 
-export function TestBenchV2() {
+export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = {}) {
   const router = useRouter();
   
   // Page navigation state
@@ -743,7 +743,11 @@ export function TestBenchV2() {
   // ==========================================================================
   
   const handleV2Message = useCallback((message: { type: string; data?: unknown; timestamp?: string }) => {
-    const { type, data } = message;
+    const { type } = message;
+    // Worker sends flat messages (no data wrapper), but V2 protocol uses {type, data}.
+    // Support both: use message.data if present, otherwise use message itself.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = (message.data ?? message) as any;
 
     switch (type) {
       case 'state': {

@@ -151,9 +151,9 @@ def get_upcoming_events(event):
                 # Parse ISO format
                 start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00'))
                 
-                # Include events starting within 24 hours OR already in progress (started within last 3 hours)
-                three_hours_ago = now - timedelta(hours=3)
-                if three_hours_ago <= start_date <= cutoff:
+                # Include events starting within 24 hours OR started within last 24 hours
+                twenty_four_hours_ago = now - timedelta(hours=24)
+                if twenty_four_hours_ago <= start_date <= cutoff:
                     hours_until = (start_date - now).total_seconds() / 3600
                     
                     # Get associated markets (words)

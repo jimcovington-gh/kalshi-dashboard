@@ -531,7 +531,7 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
   
   // Setup form
   const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite'>('phone');
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
   const [dryRun, setDryRun] = useState(true);

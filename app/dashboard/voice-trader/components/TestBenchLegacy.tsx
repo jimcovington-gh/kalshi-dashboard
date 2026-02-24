@@ -172,7 +172,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   
   // Setup form state
   const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite'>('phone');
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
 
@@ -267,7 +267,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [newQueueEvent, setNewQueueEvent] = useState({
     event_ticker: '',
     scheduled_time: '',
-    phone_number: ''
+    phone_number: '+12026268888'
   });
 
   // Check for cert_accepted param on load (redirect back from cert page)

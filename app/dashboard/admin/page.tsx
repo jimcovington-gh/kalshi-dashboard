@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { isAdmin, getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent, getVolatileWatchlist, VolatileWatchlistResponse, getVolatileOrders, VolatileOrdersResponse, getRunningVoiceContainers, stopVoiceContainer, RunningVoiceContainer, RunningVoiceContainersResponse, getRecorderSettings, setRecorderSetting, getRecorderStatus, RecorderSettings, RecorderStatus } from '@/lib/api';
+import { isAdmin, getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent, getVolatileWatchlist, VolatileWatchlistResponse, getVolatileOrders, VolatileOrdersResponse, getRunningVoiceContainers, stopVoiceContainer, RunningVoiceContainer, RunningVoiceContainersResponse, getRecorderSettings, setRecorderSetting, getRecorderStatus, RecorderSettings, RecorderStatus, getSportsCaptures, SportsCapture } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
@@ -44,6 +44,8 @@ export default function AdminPage() {
   const [recorderStatus, setRecorderStatus] = useState<RecorderStatus | null>(null);
   const [recorderStatusLoading, setRecorderStatusLoading] = useState(false);
   const [recorderToggleLoading, setRecorderToggleLoading] = useState<string | null>(null);
+  const [sportsCaptures, setSportsCaptures] = useState<SportsCapture[]>([]);
+  const [sportsCapturesLoading, setSportsCapturesLoading] = useState(false);
   
   const router = useRouter();
 
@@ -68,6 +70,7 @@ export default function AdminPage() {
         loadVoiceContainers(),
         loadRecorderSettings(),
         loadRecorderStatus(),
+        loadSportsCaptures(),
       ]);
     } catch (err: any) {
       setError('Access denied');
@@ -113,6 +116,18 @@ export default function AdminPage() {
       setError(`Failed to update recorder setting: ${err.message}`);
     } finally {
       setRecorderToggleLoading(null);
+    }
+  }
+
+  async function loadSportsCaptures() {
+    setSportsCapturesLoading(true);
+    try {
+      const data = await getSportsCaptures();
+      setSportsCaptures(data.captures);
+    } catch (err: any) {
+      console.error('Failed to load sports captures:', err);
+    } finally {
+      setSportsCapturesLoading(false);
     }
   }
 
@@ -1168,7 +1183,7 @@ export default function AdminPage() {
         <div className="flex justify-between items-center mb-3">
           <h2 className="text-xl font-bold text-gray-900">📼 Orderbook Recorder</h2>
           <button
-            onClick={() => { loadRecorderSettings(); loadRecorderStatus(); }}
+            onClick={() => { loadRecorderSettings(); loadRecorderStatus(); loadSportsCaptures(); }}
             disabled={recorderSettingsLoading || recorderStatusLoading}
             className="px-2 py-1 text-base text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50"
           >
@@ -1182,6 +1197,7 @@ export default function AdminPage() {
             { key: 'recorder_enabled', label: 'Recorder On/Off', desc: 'Master switch — allows manual and auto recording' },
             { key: 'record_after_trades', label: 'Record After Trades', desc: 'Auto-start recording each market when a trade is placed' },
             { key: 'record_mention_markets', label: 'Record Mention Markets', desc: 'Auto-start recording entire mention event on monitor activation' },
+            { key: 'record_basketball_games', label: 'Record Basketball', desc: 'Auto-queue basketball game captures via sports feeder' },
           ].map(({ key, label, desc }) => {
             const value = recorderSettings ? recorderSettings[key as keyof RecorderSettings] : false;
             const isLoading = recorderToggleLoading === key;
@@ -1244,6 +1260,54 @@ export default function AdminPage() {
             </table>
           ) : (
             <div className="text-center py-3 text-gray-400 text-sm">No active recording sessions</div>
+          )}
+        </div>
+
+        {/* Basketball captures from sports feeder */}
+        <div className="mt-4 border-t border-gray-100 pt-3">
+          <div className="text-sm font-semibold text-gray-700 mb-2">
+            🏀 Basketball Captures (Sports Feeder){sportsCaptures.length > 0 ? ` — ${sportsCaptures.filter(c => c.status === 'capturing').length} live, ${sportsCaptures.filter(c => c.status === 'queued').length} queued` : ''}
+          </div>
+          {sportsCapturesLoading ? (
+            <div className="text-center py-4 text-gray-400 text-sm">Loading...</div>
+          ) : sportsCaptures.length > 0 ? (
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Game</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500 hidden sm:table-cell">League</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">Status</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">Data Points</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Start</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {sportsCaptures.map((c) => {
+                  const statusColor = c.status === 'capturing'
+                    ? 'bg-green-100 text-green-800'
+                    : c.status === 'running'
+                    ? 'bg-blue-100 text-blue-800'
+                    : 'bg-yellow-100 text-yellow-800';
+                  const startTs = c.scheduled_start ? parseInt(c.scheduled_start) * 1000 : 0;
+                  const startTime = startTs ? new Date(startTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+                  return (
+                    <tr key={c.event_ticker} className="hover:bg-gray-50">
+                      <td className="px-2 py-1 font-semibold text-gray-900">{c.title}</td>
+                      <td className="px-2 py-1 text-gray-500 text-xs hidden sm:table-cell">{c.league}</td>
+                      <td className="px-2 py-1 text-center">
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${statusColor}`}>{c.status}</span>
+                      </td>
+                      <td className="px-2 py-1 text-center font-mono text-gray-700">
+                        {c.data_points > 0 ? c.data_points.toLocaleString() : '—'}
+                      </td>
+                      <td className="px-2 py-1 text-gray-600">{startTime}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <div className="text-center py-3 text-gray-400 text-sm">No active basketball captures</div>
           )}
         </div>
       </div>

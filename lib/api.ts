@@ -1373,6 +1373,7 @@ export interface RecorderSettings {
   recorder_enabled: boolean;
   record_after_trades: boolean;
   record_mention_markets: boolean;
+  record_basketball_games: boolean;
 }
 
 export interface RecorderSessionInfo {
@@ -1447,6 +1448,34 @@ export async function getRecorderStatus(): Promise<RecorderStatus> {
     return data as unknown as RecorderStatus;
   } catch (error) {
     console.error('Error fetching recorder status:', error);
+    throw error;
+  }
+}
+
+export interface SportsCapture {
+  event_ticker: string;
+  title: string;
+  league: string;
+  status: string;
+  data_points: number;
+  scheduled_start: string;
+  s3_path: string;
+}
+
+export async function getSportsCaptures(): Promise<{ captures: SportsCapture[]; count: number }> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: '/sports-captures',
+      options: { headers: { Authorization: `Bearer ${token}` } },
+    });
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    return data as unknown as { captures: SportsCapture[]; count: number };
+  } catch (error) {
+    console.error('Error fetching sports captures:', error);
     throw error;
   }
 }

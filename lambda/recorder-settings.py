@@ -9,6 +9,7 @@ GET  /recorder-status    - Proxy to TIS to get recorder status (requires VPC)
 import json
 import logging
 import os
+import time
 import urllib3
 
 import boto3
@@ -30,7 +31,10 @@ FEATURE_KEYS = {
     'recorder_enabled': 'FEATURE#orderbook_recorder',
     'record_after_trades': 'FEATURE#record_after_trades',
     'record_mention_markets': 'FEATURE#record_mention_markets',
+    'record_basketball_games': 'FEATURE#record_basketball_games',
 }
+
+SPORTS_TABLE = 'production-sports-feeder-state'
 
 
 def cors_response(status_code, body):
@@ -116,6 +120,46 @@ def get_recorder_status():
         return None, f"Failed to reach TIS: {e}"
 
 
+def get_sports_captures():
+    """Read active and upcoming basketball captures from sports feeder state table."""
+    from boto3.dynamodb.conditions import Attr
+    table = dynamodb.Table(SPORTS_TABLE)
+    try:
+        resp = table.scan(
+            FilterExpression=(
+                Attr('status').is_in(['capturing', 'running', 'queued']) &
+                Attr('league').contains('Basketball')
+            )
+        )
+        items = resp.get('Items', [])
+        now = int(time.time())
+        result = []
+        for item in items:
+            scheduled_start_raw = item.get('scheduled_start', '')
+            # For queued items, only include if starting within 3 hours
+            if item.get('status') == 'queued':
+                try:
+                    if int(str(scheduled_start_raw)) > now + 3 * 60 * 60:
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            result.append({
+                'event_ticker': item.get('event_ticker', ''),
+                'title': item.get('title', ''),
+                'league': item.get('league', ''),
+                'status': item.get('status', ''),
+                'data_points': int(item.get('data_points', 0)) if item.get('data_points') else 0,
+                'scheduled_start': str(scheduled_start_raw),
+                's3_path': item.get('s3_path', ''),
+            })
+        status_order = {'capturing': 0, 'running': 1, 'queued': 2}
+        result.sort(key=lambda x: (status_order.get(x['status'], 9), x['scheduled_start']))
+        return result
+    except Exception as e:
+        logger.error(f"Failed to read sports captures: {e}")
+        return []
+
+
 def lambda_handler(event, context):
     http_method = event.get('httpMethod', 'GET')
     path = event.get('path', '')
@@ -152,5 +196,10 @@ def lambda_handler(event, context):
                 return cors_response(400, {'error': 'Invalid JSON body'})
             except Exception as e:
                 return cors_response(500, {'error': str(e)})
+
+    if path == '/sports-captures':
+        if http_method == 'GET':
+            captures = get_sports_captures()
+            return cors_response(200, {'captures': captures, 'count': len(captures)})
 
     return cors_response(404, {'error': f'Unknown path: {path}'})

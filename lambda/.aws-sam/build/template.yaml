@@ -270,6 +270,8 @@ Resources:
       Policies:
       - DynamoDBCrudPolicy:
           TableName: production-kalshi-trading-shutdown-signals
+      - DynamoDBReadPolicy:
+          TableName: production-sports-feeder-state
       - Statement:
         - Effect: Allow
           Action:
@@ -298,6 +300,13 @@ Resources:
             RestApiId:
               Ref: DashboardApi
             Path: /recorder-status
+            Method: GET
+        GetSportsCaptures:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /sports-captures
             Method: GET
     Metadata:
       SamResourceId: RecorderSettingsFunction

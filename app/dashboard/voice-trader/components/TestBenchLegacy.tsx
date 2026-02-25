@@ -736,6 +736,23 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                   }
                 : w
             ));
+            
+            // Log trigger phrase to system log (if context available)
+            if (data.context_before || data.context_after) {
+              const before = data.context_before || '';
+              const after = data.context_after || '';
+              const word = data.word || '';
+              
+              // Format: "...context [WORD] context..."
+              const triggerPhrase = `${before ? '...' + before : ''}[${word.toUpperCase()}]${after ? after + '...' : ''}`;
+              
+              setSystemLog(prev => [...prev, {
+                timestamp: data.timestamp || Date.now() / 1000,
+                message: `Word detected: ${word}`,
+                level: 'trade',
+                details: triggerPhrase
+              }]);
+            }
           } else if (data.type === 'word_status_update') {
             // Orderbook scanner detected word was already said (no NO bids)
             console.log('[WORD] Orderbook update:', data.market_ticker, data.source, data.reason);

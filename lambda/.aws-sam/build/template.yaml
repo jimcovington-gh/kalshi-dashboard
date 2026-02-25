@@ -250,6 +250,57 @@ Resources:
             Method: POST
     Metadata:
       SamResourceId: TradingStatusFunction
+  RecorderSettingsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-recorder-settings
+      CodeUri: RecorderSettingsFunction
+      Handler: recorder-settings.lambda_handler
+      Description: Get and set orderbook recorder feature flags; proxy recorder status
+        from TIS
+      AutoPublishAlias: live
+      VpcConfig:
+        SubnetIds:
+          Ref: TISVpcSubnets
+        SecurityGroupIds:
+          Ref: TISVpcSecurityGroups
+      Environment:
+        Variables:
+          TIS_ENDPOINT: http://tis.production.local:8080
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: production-kalshi-trading-shutdown-signals
+      - Statement:
+        - Effect: Allow
+          Action:
+          - ec2:CreateNetworkInterface
+          - ec2:DescribeNetworkInterfaces
+          - ec2:DeleteNetworkInterface
+          Resource: '*'
+      Events:
+        GetRecorderSettings:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /recorder-settings
+            Method: GET
+        SetRecorderSettings:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /recorder-settings
+            Method: POST
+        GetRecorderStatus:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /recorder-status
+            Method: GET
+    Metadata:
+      SamResourceId: RecorderSettingsFunction
   AdminStatsFunction:
     Type: AWS::Serverless::Function
     Properties:

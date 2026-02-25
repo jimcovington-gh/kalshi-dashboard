@@ -1457,8 +1457,10 @@ export interface SportsCapture {
   title: string;
   league: string;
   status: string;
+  stale: boolean;
   data_points: number;
   scheduled_start: string;
+  capture_started_at: string;
   s3_path: string;
 }
 

@@ -1266,7 +1266,12 @@ export default function AdminPage() {
         {/* Basketball captures from sports feeder */}
         <div className="mt-4 border-t border-gray-100 pt-3">
           <div className="text-sm font-semibold text-gray-700 mb-2">
-            🏀 Basketball Captures (Sports Feeder){sportsCaptures.length > 0 ? ` — ${sportsCaptures.filter(c => c.status === 'capturing').length} live, ${sportsCaptures.filter(c => c.status === 'queued').length} queued` : ''}
+            🏀 Basketball Captures (Sports Feeder){sportsCaptures.length > 0 ? (() => {
+              const live = sportsCaptures.filter(c => (c.status === 'capturing' || c.status === 'running') && !c.stale).length;
+              const queued = sportsCaptures.filter(c => c.status === 'queued').length;
+              const stale = sportsCaptures.filter(c => c.stale).length;
+              return ` — ${live} live${queued ? `, ${queued} queued` : ''}${stale ? `, ${stale} stale` : ''}`;
+            })() : ''}
           </div>
           {sportsCapturesLoading ? (
             <div className="text-center py-4 text-gray-400 text-sm">Loading...</div>
@@ -1277,28 +1282,44 @@ export default function AdminPage() {
                   <th className="px-2 py-1 text-left font-medium text-gray-500">Game</th>
                   <th className="px-2 py-1 text-left font-medium text-gray-500 hidden sm:table-cell">League</th>
                   <th className="px-2 py-1 text-center font-medium text-gray-500">Status</th>
-                  <th className="px-2 py-1 text-center font-medium text-gray-500">Data Points</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500" title="Data point count is only written at capture completion">Data Points</th>
                   <th className="px-2 py-1 text-left font-medium text-gray-500">Start</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {sportsCaptures.map((c) => {
-                  const statusColor = c.status === 'capturing'
+                  const isStale = c.stale;
+                  const statusColor = isStale
+                    ? 'bg-gray-100 text-gray-400'
+                    : c.status === 'capturing'
                     ? 'bg-green-100 text-green-800'
                     : c.status === 'running'
                     ? 'bg-blue-100 text-blue-800'
                     : 'bg-yellow-100 text-yellow-800';
                   const startTs = c.scheduled_start ? parseInt(c.scheduled_start) * 1000 : 0;
                   const startTime = startTs ? new Date(startTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+                  const kalshiUrl = buildEventUrl(c.event_ticker);
                   return (
-                    <tr key={c.event_ticker} className="hover:bg-gray-50">
-                      <td className="px-2 py-1 font-semibold text-gray-900">{c.title}</td>
+                    <tr key={c.event_ticker} className={isStale ? 'opacity-50 hover:opacity-70' : 'hover:bg-gray-50'}>
+                      <td className="px-2 py-1 font-semibold text-gray-900">
+                        <a href={kalshiUrl} target="_blank" rel="noopener noreferrer"
+                           className="text-blue-600 hover:text-blue-800 hover:underline">
+                          {c.title}
+                        </a>
+                      </td>
                       <td className="px-2 py-1 text-gray-500 text-xs hidden sm:table-cell">{c.league}</td>
                       <td className="px-2 py-1 text-center">
-                        <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${statusColor}`}>{c.status}</span>
+                        {isStale
+                          ? <span className="px-1.5 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-400" title="Capture abandoned when feeder restarted">stale</span>
+                          : <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${statusColor}`}>{c.status}</span>
+                        }
                       </td>
                       <td className="px-2 py-1 text-center font-mono text-gray-700">
-                        {c.data_points > 0 ? c.data_points.toLocaleString() : '—'}
+                        {c.data_points > 0
+                          ? c.data_points.toLocaleString()
+                          : (!isStale && (c.status === 'capturing' || c.status === 'running'))
+                          ? <span className="text-green-600 text-xs font-bold animate-pulse">● live</span>
+                          : '—'}
                       </td>
                       <td className="px-2 py-1 text-gray-600">{startTime}</td>
                     </tr>

@@ -124,6 +124,7 @@ def get_sports_captures():
     """Read active and upcoming basketball captures from sports feeder state table."""
     from boto3.dynamodb.conditions import Attr
     table = dynamodb.Table(SPORTS_TABLE)
+    STALE_CUTOFF = 7 * 3600  # captures not updated in 7h are stale (feeder restart abandoned them)
     try:
         resp = table.scan(
             FilterExpression=(
@@ -136,6 +137,7 @@ def get_sports_captures():
         result = []
         for item in items:
             scheduled_start_raw = item.get('scheduled_start', '')
+            capture_started_raw = item.get('capture_started_at', '')
             # For queued items, only include if starting within 3 hours
             if item.get('status') == 'queued':
                 try:
@@ -143,17 +145,29 @@ def get_sports_captures():
                         continue
                 except (ValueError, TypeError):
                     pass
+            # Detect stale captures: capturing/running but started more than 7h ago
+            stale = False
+            if item.get('status') in ('capturing', 'running') and capture_started_raw:
+                try:
+                    age = now - int(str(capture_started_raw))
+                    if age > STALE_CUTOFF:
+                        stale = True
+                except (ValueError, TypeError):
+                    pass
             result.append({
                 'event_ticker': item.get('event_ticker', ''),
                 'title': item.get('title', ''),
                 'league': item.get('league', ''),
                 'status': item.get('status', ''),
+                'stale': stale,
                 'data_points': int(item.get('data_points', 0)) if item.get('data_points') else 0,
                 'scheduled_start': str(scheduled_start_raw),
+                'capture_started_at': str(capture_started_raw),
                 's3_path': item.get('s3_path', ''),
             })
+        # Sort: live first, then queued, stale last
         status_order = {'capturing': 0, 'running': 1, 'queued': 2}
-        result.sort(key=lambda x: (status_order.get(x['status'], 9), x['scheduled_start']))
+        result.sort(key=lambda x: (x['stale'], status_order.get(x['status'], 9), x['scheduled_start']))
         return result
     except Exception as e:
         logger.error(f"Failed to read sports captures: {e}")

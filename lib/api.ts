@@ -1364,3 +1364,89 @@ export async function sendCopilotMessage(
     throw error;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Orderbook Recorder Settings & Status
+// ---------------------------------------------------------------------------
+
+export interface RecorderSettings {
+  recorder_enabled: boolean;
+  record_after_trades: boolean;
+  record_mention_markets: boolean;
+}
+
+export interface RecorderSessionInfo {
+  group_key: string;
+  tickers: string[];
+  data_points: number;
+  started_at: string;
+  closed_tickers: string[];
+  pending_close: string[];
+  s3_key: string;
+  buffer_size: number;
+}
+
+export interface RecorderStatus {
+  enabled: boolean;
+  record_after_trades: boolean;
+  record_mention_markets: boolean;
+  active_sessions: number;
+  sessions: RecorderSessionInfo[];
+}
+
+export async function getRecorderSettings(): Promise<RecorderSettings> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: '/recorder-settings',
+      options: { headers: { Authorization: `Bearer ${token}` } },
+    });
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    return data as unknown as RecorderSettings;
+  } catch (error) {
+    console.error('Error fetching recorder settings:', error);
+    throw error;
+  }
+}
+
+export async function setRecorderSetting(key: string, enabled: boolean): Promise<RecorderSettings> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+    const restOperation = post({
+      apiName: 'DashboardAPI',
+      path: '/recorder-settings',
+      options: {
+        headers: { Authorization: `Bearer ${token}` },
+        body: { key, enabled },
+      },
+    });
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    return data as unknown as RecorderSettings;
+  } catch (error) {
+    console.error('Error setting recorder setting:', error);
+    throw error;
+  }
+}
+
+export async function getRecorderStatus(): Promise<RecorderStatus> {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+    const restOperation = get({
+      apiName: 'DashboardAPI',
+      path: '/recorder-status',
+      options: { headers: { Authorization: `Bearer ${token}` } },
+    });
+    const response = await restOperation.response;
+    const data = await response.body.json();
+    return data as unknown as RecorderStatus;
+  } catch (error) {
+    console.error('Error fetching recorder status:', error);
+    throw error;
+  }
+}

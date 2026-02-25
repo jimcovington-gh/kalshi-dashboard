@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { isAdmin, getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent, getVolatileWatchlist, VolatileWatchlistResponse, getVolatileOrders, VolatileOrdersResponse, getRunningVoiceContainers, stopVoiceContainer, RunningVoiceContainer, RunningVoiceContainersResponse } from '@/lib/api';
+import { isAdmin, getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent, getVolatileWatchlist, VolatileWatchlistResponse, getVolatileOrders, VolatileOrdersResponse, getRunningVoiceContainers, stopVoiceContainer, RunningVoiceContainer, RunningVoiceContainersResponse, getRecorderSettings, setRecorderSetting, getRecorderStatus, RecorderSettings, RecorderStatus } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
@@ -37,6 +37,13 @@ export default function AdminPage() {
   
   // Per-user/per-idea toggle state
   const [toggleLoading, setToggleLoading] = useState<string | null>(null); // Format: "user_name#idea_id"
+
+  // Orderbook Recorder state
+  const [recorderSettings, setRecorderSettings] = useState<RecorderSettings | null>(null);
+  const [recorderSettingsLoading, setRecorderSettingsLoading] = useState(false);
+  const [recorderStatus, setRecorderStatus] = useState<RecorderStatus | null>(null);
+  const [recorderStatusLoading, setRecorderStatusLoading] = useState(false);
+  const [recorderToggleLoading, setRecorderToggleLoading] = useState<string | null>(null);
   
   const router = useRouter();
 
@@ -58,11 +65,54 @@ export default function AdminPage() {
         loadAdminStats(),
         loadVolatileWatchlist(),
         loadVolatileOrders(),
-        loadVoiceContainers()
+        loadVoiceContainers(),
+        loadRecorderSettings(),
+        loadRecorderStatus(),
       ]);
     } catch (err: any) {
       setError('Access denied');
       setTimeout(() => router.push('/dashboard'), 2000);
+    }
+  }
+
+  async function loadRecorderSettings() {
+    setRecorderSettingsLoading(true);
+    try {
+      const data = await getRecorderSettings();
+      setRecorderSettings(data);
+    } catch (err: any) {
+      console.error('Failed to load recorder settings:', err);
+    } finally {
+      setRecorderSettingsLoading(false);
+    }
+  }
+
+  async function loadRecorderStatus() {
+    setRecorderStatusLoading(true);
+    try {
+      const data = await getRecorderStatus();
+      setRecorderStatus(data);
+    } catch (err: any) {
+      console.error('Failed to load recorder status:', err);
+    } finally {
+      setRecorderStatusLoading(false);
+    }
+  }
+
+  async function handleRecorderToggle(key: string) {
+    if (!recorderSettings) return;
+    const currentValue = recorderSettings[key as keyof RecorderSettings];
+    const newValue = !currentValue;
+    setRecorderToggleLoading(key);
+    try {
+      const updated = await setRecorderSetting(key, newValue);
+      setRecorderSettings(updated);
+      // Flags are cached in TIS for 60s; refresh status after a short delay
+      setTimeout(() => loadRecorderStatus(), 1500);
+    } catch (err: any) {
+      setError(`Failed to update recorder setting: ${err.message}`);
+    } finally {
+      setRecorderToggleLoading(null);
     }
   }
 
@@ -1111,6 +1161,91 @@ export default function AdminPage() {
         ) : (
           <div className="text-center py-4 text-gray-400 text-base">Loading...</div>
         )}
+      </div>
+
+      {/* Orderbook Recorder */}
+      <div className="bg-white rounded-lg shadow p-4">
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-xl font-bold text-gray-900">📼 Orderbook Recorder</h2>
+          <button
+            onClick={() => { loadRecorderSettings(); loadRecorderStatus(); }}
+            disabled={recorderSettingsLoading || recorderStatusLoading}
+            className="px-2 py-1 text-base text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50"
+          >
+            🔄
+          </button>
+        </div>
+
+        {/* Three feature flag toggles */}
+        <div className="flex flex-wrap gap-4 mb-4">
+          {[
+            { key: 'recorder_enabled', label: 'Recorder On/Off', desc: 'Master switch — allows manual and auto recording' },
+            { key: 'record_after_trades', label: 'Record After Trades', desc: 'Auto-start recording each market when a trade is placed' },
+            { key: 'record_mention_markets', label: 'Record Mention Markets', desc: 'Auto-start recording entire mention event on monitor activation' },
+          ].map(({ key, label, desc }) => {
+            const value = recorderSettings ? recorderSettings[key as keyof RecorderSettings] : false;
+            const isLoading = recorderToggleLoading === key;
+            return (
+              <div key={key} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2 border border-gray-200">
+                <button
+                  onClick={() => handleRecorderToggle(key)}
+                  disabled={isLoading || recorderSettingsLoading}
+                  className={`px-3 py-1 rounded text-base font-bold uppercase tracking-wide min-w-[4rem] transition-colors duration-200 ${
+                    isLoading
+                      ? 'animate-pulse bg-gray-300 text-gray-500'
+                      : value
+                      ? 'bg-green-500 hover:bg-green-600 text-white'
+                      : 'bg-red-500 hover:bg-red-600 text-white'
+                  } disabled:opacity-50`}
+                  title={desc}
+                >
+                  {isLoading ? '...' : value ? 'ON' : 'OFF'}
+                </button>
+                <div>
+                  <div className="text-sm font-semibold text-gray-800">{label}</div>
+                  <div className="text-xs text-gray-500">{desc}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Active sessions table */}
+        <div>
+          <div className="text-sm font-semibold text-gray-700 mb-1">
+            Active Sessions{recorderStatus ? ` (${recorderStatus.active_sessions})` : ''}
+          </div>
+          {recorderStatusLoading ? (
+            <div className="text-center py-4 text-gray-400 text-sm">Loading...</div>
+          ) : recorderStatus && recorderStatus.sessions.length > 0 ? (
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Group Key</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">Tickers</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">Data Points</th>
+                  <th className="px-2 py-1 text-center font-medium text-gray-500">Buffer</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Started</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">S3 Key</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {recorderStatus.sessions.map((s) => (
+                  <tr key={s.group_key} className="hover:bg-gray-50">
+                    <td className="px-2 py-1 font-mono font-semibold text-gray-900">{s.group_key}</td>
+                    <td className="px-2 py-1 text-center text-gray-700">{s.tickers.length}</td>
+                    <td className="px-2 py-1 text-center font-mono text-gray-700">{s.data_points.toLocaleString()}</td>
+                    <td className="px-2 py-1 text-center font-mono text-gray-700">{s.buffer_size}</td>
+                    <td className="px-2 py-1 text-gray-600">{new Date(s.started_at).toLocaleTimeString()}</td>
+                    <td className="px-2 py-1 font-mono text-xs text-gray-500 max-w-xs truncate" title={s.s3_key}>{s.s3_key}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="text-center py-3 text-gray-400 text-sm">No active recording sessions</div>
+          )}
+        </div>
       </div>
 
       {error && (

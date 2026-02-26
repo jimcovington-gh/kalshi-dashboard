@@ -379,6 +379,37 @@ export default function AdminPage() {
     return `https://kalshi.com/markets/${prefix}/${eventTicker}`;
   }
 
+  // Abbreviate an event ticker into a short readable title
+  // e.g. "KXNFLMENTION-25DEC22SFIND" → "NFL Mention SFIND"
+  //      "KXNCAAMBGAME-26FEB25URISBON" → "NCAAMB URISBON"
+  //      "KXBTC-26FEB25" → "BTC 26FEB25"
+  function abbreviateGroupKey(groupKey: string): string {
+    if (!groupKey) return groupKey;
+    const parts = groupKey.split('-');
+    // First part is the Kalshi series prefix like KXNFLMENTION, KXNCAAMBGAME, etc.
+    const seriesPrefix = parts[0] || '';
+    // Strip 'KX' prefix
+    let series = seriesPrefix.startsWith('KX') ? seriesPrefix.slice(2) : seriesPrefix;
+    // Extract the suffix part (team codes, etc.) — everything after the date portion in the last segment
+    // Date pattern: 2-digit day + 3-letter month + 2-digit year (e.g. 25DEC22, 26FEB25)
+    const rest = parts.slice(1).join('-');
+    const dateMatch = rest.match(/^(\d{2}[A-Z]{3}\d{2})(.*)/); 
+    let suffix = '';
+    if (dateMatch) {
+      suffix = dateMatch[2]; // everything after the date
+    } else {
+      suffix = rest;
+    }
+    // Clean up series name: split known patterns
+    series = series
+      .replace(/MENTION$/, ' Mention')
+      .replace(/GAME$/, '')
+      .replace(/SPREAD$/, ' Spread')
+      .replace(/TOTAL$/, ' Total');
+    const display = suffix ? `${series} ${suffix}` : series || groupKey;
+    return display.trim();
+  }
+
   // Helper function to build Kalshi market URL from market_ticker (for volatile watchlist/orders)
   // Format: https://kalshi.com/markets/<prefix>/<market_ticker>
   function buildMarketUrlFromTicker(marketTicker: string): string {
@@ -1237,7 +1268,7 @@ export default function AdminPage() {
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500">Group Key</th>
+                  <th className="px-2 py-1 text-left font-medium text-gray-500">Event</th>
                   <th className="px-2 py-1 text-center font-medium text-gray-500">Tickers</th>
                   <th className="px-2 py-1 text-center font-medium text-gray-500">Data Points</th>
                   <th className="px-2 py-1 text-center font-medium text-gray-500">Buffer</th>
@@ -1248,7 +1279,12 @@ export default function AdminPage() {
               <tbody className="divide-y divide-gray-100">
                 {recorderStatus.sessions.map((s) => (
                   <tr key={s.group_key} className="hover:bg-gray-50">
-                    <td className="px-2 py-1 font-mono font-semibold text-gray-900">{s.group_key}</td>
+                    <td className="px-2 py-1 font-semibold text-gray-900" title={s.group_key}>
+                        <a href={buildEventUrl(s.group_key)} target="_blank" rel="noopener noreferrer"
+                           className="text-blue-600 hover:text-blue-800 hover:underline">
+                          {abbreviateGroupKey(s.group_key)}
+                        </a>
+                      </td>
                     <td className="px-2 py-1 text-center text-gray-700">{s.tickers.length}</td>
                     <td className="px-2 py-1 text-center font-mono text-gray-700">{s.data_points.toLocaleString()}</td>
                     <td className="px-2 py-1 text-center font-mono text-gray-700">{s.buffer_size}</td>

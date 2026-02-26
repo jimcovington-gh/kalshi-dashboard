@@ -373,8 +373,8 @@ def lambda_handler(event, context):
     
     try:
         market_capture_runs = get_market_capture_runs()
-        recent_orders = get_recent_orders(20)
-        recent_trades = get_recent_trades(20)
+        recent_orders = get_recent_orders(5)
+        recent_trades = get_recent_trades(5)
         upcoming_mention_events = get_upcoming_mention_events()
         
         return cors_response(200, {

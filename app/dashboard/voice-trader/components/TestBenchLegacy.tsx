@@ -33,7 +33,14 @@ interface WordStatus {
   triggered: boolean;
   triggered_at?: number;
   no_purchased: boolean;
-  trade_result?: any;
+  trade_result?: {
+    contracts_filled?: number;
+    avg_buy_price?: number;
+    cost?: number;
+    sell_fill_price?: number;
+    sell_contracts?: number;
+    realized_profit?: number;
+  };
   status?: 'pending' | 'success' | 'no_fill' | 'failed' | 'skipped';
 }
 
@@ -227,8 +234,9 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [dialpadOpen, setDialpadOpen] = useState(false);
   
   // Trading parameters state
-  const [betSize, setBetSize] = useState<number>(10);  // Current bet size in dollars - user controlled only
-  const [betSizeInput, setBetSizeInput] = useState<string>('10');  // Text input value
+  const [betSize, setBetSize] = useState<number>(10);  // Last confirmed bet size on the server
+  const [betSizeInput, setBetSizeInput] = useState<string>('10');  // Text input value (may differ from betSize while editing)
+  const [betSizeDirty, setBetSizeDirty] = useState<boolean>(false);  // True when input differs from confirmed value
   const [cashBalance, setCashBalance] = useState<number>(0);
   const [availableCash, setAvailableCash] = useState<number>(0);
   const [minTrade, setMinTrade] = useState<number>(10);  // Minimum trade size
@@ -724,16 +732,26 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
           } else if (data.type === 'word_triggered') {
             // Update the words state based on status
             // pending = yellow (trade in progress)
-            // success = green (got fills)
-            // no_fill/failed/skipped = gray (revert to untriggered look)
+            // success = green (got fills + profit)
+            // no_fill/failed = gray (no trade executed)
             console.log('[WORD] Status:', data.word, data.market_ticker, data.status || 'triggered');
             setWords(prev => prev.map(w => 
               w.market_ticker === data.market_ticker 
                 ? { 
                     ...w, 
-                    triggered: data.status === 'success',  // Only green on success
+                    triggered: true,  // Always mark triggered once detected
                     triggered_at: data.timestamp,
-                    status: data.status || 'pending'
+                    status: data.status || 'pending',
+                    // Merge trade_result — pending has buy info, success adds sell info
+                    trade_result: {
+                      ...w.trade_result,
+                      ...(data.contracts_filled !== undefined ? { contracts_filled: data.contracts_filled } : {}),
+                      ...(data.avg_fill_price !== undefined ? { avg_buy_price: data.avg_fill_price } : {}),
+                      ...(data.cost !== undefined ? { cost: data.cost } : {}),
+                      ...(data.sell_fill_price !== undefined ? { sell_fill_price: data.sell_fill_price } : {}),
+                      ...(data.sell_contracts !== undefined ? { sell_contracts: data.sell_contracts } : {}),
+                      ...(data.realized_profit !== undefined ? { realized_profit: data.realized_profit } : {}),
+                    }
                   }
                 : w
             ));
@@ -805,11 +823,20 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
           } else if (data.type === 'audio_active') {
             setAudioActive(data.active);
           } else if (data.type === 'trading_params') {
-            // Update cash balance from server - bet size is user-controlled only
+            // Sync cash balance + bet size from server
             setCashBalance(data.cash_balance || 0);
             setAvailableCash(data.available_cash || 0);
             setMinTrade(data.min_trade || 10);
-            // DO NOT update betSize from server - user controls it entirely
+            // Sync bet size from server ONLY if user isn't actively editing (not dirty)
+            if (data.bet_size != null) {
+              setBetSize(data.bet_size);
+              setBetSizeDirty(prev => {
+                if (!prev) {
+                  setBetSizeInput(String(data.bet_size));
+                }
+                return prev;
+              });
+            }
           } else if (data.type === 'speakers') {
             // Update speakers from server
             setContainerState(prev => prev ? {...prev, speakers: data.speakers} : prev);
@@ -1636,12 +1663,20 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
     console.log('[BET] Sending:', msg);
     wsRef.current.send(msg);
     setBetSize(dollars);
+    setBetSizeDirty(false);
   };
 
-  // Handle bet size input change
-  const handleBetSizeChange = (value: string) => {
+  // Handle bet size input change — update text only, mark dirty, do NOT send yet
+  const handleBetSizeInputChange = (value: string) => {
     setBetSizeInput(value);
     const dollars = parseFloat(value);
+    // Mark dirty if the input differs from the confirmed bet size
+    setBetSizeDirty(!isNaN(dollars) && dollars >= 0 && dollars !== betSize);
+  };
+
+  // Confirm & send the bet size (button click or Enter key)
+  const confirmBetSize = () => {
+    const dollars = parseFloat(betSizeInput);
     if (!isNaN(dollars) && dollars >= 0) {
       sendBetSize(dollars);
     }
@@ -2803,6 +2838,12 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                     <div className="text-[10px] text-gray-400 truncate">
                       {w.status === 'skipped'
                         ? '🚫 said'
+                        : w.status === 'success' && w.trade_result
+                        ? (w.trade_result.realized_profit !== undefined
+                          ? `✓ ${w.trade_result.contracts_filled}@${w.trade_result.avg_buy_price?.toFixed(2)}→${w.trade_result.sell_fill_price?.toFixed(2)} +$${w.trade_result.realized_profit?.toFixed(2)}`
+                          : `✓ ${w.trade_result.contracts_filled}@${w.trade_result.avg_buy_price?.toFixed(2)} (sell pending)`)
+                        : w.status === 'pending' && w.trade_result
+                        ? `⏳ ${w.trade_result.contracts_filled}@${w.trade_result.avg_buy_price?.toFixed(2)} ($${w.trade_result.cost?.toFixed(2)})`
                         : w.status && w.triggered_at
                         ? `${statusIcon} ${formatTime(w.triggered_at)}`
                         : w.no_purchased
@@ -2843,21 +2884,39 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                   <div className="flex items-center gap-1">
                     <span className="text-gray-500 text-xs">$</span>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       value={betSizeInput}
-                      onChange={(e) => handleBetSizeChange(e.target.value)}
+                      onChange={(e) => handleBetSizeInputChange(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          confirmBetSize();
+                        }
+                      }}
                       onBlur={() => {
                         const val = parseFloat(betSizeInput);
                         if (isNaN(val) || val < 0) {
-                          setBetSizeInput(betSize.toFixed(2));
+                          setBetSizeInput(String(betSize));
+                          setBetSizeDirty(false);
                         }
                       }}
-                      className={`w-16 px-1 py-0.5 rounded text-xs font-mono text-right ${
-                        betSize < minTrade ? 'bg-red-900 border border-red-500' : 'bg-gray-700'
+                      className={`w-16 px-1 py-0.5 rounded text-xs font-mono text-right border ${
+                        betSize < minTrade ? 'bg-red-900 border-red-500' :
+                        betSizeDirty ? 'bg-yellow-900 border-yellow-500' :
+                        'bg-green-900/40 border-green-600'
                       }`}
-                      min="0"
-                      step="1"
                     />
+                    <button
+                      onClick={confirmBetSize}
+                      disabled={!betSizeDirty}
+                      className={`px-1.5 py-0.5 rounded text-xs font-bold transition-colors ${
+                        betSizeDirty
+                          ? 'bg-yellow-600 hover:bg-yellow-500 text-black cursor-pointer'
+                          : 'bg-green-800/60 text-green-300 cursor-default'
+                      }`}
+                    >
+                      {betSizeDirty ? 'Set' : '✓'}
+                    </button>
                   </div>
                 </div>
                 {betSize < minTrade && (

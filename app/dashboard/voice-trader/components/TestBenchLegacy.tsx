@@ -171,7 +171,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [sessionId, setSessionId] = useState<string | null>(null);
   
   // Setup form state
-  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
@@ -1506,6 +1506,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         body.stream_url = webUrl;
       } else if (audioSource === 'satellite') {
         body.satellite_stream_id = selectedSatStreamId;
+      } else if (audioSource === 'desktop') {
+        // No extra fields needed - TCP listener starts automatically on port 4400
       }
       
       // Add dry_run flag
@@ -2243,6 +2245,12 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             >
               📡 Satellite TV
             </button>
+            <button
+              className={`px-4 py-2 rounded ${audioSource === 'desktop' ? 'bg-blue-600' : 'bg-gray-700'}`}
+              onClick={() => setAudioSource('desktop')}
+            >
+              🖥️ Desktop Audio
+            </button>
           </div>
           
           {audioSource === 'phone' && (
@@ -2302,6 +2310,22 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               />
               <p className="text-xs text-gray-500 mt-1">
                 ⚠️ Web streams may have 5-15 second delay. Phone is recommended.
+              </p>
+            </div>
+          )}
+
+          {audioSource === 'desktop' && (
+            <div className="space-y-2">
+              <p className="text-sm text-gray-400">
+                Streams your system audio (whatever is playing on your speakers) to Voice Trader via SSH tunnel.
+              </p>
+              <div className="bg-gray-900 rounded p-3 text-xs font-mono text-gray-300">
+                <p className="text-gray-500 mb-1"># On Windows — open PowerShell and run:</p>
+                <p>ssh -L 4400:localhost:4400 voice-trader-gpu</p>
+                <p className="mt-1">ffmpeg -f dshow -audio_buffer_size 20 -i &quot;audio=Stereo Mix&quot; -acodec pcm_s16le -ar 8000 -ac 1 -f s16le tcp://127.0.0.1:4400</p>
+              </div>
+              <p className="text-xs text-green-400">
+                ✓ Lowest latency option (~50-100ms). Uses Riva GPU transcription.
               </p>
             </div>
           )}
@@ -2413,7 +2437,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
           <div className="mt-8">
             <button
               onClick={handleLaunch}
-              disabled={launching || (audioSource === 'phone' && !phoneNumber) || (audioSource === 'web' && !webUrl) || (audioSource === 'satellite' && selectedSatStreamId === null)}
+              disabled={launching || (audioSource === 'phone' && !phoneNumber) || (audioSource === 'web' && !webUrl) || (audioSource === 'satellite' && selectedSatStreamId === null) || false}
               className={`w-full font-bold py-3 px-4 rounded ${
                 launching 
                   ? 'bg-gray-600 cursor-not-allowed' 

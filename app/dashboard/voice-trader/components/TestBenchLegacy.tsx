@@ -56,6 +56,7 @@ interface ContainerState {
     valid_count: number;
     invalid_count: number;
     current: string;
+    filter_enabled: boolean;
     details: Speaker[];
   };
   transcript_segments: number;
@@ -786,8 +787,13 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               message: `Speaker changed: ${data.speaker_name || data.speaker_id}`,
               level: 'info'
             }]);
-            // Also update lastSpeakerId to trigger speaker label in transcript
+            // Update lastSpeakerId to trigger speaker label in transcript
             setLastSpeakerId(data.speaker_id);
+            // Update speakers.current so the "▶ speaking" indicator moves in real time
+            setContainerState(prev => prev ? {
+              ...prev,
+              speakers: { ...prev.speakers, current: data.speaker_id }
+            } : prev);
           } else if (data.type === 'disconnect_alert') {
             setError(data.message);
             setAudioActive(false);  // Call disconnected - not active anymore
@@ -942,7 +948,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             detection_paused: data.detection_paused || false,
             dry_run: data.dry_run ?? prev?.dry_run ?? false,
             // Use speakers from response, fallback to prev if not present
-            speakers: data.speakers || prev?.speakers || { valid_count: 0, invalid_count: 0, current: '', details: [] },
+            speakers: data.speakers || prev?.speakers || { valid_count: 0, invalid_count: 0, current: '', filter_enabled: false, details: [] },
             transcript_segments: data.transcript_segments || prev?.transcript_segments || 0
           }));
           
@@ -1508,6 +1514,9 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         body.satellite_stream_id = selectedSatStreamId;
       }
       
+      // Always enable diarization so speaker panel works
+      body.stt_diarization = true;
+
       // Add dry_run flag
       if (dryRun) {
         body.dry_run = true;
@@ -2929,25 +2938,76 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             
             {/* Speakers - ALWAYS show section, even when empty */}
             <div className="bg-gray-800 rounded-lg p-3">
-              <h2 className="font-semibold text-sm mb-1">Speakers</h2>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="font-semibold text-sm">🎙 Speakers</h2>
+                {/* Speaker filter toggle - OFF by default, safe to enable once you trust the IDs */}
+                <button
+                  onClick={() => {
+                    if (wsRef.current?.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({
+                        type: 'set_speaker_filter',
+                        enabled: !containerState?.speakers?.filter_enabled
+                      }));
+                    }
+                  }}
+                  className={`text-xs px-2 py-0.5 rounded font-medium transition-colors ${
+                    containerState?.speakers?.filter_enabled
+                      ? 'bg-orange-600 hover:bg-orange-500 ring-1 ring-orange-400'
+                      : 'bg-gray-600 hover:bg-gray-500'
+                  }`}
+                  title={containerState?.speakers?.filter_enabled
+                    ? 'Speaker filter ON — uncheck a speaker to block their words from trading'
+                    : 'Speaker filter OFF — all speakers trade (safe default). Enable to gate by speaker.'}
+                >
+                  {containerState?.speakers?.filter_enabled ? '🔒 Filter ON' : '🔓 Filter OFF'}
+                </button>
+              </div>
               <div className="text-xs space-y-1">
-                <div className="flex justify-between text-gray-400">
-                  <span>✓ {containerState?.speakers?.valid_count ?? 0}</span>
-                  <span>✗ {containerState?.speakers?.invalid_count ?? 0}</span>
-                </div>
                 {containerState?.speakers?.details && containerState.speakers.details.length > 0 ? (
-                  containerState.speakers.details.slice(0, 5).map(s => (
-                    <div
-                      key={s.id}
-                      className={`text-xs p-1 rounded truncate ${
-                        s.is_valid ? 'bg-green-900/50' : 'bg-red-900/50'
-                      }`}
-                    >
-                      <span className="font-mono">{s.id}</span>: {s.sample}
-                    </div>
-                  ))
+                  containerState.speakers.details.slice(0, 8).map(s => {
+                    const isCurrent = containerState.speakers.current === s.id;
+                    return (
+                      <div
+                        key={s.id}
+                        className={`flex items-center gap-1.5 p-1 rounded ${
+                          isCurrent
+                            ? 'bg-blue-700/60 ring-1 ring-blue-400'
+                            : s.is_valid ? 'bg-gray-700/50' : 'bg-red-900/40'
+                        }`}
+                      >
+                        {/* Active speaker pulse */}
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                          isCurrent ? 'bg-blue-400 animate-pulse' : 'bg-gray-600'
+                        }`} />
+                        {/* Valid-for-trading checkbox */}
+                        <input
+                          type="checkbox"
+                          checked={s.is_valid}
+                          onChange={(e) => {
+                            if (wsRef.current?.readyState === WebSocket.OPEN) {
+                              wsRef.current.send(JSON.stringify({
+                                type: 'set_speaker_valid',
+                                speaker_id: s.id,
+                                is_valid: e.target.checked
+                              }));
+                            }
+                          }}
+                          title={s.is_valid ? 'Approved — words from this speaker will trade (when filter is ON)' : 'Not approved — check to allow this speaker to trigger trades'}
+                          className="accent-green-500 cursor-pointer flex-shrink-0"
+                        />
+                        <span className="font-mono text-gray-300 flex-shrink-0">{s.id}</span>
+                        {isCurrent && <span className="text-blue-300 text-[10px] flex-shrink-0">▶ speaking</span>}
+                        <span className="text-gray-400 truncate">{s.sample}</span>
+                      </div>
+                    );
+                  })
                 ) : (
-                  <div className="text-gray-500 italic">No speakers detected yet</div>
+                  <div className="text-gray-500 italic">No speakers detected yet{!containerState?.speakers?.filter_enabled ? ' — diarization active' : ''}</div>
+                )}
+                {containerState?.speakers?.filter_enabled && (
+                  <div className="mt-1 text-orange-300 text-[10px]">
+                    ⚠ Filter active — unchecked speakers will NOT trigger trades
+                  </div>
                 )}
               </div>
             </div>

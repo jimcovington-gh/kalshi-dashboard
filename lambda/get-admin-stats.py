@@ -310,7 +310,6 @@ def get_upcoming_mention_events():
         table = dynamodb.Table(MENTION_EVENTS_TABLE)
         
         now = datetime.now(timezone.utc)
-        tomorrow = now + timedelta(hours=24)
         
         # Scan for events - table should be small enough
         response = table.scan()
@@ -321,16 +320,23 @@ def get_upcoming_mention_events():
             response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
             items.extend(response.get('Items', []))
         
-        # Filter to events starting in next 24 hours
+        # Filter to events that haven't resolved yet (strike_date > now)
+        # Using strike_date (not start_date) so active events that already started
+        # but haven't resolved remain visible.
         upcoming = []
         for item in items:
             start_date_str = item.get('start_date', '')
+            strike_date_str = item.get('strike_date', '')
             if not start_date_str:
                 continue
             
             try:
                 start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00'))
-                if now <= start_date <= tomorrow:
+                # Determine cutoff: use strike_date if present, else fall back to start_date
+                cutoff_str = strike_date_str or start_date_str
+                cutoff = datetime.fromisoformat(cutoff_str.replace('Z', '+00:00'))
+                if cutoff > now:
+                    hours_until_start = round((start_date - now).total_seconds() / 3600, 1)
                     upcoming.append({
                         'event_ticker': item.get('event_ticker', ''),
                         'series_ticker': item.get('series_ticker', ''),
@@ -338,11 +344,11 @@ def get_upcoming_mention_events():
                         'sub_title': item.get('sub_title', ''),
                         'category': item.get('category', ''),
                         'start_date': start_date_str,
-                        'strike_date': item.get('strike_date', ''),
-                        'hours_until_start': round((start_date - now).total_seconds() / 3600, 1)
+                        'strike_date': strike_date_str,
+                        'hours_until_start': hours_until_start
                     })
             except (ValueError, TypeError) as e:
-                logger.warning(f"Could not parse start_date for {item.get('event_ticker')}: {e}")
+                logger.warning(f"Could not parse date for {item.get('event_ticker')}: {e}")
                 continue
         
         # Sort by start_date ascending (soonest first)

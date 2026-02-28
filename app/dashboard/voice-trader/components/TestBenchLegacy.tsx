@@ -179,10 +179,11 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [sessionId, setSessionId] = useState<string | null>(null);
   
   // Setup form state
-  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
+  const [primeUrl, setPrimeUrl] = useState('');
 
   // Satellite TV channel picker
   interface SatStream { stream_id: number; channel_name: string; status: string; thumb_url: string; }
@@ -1495,6 +1496,25 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       setError('Please select a satellite channel');
       return;
     }
+
+    // For Prime Video: start capture pipeline first
+    if (audioSource === 'desktop') {
+      try {
+        const primeRes = await fetch(`${EC2_BASE}/prime/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: primeUrl || undefined, desktop_port: 4400 }),
+        });
+        if (!primeRes.ok) {
+          const err = await primeRes.json().catch(() => ({})) as Record<string, unknown>;
+          setError(`Prime pipeline failed: ${err.errors || primeRes.status}`);
+          return;
+        }
+      } catch (e) {
+        setError(`Could not start Prime capture: ${(e as Error).message}`);
+        return;
+      }
+    }
     
     // Check if EC2 server is responding
     if (ec2Status?.status !== 'running') {
@@ -1540,6 +1560,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         body.stream_url = webUrl;
       } else if (audioSource === 'satellite') {
         body.satellite_stream_id = selectedSatStreamId;
+      } else if (audioSource === 'desktop') {
+        body.desktop_port = 4400;
       }
       
       // Always enable diarization so speaker panel works
@@ -2299,6 +2321,12 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             >
               📡 Satellite TV
             </button>
+            <button
+              className={`px-4 py-2 rounded ${audioSource === 'desktop' ? 'bg-purple-600' : 'bg-gray-700'}`}
+              onClick={() => setAudioSource('desktop')}
+            >
+              🎬 Prime Video
+            </button>
 
           </div>
           
@@ -2360,6 +2388,25 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               <p className="text-xs text-gray-500 mt-1">
                 ⚠️ Web streams may have 5-15 second delay. Phone is recommended.
               </p>
+            </div>
+          )}
+
+          {audioSource === 'desktop' && (
+            <div className="space-y-3 mb-6">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Prime Video URL <span className="text-gray-500">(optional)</span></label>
+                <input
+                  type="text"
+                  value={primeUrl}
+                  onChange={e => setPrimeUrl(e.target.value)}
+                  placeholder="https://www.amazon.com/video/detail/..."
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-white"
+                />
+              </div>
+              <div className="bg-purple-900/30 border border-purple-700 rounded-lg p-3 text-sm text-purple-200 space-y-1">
+                <p className="font-medium">🎬 How it works</p>
+                <p className="text-xs text-purple-300">Chrome opens on the EC2 server. After launch, click <strong>Open VNC</strong> in the session monitor to see and control the browser — navigate to your show and press play. Audio streams automatically to the voice trader.</p>
+              </div>
             </div>
           )}
 
@@ -2470,7 +2517,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
           <div className="mt-8">
             <button
               onClick={handleLaunch}
-              disabled={launching || (audioSource === 'phone' && !phoneNumber) || (audioSource === 'web' && !webUrl) || (audioSource === 'satellite' && selectedSatStreamId === null) || false}
+              disabled={launching || (audioSource === 'phone' && !phoneNumber) || (audioSource === 'web' && !webUrl) || (audioSource === 'satellite' && selectedSatStreamId === null)}
               className={`w-full font-bold py-3 px-4 rounded ${
                 launching 
                   ? 'bg-gray-600 cursor-not-allowed' 
@@ -2539,6 +2586,26 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             <span>🧪</span>
             <span className="font-bold">DRY RUN MODE</span>
             <span>— No real trades will be executed</span>
+          </div>
+        )}
+
+        {/* PRIME VIDEO BANNER - show when using desktop audio source */}
+        {audioSource === 'desktop' && (
+          <div className="bg-purple-900/40 border border-purple-700 px-3 py-2 rounded-lg mb-2 flex items-center gap-3 text-sm">
+            <span className="text-purple-200 font-medium">🎬 Prime Video capture running</span>
+            <button
+              onClick={() => window.open(`${EC2_BASE}/prime/novnc`, 'prime-vnc',
+                'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes')}
+              className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded font-medium transition-colors"
+            >
+              🖥️ Open VNC Viewer
+            </button>
+            <button
+              onClick={async () => { await fetch(`${EC2_BASE}/prime/stop`, { method: 'POST' }); }}
+              className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
+            >
+              Stop Capture
+            </button>
           </div>
         )}
         

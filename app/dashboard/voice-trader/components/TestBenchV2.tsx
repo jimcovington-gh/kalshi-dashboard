@@ -530,10 +530,12 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
   const [selectedEvent, setSelectedEvent] = useState<MentionEvent | null>(null);
   
   // Setup form
-  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
+  const [primeUrl, setPrimeUrl] = useState('');
+  const [primeVncOpen, setPrimeVncOpen] = useState(false);
   const [dryRun, setDryRun] = useState(true);
   const [launching, setLaunching] = useState(false);
 
@@ -1001,6 +1003,19 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
     setError(null);
 
     try {
+      // For desktop (Prime Video), spin up the capture pipeline first
+      if (audioSource === 'desktop') {
+        const primeRes = await fetch(`${EC2_BASE}/prime/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: primeUrl || undefined, desktop_port: 4400 }),
+        });
+        if (!primeRes.ok) {
+          const err = await primeRes.json().catch(() => ({})) as Record<string, unknown>;
+          throw new Error(`Prime pipeline failed to start: ${err.errors || primeRes.status}`);
+        }
+      }
+
       const config = {
         session_id: selectedEvent.event_ticker,
         event_ticker: selectedEvent.event_ticker,
@@ -1009,6 +1024,7 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
         passcode: audioSource === 'phone' ? passcode : undefined,
         stream_url: audioSource === 'web' ? webUrl : undefined,
         satellite_stream_id: audioSource === 'satellite' ? selectedSatStreamId : undefined,
+        desktop_port: audioSource === 'desktop' ? 4400 : undefined,
         dry_run: dryRun,
         use_v2: true, // Use v2 worker pipeline (worker_new.py)
       };
@@ -1309,6 +1325,16 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
                 >
                   📡 Satellite TV
                 </button>
+                <button
+                  onClick={() => setAudioSource('desktop')}
+                  className={`flex-1 py-3 rounded-lg border-2 transition-colors ${
+                    audioSource === 'desktop'
+                      ? 'border-purple-500 bg-purple-900/50'
+                      : 'border-gray-600 hover:border-gray-500'
+                  }`}
+                >
+                  🎬 Prime Video
+                </button>
               </div>
             </div>
 
@@ -1436,6 +1462,26 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
               </div>
             )}
 
+            {/* Prime Video Options */}
+            {audioSource === 'desktop' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Prime Video URL <span className="text-gray-500">(optional — you can navigate in the VNC window)</span></label>
+                  <input
+                    type="text"
+                    value={primeUrl}
+                    onChange={e => setPrimeUrl(e.target.value)}
+                    placeholder="https://www.amazon.com/video/detail/..."
+                    className="w-full bg-gray-700 rounded px-3 py-2"
+                  />
+                </div>
+                <div className="bg-purple-900/30 border border-purple-700 rounded-lg p-3 text-sm text-purple-200 space-y-1">
+                  <p className="font-medium">🎬 How it works</p>
+                  <p className="text-xs text-purple-300">Chrome opens on the EC2 server. After launch, click <strong>Open VNC</strong> in the session monitor to see and control the browser — navigate to your show and press play. Audio streams automatically to the voice trader.</p>
+                </div>
+              </div>
+            )}
+
             {/* Dry Run Toggle */}
             <div className="flex items-center gap-3">
               <input
@@ -1544,6 +1590,31 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
 
           {/* Stats Panel */}
           <StatsPanel stats={sessionStats} />
+
+          {/* VNC panel for Prime Video sessions */}
+          {sessionConfig?.audio_source === 'desktop' && (
+            <div className="bg-purple-900/30 border border-purple-700 rounded-lg px-4 py-3 flex items-center gap-4">
+              <span className="text-purple-200 text-sm font-medium">🎬 Prime Video capture running</span>
+              <button
+                onClick={() => {
+                  setPrimeVncOpen(true);
+                  window.open(`${EC2_BASE}/prime/novnc`, 'prime-vnc',
+                    'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes');
+                }}
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-sm rounded font-medium transition-colors"
+              >
+                🖥️ Open VNC Viewer
+              </button>
+              <button
+                onClick={async () => {
+                  await fetch(`${EC2_BASE}/prime/stop`, { method: 'POST' });
+                }}
+                className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded transition-colors"
+              >
+                Stop Capture
+              </button>
+            </div>
+          )}
 
           {/* Config Info */}
           {sessionConfig && (

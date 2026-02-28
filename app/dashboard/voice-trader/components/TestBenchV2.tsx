@@ -1002,6 +1002,14 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
     setLaunching(true);
     setError(null);
 
+    // Open VNC window synchronously NOW (must be during the user-gesture to bypass
+    // popup blockers — async callbacks are not treated as user-initiated).
+    let vncWindow: Window | null = null;
+    if (audioSource === 'desktop') {
+      vncWindow = window.open('about:blank', 'prime-vnc',
+        'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes');
+    }
+
     try {
       // For desktop (Prime Video), spin up the capture pipeline first
       if (audioSource === 'desktop') {
@@ -1012,7 +1020,12 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
         });
         if (!primeRes.ok) {
           const err = await primeRes.json().catch(() => ({})) as Record<string, unknown>;
+          if (vncWindow && !vncWindow.closed) vncWindow.close();
           throw new Error(`Prime pipeline failed to start: ${err.errors || primeRes.status}`);
+        }
+        // Pipeline started — navigate the pre-opened VNC window to the viewer
+        if (vncWindow && !vncWindow.closed) {
+          vncWindow.location.href = `${EC2_BASE}/prime/novnc`;
         }
       }
 

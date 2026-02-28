@@ -1498,7 +1498,12 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
     }
 
     // For Prime Video: start capture pipeline first
+    // Open the VNC window synchronously NOW (while in user-gesture context) so browsers
+    // don't block it as a popup from an async callback.
+    let vncWindow: Window | null = null;
     if (audioSource === 'desktop') {
+      vncWindow = window.open('about:blank', 'prime-vnc',
+        'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes');
       try {
         const primeRes = await fetch(`${EC2_BASE}/prime/start`, {
           method: 'POST',
@@ -1507,10 +1512,16 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         });
         if (!primeRes.ok) {
           const err = await primeRes.json().catch(() => ({})) as Record<string, unknown>;
+          if (vncWindow && !vncWindow.closed) vncWindow.close();
           setError(`Prime pipeline failed: ${err.errors || primeRes.status}`);
           return;
         }
+        // Pipeline started — navigate the pre-opened VNC window to the viewer
+        if (vncWindow && !vncWindow.closed) {
+          vncWindow.location.href = `${EC2_BASE}/prime/novnc`;
+        }
       } catch (e) {
+        if (vncWindow && !vncWindow.closed) vncWindow.close();
         setError(`Could not start Prime capture: ${(e as Error).message}`);
         return;
       }

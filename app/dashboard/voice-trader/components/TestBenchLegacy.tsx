@@ -2569,7 +2569,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             {/* Detection Pause + Q&A Status Indicators */}
             {isCallActive && (
               <div className="mt-2 flex items-center gap-2 flex-wrap">
-                {/* Detection Pause Button - prominent toggle */}
+                {/* Trading Toggle - system-wide on/off; starts OFF so user can identify speakers first */}
                 <button
                   onClick={() => {
                     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -2585,13 +2585,13 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                       : 'bg-green-600 hover:bg-green-500'
                   }`}
                   title={containerState?.detection_paused 
-                    ? "Detection PAUSED - Click to resume word detection" 
-                    : "Word detection ACTIVE - Click to pause"}
+                    ? "Trading OFF - Click to enable trading" 
+                    : "Trading ON - Click to pause trading"}
                 >
-                  {containerState?.detection_paused ? '⏸️ Detection Paused' : '▶️ Detecting'}
+                  {containerState?.detection_paused ? '⏸️ Trading Off' : '▶️ Trading On'}
                 </button>
                 
-                {/* Suspend Trading Button - Emergency stop */}
+                {/* Dry Run Toggle - Emergency stop / simulate mode */}
                 <button
                   onClick={() => {
                     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -2607,10 +2607,10 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                       : 'bg-blue-600 hover:bg-blue-500'
                   }`}
                   title={containerState?.dry_run 
-                    ? "TRADING SUSPENDED (dry run) - Click to enable live trading" 
-                    : "Live trading enabled - Click to suspend"}
+                    ? "DRY RUN - trades are simulated, no real orders. Click to go live" 
+                    : "LIVE - real orders will be placed. Click to switch to dry run"}
                 >
-                  {containerState?.dry_run ? '🚫 Trading Off' : '💰 Trading On'}
+                  {containerState?.dry_run ? '🧪 Dry Run' : '💰 Live'}
                 </button>
                 
                 {/* Q&A Detection Toggle - show current state and allow toggle */}

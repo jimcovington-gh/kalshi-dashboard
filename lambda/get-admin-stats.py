@@ -320,9 +320,7 @@ def get_upcoming_mention_events():
             response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
             items.extend(response.get('Items', []))
         
-        # Filter to events that haven't resolved yet (strike_date > now)
-        # Using strike_date (not start_date) so active events that already started
-        # but haven't resolved remain visible.
+        # Filter to events that haven't started yet (start_date > now)
         upcoming = []
         for item in items:
             start_date_str = item.get('start_date', '')
@@ -332,10 +330,8 @@ def get_upcoming_mention_events():
             
             try:
                 start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00'))
-                # Determine cutoff: use strike_date if present, else fall back to start_date
-                cutoff_str = strike_date_str or start_date_str
-                cutoff = datetime.fromisoformat(cutoff_str.replace('Z', '+00:00'))
-                if cutoff > now:
+                # Only show events that haven't started yet
+                if start_date > now:
                     hours_until_start = round((start_date - now).total_seconds() / 3600, 1)
                     upcoming.append({
                         'event_ticker': item.get('event_ticker', ''),

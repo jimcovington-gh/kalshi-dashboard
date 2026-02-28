@@ -192,6 +192,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [selectedSatStreamId, setSelectedSatStreamId] = useState<number | null>(null);
   const [scheduledStart, setScheduledStart] = useState('');
   const [dryRun, setDryRun] = useState(false);  // Dry run mode - no real trades
+  const [showStarted, setShowStarted] = useState(false);  // Toggle to show already-started events
   
   // Launch state
   const [launching, setLaunching] = useState(false);
@@ -2156,12 +2157,23 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         </div>
         
         {/* Upcoming Events Section */}
-        <h2 className="text-xl font-bold mb-4">📅 Upcoming Events</h2>
-        {events.length === 0 ? (
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">📅 Upcoming Events</h2>
+          <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showStarted}
+              onChange={(e) => setShowStarted(e.target.checked)}
+              className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+            />
+            Show started (last 24h)
+          </label>
+        </div>
+        {events.filter(e => showStarted || (e.hours_until_start ?? 0) > 0).length === 0 ? (
           <div className="text-gray-400">No upcoming mention events found.</div>
         ) : (
           <div className="grid gap-4">
-            {events.map(event => (
+            {events.filter(e => showStarted || (e.hours_until_start ?? 0) > 0).map(event => (
               <div
                 key={event.event_ticker}
                 className="bg-gray-800 rounded-lg p-4 hover:bg-gray-700 cursor-pointer transition"

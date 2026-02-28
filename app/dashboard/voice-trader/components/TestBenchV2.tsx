@@ -568,6 +568,7 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
   const [ec2Status, setEc2Status] = useState<EC2Status | null>(null);
   const [rivaStatus, setRivaStatus] = useState<RivaStatus | null>(null);
   const [ec2Loading, setEc2Loading] = useState(false);
+  const [showStarted, setShowStarted] = useState(false);  // Toggle to show already-started events
   
   // Audio playback
   const [audioMuted, setAudioMuted] = useState(false);
@@ -1182,12 +1183,23 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
           </div>
 
           {/* Events Grid */}
-          <h2 className="text-xl font-semibold mb-4">📅 Upcoming Events</h2>
-          {events.length === 0 ? (
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">📅 Upcoming Events</h2>
+            <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showStarted}
+                onChange={(e) => setShowStarted(e.target.checked)}
+                className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+              />
+              Show started (last 24h)
+            </label>
+          </div>
+          {events.filter(e => showStarted || e.hours_until_start > 0).length === 0 ? (
             <div className="text-gray-500 text-center py-8">No events available</div>
           ) : (
             <div className="grid gap-4">
-              {events.map(event => (
+              {events.filter(e => showStarted || e.hours_until_start > 0).map(event => (
                 <div
                   key={event.event_ticker}
                   onClick={() => handleSelectEvent(event)}

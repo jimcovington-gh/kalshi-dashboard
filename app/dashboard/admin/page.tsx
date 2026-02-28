@@ -763,7 +763,7 @@ export default function AdminPage() {
 
         {/* Upcoming Mention Events */}
         <div className="bg-white rounded-lg shadow p-4 order-2">
-          <h2 className="text-xl font-bold text-gray-900 mb-2">⏰ Upcoming Mentions (24h)</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">⏰ Upcoming Mentions</h2>
           {adminStats && adminStats.upcoming_mention_events && adminStats.upcoming_mention_events.length > 0 ? (
             <table className="min-w-full text-base">
               <thead className="bg-gray-50">

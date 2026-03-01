@@ -535,7 +535,7 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
-  const [primeUrl, setPrimeUrl] = useState('https://www.amazon.com/gp/video/storefront');
+  const [primeUrl, setPrimeUrl] = useState('https://www.amazon.com/gp/video/livetv');
   const [primeVncOpen, setPrimeVncOpen] = useState(false);
   const [paramountUrl, setParamountUrl] = useState('https://www.paramountplus.com/live-tv/');
   const [paramountVncOpen, setParamountVncOpen] = useState(false);
@@ -1516,14 +1516,15 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
             {audioSource === 'desktop' && (
               <div className="space-y-3">
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Prime Video URL <span className="text-gray-500">(optional — you can navigate in the VNC window)</span></label>
-                  <input
-                    type="text"
+                  <label className="block text-sm text-gray-400 mb-1">URL to open</label>
+                  <select
                     value={primeUrl}
                     onChange={e => setPrimeUrl(e.target.value)}
-                    placeholder="https://www.amazon.com/video/detail/..."
-                    className="w-full bg-gray-700 rounded px-3 py-2"
-                  />
+                    className="w-full bg-gray-700 rounded px-3 py-2 text-white"
+                  >
+                    <option value="https://www.amazon.com/gp/video/livetv">🎬 AWS Live TV</option>
+                    <option value="https://www.paramountplus.com/live-tv/">📺 Paramount+ Live TV</option>
+                  </select>
                 </div>
                 <div className="bg-purple-900/30 border border-purple-700 rounded-lg p-3 text-sm text-purple-200 space-y-1">
                   <p className="font-medium">🎬 How it works</p>

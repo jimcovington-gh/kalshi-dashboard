@@ -73,6 +73,7 @@ interface SessionConfig {
   dry_run: boolean;
   audio_source: string;
   stt_provider: string;
+  desktop_port?: number;
 }
 
 /** V2 Full State (from WebSocket) */
@@ -530,12 +531,14 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
   const [selectedEvent, setSelectedEvent] = useState<MentionEvent | null>(null);
   
   // Setup form
-  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop' | 'paramount'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
   const [primeUrl, setPrimeUrl] = useState('https://www.amazon.com/gp/video/storefront');
   const [primeVncOpen, setPrimeVncOpen] = useState(false);
+  const [paramountUrl, setParamountUrl] = useState('https://www.paramountplus.com/live-tv/');
+  const [paramountVncOpen, setParamountVncOpen] = useState(false);
   const [dryRun, setDryRun] = useState(true);
   const [launching, setLaunching] = useState(false);
 
@@ -1005,8 +1008,8 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
     // Open VNC window synchronously NOW (must be during the user-gesture to bypass
     // popup blockers — async callbacks are not treated as user-initiated).
     let vncWindow: Window | null = null;
-    if (audioSource === 'desktop') {
-      vncWindow = window.open('about:blank', 'prime-vnc',
+    if (audioSource === 'desktop' || audioSource === 'paramount') {
+      vncWindow = window.open('about:blank', audioSource === 'paramount' ? 'paramount-vnc' : 'prime-vnc',
         'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes');
       if (!vncWindow) {
         // Popup was blocked by the browser — user will need to manually click Open VNC
@@ -1015,7 +1018,7 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
     }
 
     try {
-      // For desktop (Prime Video), spin up the capture pipeline first
+      // For desktop (Prime Video), spin up the Prime capture pipeline first
       if (audioSource === 'desktop') {
         const primeRes = await fetch(`${EC2_BASE}/prime/start`, {
           method: 'POST',
@@ -1027,21 +1030,41 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
           if (vncWindow && !vncWindow.closed) vncWindow.close();
           throw new Error(`Prime pipeline failed to start: ${err.errors || primeRes.status}`);
         }
-        // Pipeline started — navigate the pre-opened VNC window to the viewer
         if (vncWindow && !vncWindow.closed) {
           vncWindow.location.href = `${EC2_BASE}/prime/novnc`;
+        }
+      }
+
+      // For Paramount+, spin up the Paramount capture pipeline first
+      if (audioSource === 'paramount') {
+        const paramountRes = await fetch(`${EC2_BASE}/paramount/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: paramountUrl || undefined, desktop_port: 4401 }),
+        });
+        if (!paramountRes.ok) {
+          const err = await paramountRes.json().catch(() => ({})) as Record<string, unknown>;
+          if (vncWindow && !vncWindow.closed) vncWindow.close();
+          throw new Error(`Paramount pipeline failed to start: ${err.errors || paramountRes.status}`);
+        }
+        if (vncWindow && !vncWindow.closed) {
+          vncWindow.location.href = `${EC2_BASE}/paramount/novnc`;
         }
       }
 
       const config = {
         session_id: selectedEvent.event_ticker,
         event_ticker: selectedEvent.event_ticker,
-        audio_source: audioSource === 'satellite' ? 'satellite_transcript' : audioSource,
+        audio_source: audioSource === 'satellite' ? 'satellite_transcript'
+                    : audioSource === 'paramount' ? 'desktop'
+                    : audioSource,
         phone_number: audioSource === 'phone' ? phoneNumber : undefined,
         passcode: audioSource === 'phone' ? passcode : undefined,
         stream_url: audioSource === 'web' ? webUrl : undefined,
         satellite_stream_id: audioSource === 'satellite' ? selectedSatStreamId : undefined,
-        desktop_port: audioSource === 'desktop' ? 4400 : undefined,
+        desktop_port: audioSource === 'desktop' ? 4400
+                    : audioSource === 'paramount' ? 4401
+                    : undefined,
         dry_run: dryRun,
         use_v2: true, // Use v2 worker pipeline (worker_new.py)
       };
@@ -1352,6 +1375,16 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
                 >
                   🎬 Prime Video
                 </button>
+                <button
+                  onClick={() => setAudioSource('paramount')}
+                  className={`flex-1 py-3 rounded-lg border-2 transition-colors ${
+                    audioSource === 'paramount'
+                      ? 'border-blue-500 bg-blue-900/50'
+                      : 'border-gray-600 hover:border-gray-500'
+                  }`}
+                >
+                  📺 Paramount+
+                </button>
               </div>
             </div>
 
@@ -1499,6 +1532,26 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
               </div>
             )}
 
+            {/* Paramount+ Options */}
+            {audioSource === 'paramount' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Paramount+ URL <span className="text-gray-500">(optional — you can navigate in the VNC window)</span></label>
+                  <input
+                    type="text"
+                    value={paramountUrl}
+                    onChange={e => setParamountUrl(e.target.value)}
+                    placeholder="https://www.paramountplus.com/live-tv/"
+                    className="w-full bg-gray-700 rounded px-3 py-2"
+                  />
+                </div>
+                <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-3 text-sm text-blue-200 space-y-1">
+                  <p className="font-medium">📺 How it works</p>
+                  <p className="text-xs text-blue-300">Chrome opens on the EC2 server on a separate display. After launch, click <strong>Open VNC</strong> to see and control the browser — navigate to your live event and press play. Audio streams automatically to the voice trader.</p>
+                </div>
+              </div>
+            )}
+
             {/* Dry Run Toggle */}
             <div className="flex items-center gap-3">
               <input
@@ -1623,9 +1676,30 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
                 🖥️ Open VNC Viewer
               </button>
               <button
-                onClick={async () => {
-                  await fetch(`${EC2_BASE}/prime/stop`, { method: 'POST' });
+                onClick={async () => { await fetch(`${EC2_BASE}/prime/stop`, { method: 'POST' }); }}
+                className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded transition-colors"
+              >
+                Stop Capture
+              </button>
+            </div>
+          )}
+
+          {/* VNC panel for Paramount+ sessions */}
+          {sessionConfig?.desktop_port === 4401 && (
+            <div className="bg-blue-900/30 border border-blue-700 rounded-lg px-4 py-3 flex items-center gap-4">
+              <span className="text-blue-200 text-sm font-medium">📺 Paramount+ capture running</span>
+              <button
+                onClick={() => {
+                  setParamountVncOpen(true);
+                  window.open(`${EC2_BASE}/paramount/novnc`, 'paramount-vnc',
+                    'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes');
                 }}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded font-medium transition-colors"
+              >
+                🖥️ Open VNC Viewer
+              </button>
+              <button
+                onClick={async () => { await fetch(`${EC2_BASE}/paramount/stop`, { method: 'POST' }); }}
                 className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded transition-colors"
               >
                 Stop Capture

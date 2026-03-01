@@ -534,7 +534,7 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
-  const [primeUrl, setPrimeUrl] = useState('');
+  const [primeUrl, setPrimeUrl] = useState('https://www.amazon.com/gp/video/storefront');
   const [primeVncOpen, setPrimeVncOpen] = useState(false);
   const [dryRun, setDryRun] = useState(true);
   const [launching, setLaunching] = useState(false);
@@ -1008,6 +1008,10 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
     if (audioSource === 'desktop') {
       vncWindow = window.open('about:blank', 'prime-vnc',
         'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes');
+      if (!vncWindow) {
+        // Popup was blocked by the browser — user will need to manually click Open VNC
+        addSystemLog('VNC popup was blocked by your browser. Allow popups from this site in your browser settings, then click \"Open VNC Viewer\" to view the browser.', 'warning');
+      }
     }
 
     try {

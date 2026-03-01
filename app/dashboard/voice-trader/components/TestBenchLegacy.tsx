@@ -183,7 +183,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
-  const [primeUrl, setPrimeUrl] = useState('');
+  const [primeUrl, setPrimeUrl] = useState('https://www.amazon.com/gp/video/storefront');
 
   // Satellite TV channel picker
   interface SatStream { stream_id: number; channel_name: string; status: string; thumb_url: string; }
@@ -1504,6 +1504,14 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
     if (audioSource === 'desktop') {
       vncWindow = window.open('about:blank', 'prime-vnc',
         'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes');
+      if (!vncWindow) {
+        // Popup was blocked — log warning so user knows to click Open VNC manually
+        setSystemLog(prev => [...prev, {
+          timestamp: Date.now() / 1000,
+          message: 'VNC popup was blocked. Allow popups from this site in Chrome settings, then click "Open VNC Viewer".',
+          level: 'warning' as const
+        }]);
+      }
       try {
         const primeRes = await fetch(`${EC2_BASE}/prime/start`, {
           method: 'POST',
@@ -2928,12 +2936,12 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                     <div className="text-[10px] text-gray-400 truncate">
                       {w.status === 'skipped'
                         ? '🚫 said'
-                        : w.status === 'success' && w.trade_result
+                        : w.status === 'success' && w.trade_result?.contracts_filled != null
                         ? (w.trade_result.realized_profit !== undefined
-                          ? `✓ ${w.trade_result.contracts_filled}@${w.trade_result.avg_buy_price?.toFixed(2)}→${w.trade_result.sell_fill_price?.toFixed(2)} +$${w.trade_result.realized_profit?.toFixed(2)}`
-                          : `✓ ${w.trade_result.contracts_filled}@${w.trade_result.avg_buy_price?.toFixed(2)} (sell pending)`)
-                        : w.status === 'pending' && w.trade_result
-                        ? `⏳ ${w.trade_result.contracts_filled}@${w.trade_result.avg_buy_price?.toFixed(2)} ($${w.trade_result.cost?.toFixed(2)})`
+                          ? `✓ ${w.trade_result.contracts_filled}@${w.trade_result.avg_buy_price?.toFixed(2) ?? '?'}→${w.trade_result.sell_fill_price?.toFixed(2) ?? '?'} +$${w.trade_result.realized_profit?.toFixed(2) ?? '?'}`
+                          : `✓ ${w.trade_result.contracts_filled}@${w.trade_result.avg_buy_price?.toFixed(2) ?? '?'} (sell pending)`)
+                        : w.status === 'pending' && w.trade_result?.contracts_filled != null
+                        ? `⏳ ${w.trade_result.contracts_filled}@${w.trade_result.avg_buy_price?.toFixed(2) ?? '?'} ($${w.trade_result.cost?.toFixed(2) ?? '?'})`
                         : w.status && w.triggered_at
                         ? `${statusIcon} ${formatTime(w.triggered_at)}`
                         : w.no_purchased

@@ -179,11 +179,13 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [sessionId, setSessionId] = useState<string | null>(null);
   
   // Setup form state
-  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'nbc_multi' | 'desktop' | 'paramount' | 'netflix'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
   const [primeUrl, setPrimeUrl] = useState('https://www.amazon.com/gp/video/storefront');
+  const [paramountUrl, setParamountUrl] = useState('https://www.paramountplus.com/live-tv/');
+  const [netflixUrl, setNetflixUrl] = useState('https://www.netflix.com/browse');
 
   // Satellite TV channel picker
   interface SatStream { stream_id: number; channel_name: string; status: string; thumb_url: string; }
@@ -1497,40 +1499,46 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       return;
     }
 
-    // For Prime Video: start capture pipeline first
+    // For desktop pipelines (Prime/Paramount/Netflix): start capture pipeline first
     // Open the VNC window synchronously NOW (while in user-gesture context) so browsers
     // don't block it as a popup from an async callback.
     let vncWindow: Window | null = null;
-    if (audioSource === 'desktop') {
-      vncWindow = window.open('about:blank', 'prime-vnc',
+    if (audioSource === 'desktop' || audioSource === 'paramount' || audioSource === 'netflix') {
+      const vncName = audioSource === 'paramount' ? 'paramount-vnc' : audioSource === 'netflix' ? 'netflix-vnc' : 'prime-vnc';
+      vncWindow = window.open('about:blank', vncName,
         'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes');
       if (!vncWindow) {
-        // Popup was blocked — log warning so user knows to click Open VNC manually
         setSystemLog(prev => [...prev, {
           timestamp: Date.now() / 1000,
           message: 'VNC popup was blocked. Allow popups from this site in Chrome settings, then click "Open VNC Viewer".',
           level: 'warning' as const
         }]);
       }
+
+      const pipelineConfig = audioSource === 'paramount'
+        ? { endpoint: '/paramount/start', url: paramountUrl, port: 4401, novnc: '/paramount/novnc', label: 'Paramount' }
+        : audioSource === 'netflix'
+        ? { endpoint: '/netflix/start', url: netflixUrl, port: 4403, novnc: '/netflix/novnc', label: 'Netflix' }
+        : { endpoint: '/prime/start', url: primeUrl, port: 4400, novnc: '/prime/novnc', label: 'Prime' };
+
       try {
-        const primeRes = await fetch(`${EC2_BASE}/prime/start`, {
+        const pipelineRes = await fetch(`${EC2_BASE}${pipelineConfig.endpoint}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: primeUrl || undefined, desktop_port: 4400 }),
+          body: JSON.stringify({ url: pipelineConfig.url || undefined, desktop_port: pipelineConfig.port }),
         });
-        if (!primeRes.ok) {
-          const err = await primeRes.json().catch(() => ({})) as Record<string, unknown>;
+        if (!pipelineRes.ok) {
+          const err = await pipelineRes.json().catch(() => ({})) as Record<string, unknown>;
           if (vncWindow && !vncWindow.closed) vncWindow.close();
-          setError(`Prime pipeline failed: ${err.errors || primeRes.status}`);
+          setError(`${pipelineConfig.label} pipeline failed: ${err.errors || pipelineRes.status}`);
           return;
         }
-        // Pipeline started — navigate the pre-opened VNC window to the viewer
         if (vncWindow && !vncWindow.closed) {
-          vncWindow.location.href = `${EC2_BASE}/prime/novnc`;
+          vncWindow.location.href = `${EC2_BASE}${pipelineConfig.novnc}`;
         }
       } catch (e) {
         if (vncWindow && !vncWindow.closed) vncWindow.close();
-        setError(`Could not start Prime capture: ${(e as Error).message}`);
+        setError(`Could not start ${pipelineConfig.label} capture: ${(e as Error).message}`);
         return;
       }
     }
@@ -1566,8 +1574,17 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         session_id: selectedEvent.event_ticker,  // Required by EC2 API
         event_ticker: selectedEvent.event_ticker,
         user_name: 'jimc',  // TODO: Get from auth
-        audio_source: audioSource === 'satellite' ? 'satellite_transcript' : audioSource,
+        audio_source: audioSource === 'satellite' ? 'satellite_transcript'
+                    : audioSource === 'nbc_multi' ? 'satellite_transcript'
+                    : audioSource === 'paramount' ? 'desktop'
+                    : audioSource === 'netflix' ? 'desktop'
+                    : audioSource,
       };
+
+      // NBC Multi: tell voice trader to auto-start the NBC supervisor
+      if (audioSource === 'nbc_multi') {
+        body.nbc_transcription_mode = 'parallel';
+      }
       
       // Add audio source specific fields
       if (audioSource === 'phone') {
@@ -1581,6 +1598,10 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         body.satellite_stream_id = selectedSatStreamId;
       } else if (audioSource === 'desktop') {
         body.desktop_port = 4400;
+      } else if (audioSource === 'paramount') {
+        body.desktop_port = 4401;
+      } else if (audioSource === 'netflix') {
+        body.desktop_port = 4403;
       }
       
       // Always enable diarization so speaker panel works
@@ -2341,10 +2362,28 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               📡 Satellite TV
             </button>
             <button
+              className={`px-4 py-2 rounded ${audioSource === 'nbc_multi' ? 'bg-green-600' : 'bg-gray-700'}`}
+              onClick={() => setAudioSource('nbc_multi')}
+            >
+              📡 NBC Multi (4ch)
+            </button>
+            <button
               className={`px-4 py-2 rounded ${audioSource === 'desktop' ? 'bg-purple-600' : 'bg-gray-700'}`}
               onClick={() => setAudioSource('desktop')}
             >
               🎬 Prime Video
+            </button>
+            <button
+              className={`px-4 py-2 rounded ${audioSource === 'paramount' ? 'bg-blue-600' : 'bg-gray-700'}`}
+              onClick={() => setAudioSource('paramount')}
+            >
+              📺 Paramount+
+            </button>
+            <button
+              className={`px-4 py-2 rounded ${audioSource === 'netflix' ? 'bg-red-600' : 'bg-gray-700'}`}
+              onClick={() => setAudioSource('netflix')}
+            >
+              🎬 Netflix
             </button>
 
           </div>
@@ -2425,6 +2464,44 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               <div className="bg-purple-900/30 border border-purple-700 rounded-lg p-3 text-sm text-purple-200 space-y-1">
                 <p className="font-medium">🎬 How it works</p>
                 <p className="text-xs text-purple-300">Chrome opens on the EC2 server. After launch, click <strong>Open VNC</strong> in the session monitor to see and control the browser — navigate to your show and press play. Audio streams automatically to the voice trader.</p>
+              </div>
+            </div>
+          )}
+
+          {audioSource === 'paramount' && (
+            <div className="space-y-3 mb-6">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Paramount+ URL <span className="text-gray-500">(optional — you can navigate in the VNC window)</span></label>
+                <input
+                  type="text"
+                  value={paramountUrl}
+                  onChange={e => setParamountUrl(e.target.value)}
+                  placeholder="https://www.paramountplus.com/live-tv/"
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-white"
+                />
+              </div>
+              <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-3 text-sm text-blue-200 space-y-1">
+                <p className="font-medium">📺 How it works</p>
+                <p className="text-xs text-blue-300">Chrome opens on the EC2 server on a separate display. After launch, click <strong>Open VNC</strong> to see and control the browser — navigate to your live event and press play. Audio streams automatically to the voice trader.</p>
+              </div>
+            </div>
+          )}
+
+          {audioSource === 'netflix' && (
+            <div className="space-y-3 mb-6">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Netflix URL <span className="text-gray-500">(optional — you can navigate in the VNC window)</span></label>
+                <input
+                  type="text"
+                  value={netflixUrl}
+                  onChange={e => setNetflixUrl(e.target.value)}
+                  placeholder="https://www.netflix.com/browse"
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-white"
+                />
+              </div>
+              <div className="bg-red-900/30 border border-red-700 rounded-lg p-3 text-sm text-red-200 space-y-1">
+                <p className="font-medium">🎬 How it works</p>
+                <p className="text-xs text-red-300">Chrome opens on the EC2 server on a separate display. After launch, click <strong>Open VNC</strong> to see and control the browser — navigate to your show and press play. Audio streams automatically to the voice trader.</p>
               </div>
             </div>
           )}
@@ -2621,6 +2698,46 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             </button>
             <button
               onClick={async () => { await fetch(`${EC2_BASE}/prime/stop`, { method: 'POST' }); }}
+              className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
+            >
+              Stop Capture
+            </button>
+          </div>
+        )}
+
+        {/* PARAMOUNT+ BANNER */}
+        {audioSource === 'paramount' && (
+          <div className="bg-blue-900/40 border border-blue-700 px-3 py-2 rounded-lg mb-2 flex items-center gap-3 text-sm">
+            <span className="text-blue-200 font-medium">📺 Paramount+ capture running</span>
+            <button
+              onClick={() => window.open(`${EC2_BASE}/paramount/novnc`, 'paramount-vnc',
+                'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes')}
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium transition-colors"
+            >
+              🖥️ Open VNC Viewer
+            </button>
+            <button
+              onClick={async () => { await fetch(`${EC2_BASE}/paramount/stop`, { method: 'POST' }); }}
+              className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
+            >
+              Stop Capture
+            </button>
+          </div>
+        )}
+
+        {/* NETFLIX BANNER */}
+        {audioSource === 'netflix' && (
+          <div className="bg-red-900/40 border border-red-700 px-3 py-2 rounded-lg mb-2 flex items-center gap-3 text-sm">
+            <span className="text-red-200 font-medium">🎬 Netflix capture running</span>
+            <button
+              onClick={() => window.open(`${EC2_BASE}/netflix/novnc`, 'netflix-vnc',
+                'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes')}
+              className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white rounded font-medium transition-colors"
+            >
+              🖥️ Open VNC Viewer
+            </button>
+            <button
+              onClick={async () => { await fetch(`${EC2_BASE}/netflix/stop`, { method: 'POST' }); }}
               className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
             >
               Stop Capture

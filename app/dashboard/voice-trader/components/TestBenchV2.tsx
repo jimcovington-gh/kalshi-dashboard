@@ -531,7 +531,7 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
   const [selectedEvent, setSelectedEvent] = useState<MentionEvent | null>(null);
   
   // Setup form
-  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop' | 'paramount'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop' | 'paramount' | 'netflix'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
@@ -539,6 +539,8 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
   const [primeVncOpen, setPrimeVncOpen] = useState(false);
   const [paramountUrl, setParamountUrl] = useState('https://www.paramountplus.com/live-tv/');
   const [paramountVncOpen, setParamountVncOpen] = useState(false);
+  const [netflixUrl, setNetflixUrl] = useState('https://www.netflix.com/browse');
+  const [netflixVncOpen, setNetflixVncOpen] = useState(false);
   const [dryRun, setDryRun] = useState(true);
   const [launching, setLaunching] = useState(false);
 
@@ -1008,8 +1010,8 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
     // Open VNC window synchronously NOW (must be during the user-gesture to bypass
     // popup blockers — async callbacks are not treated as user-initiated).
     let vncWindow: Window | null = null;
-    if (audioSource === 'desktop' || audioSource === 'paramount') {
-      vncWindow = window.open('about:blank', audioSource === 'paramount' ? 'paramount-vnc' : 'prime-vnc',
+    if (audioSource === 'desktop' || audioSource === 'paramount' || audioSource === 'netflix') {
+      vncWindow = window.open('about:blank', audioSource === 'paramount' ? 'paramount-vnc' : audioSource === 'netflix' ? 'netflix-vnc' : 'prime-vnc',
         'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes');
       if (!vncWindow) {
         // Popup was blocked by the browser — user will need to manually click Open VNC
@@ -1052,11 +1054,29 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
         }
       }
 
+      // For Netflix, spin up the Netflix capture pipeline first
+      if (audioSource === 'netflix') {
+        const netflixRes = await fetch(`${EC2_BASE}/netflix/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: netflixUrl || undefined, desktop_port: 4403 }),
+        });
+        if (!netflixRes.ok) {
+          const err = await netflixRes.json().catch(() => ({})) as Record<string, unknown>;
+          if (vncWindow && !vncWindow.closed) vncWindow.close();
+          throw new Error(`Netflix pipeline failed to start: ${err.errors || netflixRes.status}`);
+        }
+        if (vncWindow && !vncWindow.closed) {
+          vncWindow.location.href = `${EC2_BASE}/netflix/novnc`;
+        }
+      }
+
       const config = {
         session_id: selectedEvent.event_ticker,
         event_ticker: selectedEvent.event_ticker,
         audio_source: audioSource === 'satellite' ? 'satellite_transcript'
                     : audioSource === 'paramount' ? 'desktop'
+                    : audioSource === 'netflix' ? 'desktop'
                     : audioSource,
         phone_number: audioSource === 'phone' ? phoneNumber : undefined,
         passcode: audioSource === 'phone' ? passcode : undefined,
@@ -1064,6 +1084,7 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
         satellite_stream_id: audioSource === 'satellite' ? selectedSatStreamId : undefined,
         desktop_port: audioSource === 'desktop' ? 4400
                     : audioSource === 'paramount' ? 4401
+                    : audioSource === 'netflix' ? 4403
                     : undefined,
         dry_run: dryRun,
         use_v2: true, // Use v2 worker pipeline (worker_new.py)
@@ -1385,6 +1406,16 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
                 >
                   📺 Paramount+
                 </button>
+                <button
+                  onClick={() => setAudioSource('netflix')}
+                  className={`flex-1 py-3 rounded-lg border-2 transition-colors ${
+                    audioSource === 'netflix'
+                      ? 'border-red-500 bg-red-900/50'
+                      : 'border-gray-600 hover:border-gray-500'
+                  }`}
+                >
+                  🎬 Netflix
+                </button>
               </div>
             </div>
 
@@ -1553,6 +1584,26 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
               </div>
             )}
 
+            {/* Netflix Options */}
+            {audioSource === 'netflix' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Netflix URL <span className="text-gray-500">(optional — you can navigate in the VNC window)</span></label>
+                  <input
+                    type="text"
+                    value={netflixUrl}
+                    onChange={e => setNetflixUrl(e.target.value)}
+                    placeholder="https://www.netflix.com/browse"
+                    className="w-full bg-gray-700 rounded px-3 py-2"
+                  />
+                </div>
+                <div className="bg-red-900/30 border border-red-700 rounded-lg p-3 text-sm text-red-200 space-y-1">
+                  <p className="font-medium">🎬 How it works</p>
+                  <p className="text-xs text-red-300">Chrome opens on the EC2 server on a separate display. After launch, click <strong>Open VNC</strong> to see and control the browser — navigate to your show and press play. Audio streams automatically to the voice trader.</p>
+                </div>
+              </div>
+            )}
+
             {/* Dry Run Toggle */}
             <div className="flex items-center gap-3">
               <input
@@ -1701,6 +1752,29 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
               </button>
               <button
                 onClick={async () => { await fetch(`${EC2_BASE}/paramount/stop`, { method: 'POST' }); }}
+                className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded transition-colors"
+              >
+                Stop Capture
+              </button>
+            </div>
+          )}
+
+          {/* VNC panel for Netflix sessions */}
+          {sessionConfig?.desktop_port === 4403 && (
+            <div className="bg-red-900/30 border border-red-700 rounded-lg px-4 py-3 flex items-center gap-4">
+              <span className="text-red-200 text-sm font-medium">🎬 Netflix capture running</span>
+              <button
+                onClick={() => {
+                  setNetflixVncOpen(true);
+                  window.open(`${EC2_BASE}/netflix/novnc`, 'netflix-vnc',
+                    'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes');
+                }}
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-sm rounded font-medium transition-colors"
+              >
+                🖥️ Open VNC Viewer
+              </button>
+              <button
+                onClick={async () => { await fetch(`${EC2_BASE}/netflix/stop`, { method: 'POST' }); }}
                 className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded transition-colors"
               >
                 Stop Capture

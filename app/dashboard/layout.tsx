@@ -20,6 +20,8 @@ const tabs = [
     base: 'text-orange-600', active: 'text-orange-700 border-orange-500' },
   { href: '/dashboard/ai-chat', label: '🤖 AI', 
     base: 'text-indigo-600', active: 'text-indigo-700 border-indigo-500' },
+  { href: '/dashboard/satellite', label: '📡 Satellite', 
+    base: 'text-cyan-600', active: 'text-cyan-700 border-cyan-500' },
 ];
 
 export default function DashboardLayout({

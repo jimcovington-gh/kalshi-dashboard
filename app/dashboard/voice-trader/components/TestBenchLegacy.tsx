@@ -3366,7 +3366,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             {/* Finals panel — scrolls only when a new final arrives */}
             <div
               ref={finalsScrollRef}
-              className="text-xs font-mono overflow-y-auto h-52 space-y-0.5"
+              className="text-xs font-mono overflow-y-auto h-36 space-y-0.5"
             >
               {finalSegments.slice(-100).map(seg => {
                 const time = seg.timestamp ? new Date(seg.timestamp * 1000).toLocaleTimeString() : '';
@@ -3387,7 +3387,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             </div>
 
             {/* Partial — ratcheted: only grows, never shrinks, fixed height, never reflows page */}
-            <div className="border-t border-gray-700 pt-1 h-10 overflow-hidden">
+            <div className="border-t border-gray-700 pt-1 h-24 overflow-hidden">
               {partialDisplay ? (
                 <p className="text-xs font-mono text-gray-400 italic leading-tight m-0">{partialDisplay}</p>
               ) : (

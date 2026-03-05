@@ -3374,11 +3374,11 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               })}
             </div>
 
-            {/* Current partial — fixed height so it never reflows the page */}
-            <div className="text-xs font-mono border-t border-gray-700 pt-1 h-16 overflow-hidden">
+            {/* Current partial — show only last 8 words so backward rewrites are invisible */}
+            <div className="text-xs font-mono border-t border-gray-700 pt-1 h-6 overflow-hidden whitespace-nowrap">
               {currentPartial ? (
                 <span className="text-gray-400 italic">
-                  {currentPartial.text}
+                  {currentPartial.text.split(' ').slice(-8).join(' ')}
                   {currentPartial.latency_ms != null && (
                     <span className="text-gray-600"> [{currentPartial.latency_ms}ms]</span>
                   )}

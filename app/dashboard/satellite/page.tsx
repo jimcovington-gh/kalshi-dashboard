@@ -228,6 +228,9 @@ export default function SatellitePage() {
       }
       addLog('✅ All done — new channels loaded');
 
+      // Auto-close log popup after success
+      setTimeout(() => setLogOpen(false), 3000);
+
     } catch (e) {
       addLog(`\n❌ Error: ${e}`);
       setLogPhase('Error');

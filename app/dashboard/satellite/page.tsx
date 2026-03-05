@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 const SATELLITE_PROXY = 'https://voice.apexmarkets.us:8090';
+const WS_PROXY = SATELLITE_PROXY.replace('https:', 'wss:');
 
 const pages = [
   { id: 'streams', label: '📺 Streams', path: '/' },
@@ -20,7 +21,7 @@ interface Satellite {
 
 interface AdapterInfo {
   id: number;
-  state: string;  // "idle", "streaming", "scanning", "tuned", "motor", "error", "absent"
+  state: string;
   channel?: string;
 }
 
@@ -38,6 +39,45 @@ function formatSatLabel(s: { display_name?: string | null; nickname?: string | n
   return `${s.display_name ?? 'Unknown'} - ${lon}`;
 }
 
+// Stream a job's log via WebSocket. Returns a promise that resolves with the job status.
+function streamJobLog(
+  jobId: string,
+  onLine: (line: string) => void,
+  onStatus?: (phase: string) => void,
+): Promise<'completed' | 'failed' | 'cancelled'> {
+  return new Promise((resolve, reject) => {
+    let resolved = false;
+    const ws = new WebSocket(`${WS_PROXY}/api/ops/${jobId}/stream`);
+    let lastStatus = '';
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === 'history' && Array.isArray(msg.lines)) {
+          msg.lines.forEach((l: string) => onLine(l));
+        } else if (msg.type === 'log') {
+          onLine(msg.line);
+        } else if (msg.type === 'status') {
+          lastStatus = msg.job?.status || '';
+          if (onStatus) onStatus(lastStatus);
+          if (lastStatus === 'completed' || lastStatus === 'failed' || lastStatus === 'cancelled') {
+            resolved = true;
+            ws.close();
+            resolve(lastStatus as 'completed' | 'failed' | 'cancelled');
+          }
+        } else if (msg.type === 'done') {
+          ws.close();
+          if (!resolved) {
+            resolved = true;
+            resolve((lastStatus || 'completed') as 'completed' | 'failed' | 'cancelled');
+          }
+        }
+      } catch (_) {}
+    };
+    ws.onerror = () => { ws.close(); if (!resolved) { resolved = true; reject(new Error('Job log WebSocket error')); } };
+    ws.onclose = () => { if (!resolved) { resolved = true; resolve((lastStatus || 'failed') as 'completed' | 'failed' | 'cancelled'); } };
+  });
+}
+
 export default function SatellitePage() {
   const [activePage, setActivePage] = useState('streams');
   const [adapters, setAdapters] = useState<AdapterInfo[]>([]);
@@ -47,8 +87,16 @@ export default function SatellitePage() {
   const [confirmTarget, setConfirmTarget] = useState<Satellite | null>(null);
   const [moving, setMoving] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
+
+  // Move/scan log popup state
+  const [logOpen, setLogOpen] = useState(false);
+  const [logLines, setLogLines] = useState<string[]>([]);
+  const [logPhase, setLogPhase] = useState('');  // e.g. "Stopping streams…", "Moving dish…", "Scanning lineup…"
+  const logEndRef = useRef<HTMLDivElement | null>(null);
+
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   // Fetch satellite list once
   useEffect(() => {
@@ -58,12 +106,17 @@ export default function SatellitePage() {
       .catch(() => {});
   }, []);
 
+  // Auto-scroll log popup
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logLines]);
+
   // WebSocket for real-time adapter/dish status
   const connectWs = useCallback(() => {
     if (wsRef.current) {
       try { wsRef.current.close(); } catch (_) {}
     }
-    const ws = new WebSocket(`${SATELLITE_PROXY.replace('https:', 'wss:')}/api/ws/status`);
+    const ws = new WebSocket(`${WS_PROXY}/api/ws/status`);
     wsRef.current = ws;
 
     ws.onopen = () => setWsConnected(true);
@@ -91,24 +144,95 @@ export default function SatellitePage() {
     };
   }, [connectWs]);
 
-  // Move dish
+  const addLog = useCallback((line: string) => {
+    setLogLines(prev => [...prev, line]);
+  }, []);
+
+  // Full move flow: stop streams → move dish → lineup scan → reload channels
   const doMoveDish = async (sat: Satellite) => {
     setMoving(true);
+    setConfirmTarget(null);
+    setLogLines([]);
+    setLogOpen(true);
+
     try {
-      const res = await fetch(`${SATELLITE_PROXY}/api/ops/move-dish`, {
+      // Phase 1: Stop all active streams
+      setLogPhase('Stopping streams…');
+      addLog('⏹ Stopping all active streams…');
+      try {
+        const streamsRes = await fetch(`${SATELLITE_PROXY}/api/streams`);
+        if (streamsRes.ok) {
+          const streamsData = await streamsRes.json();
+          const active = streamsData.streams || [];
+          if (active.length > 0) {
+            await Promise.all(active.map((s: { stream_id: string }) =>
+              fetch(`${SATELLITE_PROXY}/api/streams/${s.stream_id}`, { method: 'DELETE' }).catch(() => {})
+            ));
+            addLog(`  Stopped ${active.length} stream(s)`);
+          } else {
+            addLog('  No active streams');
+          }
+        }
+      } catch (e) {
+        addLog(`  Warning: could not stop streams (${e})`);
+      }
+
+      // Phase 2: Move dish
+      setLogPhase(`Moving dish → ${formatSatLabel(sat)}`);
+      addLog(`\n📡 Moving dish to ${formatSatLabel(sat)}…`);
+      const moveRes = await fetch(`${SATELLITE_PROXY}/api/ops/move-dish`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ satellite: sat.slug }),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        alert(`Move failed: ${data.detail || res.statusText}`);
+      if (!moveRes.ok) {
+        const d = await moveRes.json().catch(() => ({}));
+        throw new Error(d.detail || moveRes.statusText);
       }
+      const moveJob = await moveRes.json();
+      const moveResult = await streamJobLog(moveJob.job_id, addLog, setLogPhase);
+      if (moveResult !== 'completed') {
+        addLog(`\n❌ Move ${moveResult}`);
+        setLogPhase(`Move ${moveResult}`);
+        return;
+      }
+      addLog('\n✅ Dish move complete');
+
+      // Phase 3: Lineup scan
+      setLogPhase(`Scanning lineup on ${sat.display_name}…`);
+      addLog(`\n🔍 Starting lineup scan on ${sat.display_name}…`);
+      const scanRes = await fetch(`${SATELLITE_PROXY}/api/ops/scan-lineup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ satellite: sat.slug, auto_reload: true }),
+      });
+      if (!scanRes.ok) {
+        const d = await scanRes.json().catch(() => ({}));
+        addLog(`\n⚠ Lineup scan failed to start: ${d.detail || scanRes.statusText}`);
+        setLogPhase('Scan failed to start');
+      } else {
+        const scanJob = await scanRes.json();
+        const scanResult = await streamJobLog(scanJob.job_id, addLog, setLogPhase);
+        if (scanResult === 'completed') {
+          addLog('\n✅ Lineup scan complete');
+        } else {
+          addLog(`\n⚠ Lineup scan ${scanResult}`);
+        }
+      }
+
+      // Phase 4: Reload the iframe to pick up new channels
+      setLogPhase('Done');
+      addLog('\n🔄 Reloading channels…');
+      if (iframeRef.current) {
+        iframeRef.current.src = iframeRef.current.src;
+      }
+      addLog('✅ All done — new channels loaded');
+
     } catch (e) {
-      alert(`Move failed: ${e}`);
+      addLog(`\n❌ Error: ${e}`);
+      setLogPhase('Error');
     } finally {
       setMoving(false);
-      setConfirmTarget(null);
     }
   };
 
@@ -217,7 +341,7 @@ export default function SatellitePage() {
       )}
 
       {/* Confirm Move Dialog */}
-      {confirmTarget && (
+      {confirmTarget && !moving && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-gray-900 border border-gray-700 rounded-lg w-96 p-5 shadow-2xl">
             <h3 className="text-base font-semibold text-gray-100 mb-3">Move Dish?</h3>
@@ -232,30 +356,50 @@ export default function SatellitePage() {
               {formatSatLabel(confirmTarget)}
             </p>
             <p className="text-xs text-yellow-500 mb-4">
-              ⚠ All active streams will be interrupted during the move.
+              ⚠ All active streams will be stopped and the dish will move.
             </p>
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setConfirmTarget(null)}
-                disabled={moving}
                 className="px-4 py-1.5 text-sm text-gray-400 hover:text-white bg-gray-800 rounded transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={() => doMoveDish(confirmTarget)}
-                disabled={moving}
-                className="px-4 py-1.5 text-sm text-white bg-emerald-700 hover:bg-emerald-600 rounded font-medium transition-colors disabled:opacity-50"
+                className="px-4 py-1.5 text-sm text-white bg-emerald-700 hover:bg-emerald-600 rounded font-medium transition-colors"
               >
-                {moving ? 'Moving…' : 'Confirm Move'}
+                Confirm Move
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* Move/Scan Log Popup */}
+      {logOpen && (
+        <div className="fixed bottom-4 right-4 z-50 w-[480px] max-h-[50vh] flex flex-col bg-gray-900 border border-gray-600 rounded-lg shadow-2xl overflow-hidden">
+          <div className="px-3 py-2 bg-gray-800 border-b border-gray-700 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              {moving && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />}
+              <span className="text-xs font-semibold text-gray-200 truncate">{logPhase || 'Satellite Operation'}</span>
+            </div>
+            {!moving && (
+              <button onClick={() => setLogOpen(false)} className="text-gray-500 hover:text-white text-sm ml-2 shrink-0">✕</button>
+            )}
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed text-gray-300 whitespace-pre-wrap">
+            {logLines.map((line, i) => (
+              <div key={i} className={line.startsWith('✅') ? 'text-emerald-400' : line.startsWith('❌') ? 'text-red-400' : line.startsWith('⚠') ? 'text-yellow-400' : ''}>{line}</div>
+            ))}
+            <div ref={logEndRef} />
+          </div>
+        </div>
+      )}
+
       {/* Embedded satellite UI */}
       <iframe
+        ref={iframeRef}
         src={iframeSrc}
         className="flex-1 w-full border-0"
         allow="autoplay; fullscreen"

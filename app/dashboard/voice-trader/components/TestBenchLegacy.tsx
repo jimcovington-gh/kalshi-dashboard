@@ -210,7 +210,10 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
   // Split finals/partial for stable rendering (no DOM thrashing on every partial)
   const [finalSegments, setFinalSegments] = useState<TranscriptSegment[]>([]);
-  const [currentPartial, setCurrentPartial] = useState<TranscriptSegment | null>(null);
+  // Ratcheted partial: only ever grows within an utterance, never shrinks.
+  // Riva beam search routinely emits 50w→6w→51w mid-utterance; we ignore the shrinks.
+  const partialRatchetRef = useRef<string>('');  // max-length text seen this utterance
+  const [partialDisplay, setPartialDisplay] = useState<string>('');  // drives render
   const finalsScrollRef = useRef<HTMLDivElement | null>(null);
   const [systemLog, setSystemLog] = useState<SystemLogEntry[]>([]);  // System log - never truncated
   const [lastSpeakerId, setLastSpeakerId] = useState<string | null>(null);  // Track speaker changes
@@ -698,7 +701,10 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             // Seed split states from full_state snapshot
             const transcriptSnap: TranscriptSegment[] = data.transcript || [];
             setFinalSegments(transcriptSnap.filter((s: TranscriptSegment) => s.is_final).slice(-200));
-            setCurrentPartial(transcriptSnap.filter((s: TranscriptSegment) => !s.is_final).slice(-1)[0] || null);
+            const snapPartial = transcriptSnap.filter((s: TranscriptSegment) => !s.is_final).slice(-1)[0];
+            const snapText = snapPartial?.text || '';
+            partialRatchetRef.current = snapText;
+            setPartialDisplay(snapText);
             // Track if voice trader is waiting for manual dial
             if (data.auto_dial !== undefined) {
               setAutoDial(data.auto_dial);
@@ -713,7 +719,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             const timestamp = data.timestamp || Date.now() / 1000;
 
             if (data.is_final) {
-              // Final: append to finals list, clear partial
+              // Final: append to finals list, reset ratchet
               setLastSpeakerId(prevSpeaker => {
                 const speakerChanged = prevSpeaker !== null && prevSpeaker !== speakerId;
                 const newSeg: TranscriptSegment = {
@@ -726,18 +732,21 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                   show_timestamp: speakerChanged,
                 };
                 setFinalSegments(prev => [...prev.slice(-200), newSeg]);
-                setCurrentPartial(null);
+                partialRatchetRef.current = '';
+                setPartialDisplay('');
                 return speakerId;
               });
             } else {
-              // Partial: just overwrite current partial — zero DOM thrash on finals
-              setCurrentPartial({
-                text: data.text,
-                is_final: false,
-                speaker_id: speakerId,
-                timestamp,
-                latency_ms: data.latency_ms,
-              });
+              // Partial: only display if longer than what we're already showing.
+              // Riva beam search shrinks partials mid-utterance (50w→6w→51w);
+              // we keep the longest version seen and ignore backwards revisions.
+              const incoming = data.text || '';
+              const incomingWords = incoming.trim().split(/\s+/).length;
+              const ratchetWords = partialRatchetRef.current.trim() === '' ? 0 : partialRatchetRef.current.trim().split(/\s+/).length;
+              if (incomingWords >= ratchetWords) {
+                partialRatchetRef.current = incoming;
+                setPartialDisplay(incoming);
+              }
             }
 
           } else if (data.type === 'word_triggered') {
@@ -1563,7 +1572,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
     setWords([]);
     setTranscript([]);
     setFinalSegments([]);
-    setCurrentPartial(null);
+    partialRatchetRef.current = '';
+    setPartialDisplay('');
     setSystemLog([]);
     setContainerState(null);
     setLastSpeakerId(null);
@@ -1796,7 +1806,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       setWords([]);
       setTranscript([]);
       setFinalSegments([]);
-      setCurrentPartial(null);
+      partialRatchetRef.current = '';
+      setPartialDisplay('');
       setSystemLog([]);
       setLastSpeakerId(null);
       setError(null);
@@ -2788,7 +2799,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                 setWords([]);  // Clear word grid
                 setTranscript([]);  // Clear transcript
                 setFinalSegments([]);
-                setCurrentPartial(null);
+                partialRatchetRef.current = '';
+                setPartialDisplay('');
                 setSystemLog([]);  // Clear system log
                 setLastSpeakerId(null);  // Reset speaker tracking
                 if (wsRef.current) {
@@ -3374,16 +3386,13 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               })}
             </div>
 
-            {/* Current partial — show only last 8 words so backward rewrites are invisible */}
-            <div className="text-xs font-mono border-t border-gray-700 pt-1 h-6 overflow-hidden whitespace-nowrap">
-              {currentPartial ? (
-                <span className="text-gray-400 italic">
-                  {currentPartial.text.split(' ').slice(-8).join(' ')}
-                  {currentPartial.latency_ms != null && (
-                    <span className="text-gray-600"> [{currentPartial.latency_ms}ms]</span>
-                  )}
-                </span>
-              ) : null}
+            {/* Partial — ratcheted: only grows, never shrinks, fixed height, never reflows page */}
+            <div className="border-t border-gray-700 pt-1 h-10 overflow-hidden">
+              {partialDisplay ? (
+                <p className="text-xs font-mono text-gray-400 italic leading-tight m-0">{partialDisplay}</p>
+              ) : (
+                <p className="text-xs font-mono text-gray-600 italic leading-tight m-0">…</p>
+              )}
             </div>
           </div>
 

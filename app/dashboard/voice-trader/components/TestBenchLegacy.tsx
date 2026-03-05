@@ -3374,8 +3374,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               })}
             </div>
 
-            {/* Current partial — isolated re-renders, never touches finals DOM */}
-            <div className="text-xs font-mono border-t border-gray-700 pt-1 min-h-[1.25rem]">
+            {/* Current partial — fixed height so it never reflows the page */}
+            <div className="text-xs font-mono border-t border-gray-700 pt-1 h-16 overflow-hidden">
               {currentPartial ? (
                 <span className="text-gray-400 italic">
                   {currentPartial.text}

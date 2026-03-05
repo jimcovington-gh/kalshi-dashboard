@@ -84,6 +84,7 @@ interface TranscriptSegment {
   speaker_id?: string;
   show_speaker?: boolean;  // Show speaker ID prefix for this segment
   show_timestamp?: boolean;  // Show timestamp prefix for this segment
+  latency_ms?: number;  // ms from audio production to worker receipt
 }
 
 // System log entry - for events, trades, status changes (never truncated)
@@ -195,6 +196,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [selectedSatStreamId, setSelectedSatStreamId] = useState<number | null>(null);
   const [scheduledStart, setScheduledStart] = useState('');
   const [dryRun, setDryRun] = useState(false);  // Dry run mode - no real trades
+  const [sttDiarization, setSttDiarization] = useState(false);  // Speaker diarization (spk_0 labels)
   const [showStarted, setShowStarted] = useState(false);  // Toggle to show already-started events
   
   // Launch state
@@ -206,6 +208,10 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [words, setWords] = useState<WordStatus[]>([]);
   const [pnl, setPnl] = useState<PnLSummary | null>(null);
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
+  // Split finals/partial for stable rendering (no DOM thrashing on every partial)
+  const [finalSegments, setFinalSegments] = useState<TranscriptSegment[]>([]);
+  const [currentPartial, setCurrentPartial] = useState<TranscriptSegment | null>(null);
+  const finalsScrollRef = useRef<HTMLDivElement | null>(null);
   const [systemLog, setSystemLog] = useState<SystemLogEntry[]>([]);  // System log - never truncated
   const [lastSpeakerId, setLastSpeakerId] = useState<string | null>(null);  // Track speaker changes
   const wsConnectedOnceRef = useRef<boolean>(false);  // Track if we've logged connection once
@@ -360,6 +366,13 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       systemLogRef.current.scrollTop = systemLogRef.current.scrollHeight;
     }
   }, [systemLog]);
+
+  // Auto-scroll finals panel when a new final arrives (not on partials)
+  useEffect(() => {
+    if (finalsScrollRef.current) {
+      finalsScrollRef.current.scrollTop = finalsScrollRef.current.scrollHeight;
+    }
+  }, [finalSegments]);
 
   // Fetch events and running containers
   useEffect(() => {
@@ -682,6 +695,10 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             setWords(data.words || []);
             setPnl(data.pnl);
             setTranscript(data.transcript || []);
+            // Seed split states from full_state snapshot
+            const transcriptSnap: TranscriptSegment[] = data.transcript || [];
+            setFinalSegments(transcriptSnap.filter((s: TranscriptSegment) => s.is_final).slice(-200));
+            setCurrentPartial(transcriptSnap.filter((s: TranscriptSegment) => !s.is_final).slice(-1)[0] || null);
             // Track if voice trader is waiting for manual dial
             if (data.auto_dial !== undefined) {
               setAutoDial(data.auto_dial);
@@ -694,45 +711,35 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             // Real-time transcript segment from voice trader
             const speakerId = data.speaker_id || 'unknown';
             const timestamp = data.timestamp || Date.now() / 1000;
-            
-            // Check if speaker changed
-            setLastSpeakerId(prevSpeaker => {
-              const speakerChanged = prevSpeaker !== null && prevSpeaker !== speakerId;
-              
-              setTranscript(prev => {
-                const newSegment: TranscriptSegment = {
+
+            if (data.is_final) {
+              // Final: append to finals list, clear partial
+              setLastSpeakerId(prevSpeaker => {
+                const speakerChanged = prevSpeaker !== null && prevSpeaker !== speakerId;
+                const newSeg: TranscriptSegment = {
                   text: data.text,
-                  is_final: data.is_final,
+                  is_final: true,
                   speaker_id: speakerId,
-                  timestamp: timestamp,
-                  show_speaker: speakerChanged || prev.length === 0,  // Show speaker on change or first segment
-                  show_timestamp: speakerChanged || prev.length === 0  // Show timestamp on speaker change
+                  timestamp,
+                  latency_ms: data.latency_ms,
+                  show_speaker: speakerChanged,
+                  show_timestamp: speakerChanged,
                 };
-                
-                // Replace partials with finals, keep evolving sentence
-                if (data.is_final) {
-                  // Final: remove recent partials and add this final
-                  const withoutRecentPartials = prev.filter((seg) => {
-                    // Keep all finals
-                    if (seg.is_final) return true;
-                    // Keep partials older than 5 seconds
-                    if (seg.timestamp && timestamp - seg.timestamp > 5) return true;
-                    return false;
-                  });
-                  return [...withoutRecentPartials.slice(-200), newSegment];
-                } else {
-                  // Partial: replace the last partial (if any) with this one
-                  const lastIdx = prev.length - 1;
-                  if (lastIdx >= 0 && !prev[lastIdx].is_final) {
-                    // Replace last partial
-                    return [...prev.slice(0, lastIdx), newSegment];
-                  }
-                  return [...prev.slice(-200), newSegment];
-                }
+                setFinalSegments(prev => [...prev.slice(-200), newSeg]);
+                setCurrentPartial(null);
+                return speakerId;
               });
-              
-              return speakerId;  // Update lastSpeakerId
-            });
+            } else {
+              // Partial: just overwrite current partial — zero DOM thrash on finals
+              setCurrentPartial({
+                text: data.text,
+                is_final: false,
+                speaker_id: speakerId,
+                timestamp,
+                latency_ms: data.latency_ms,
+              });
+            }
+
           } else if (data.type === 'word_triggered') {
             // Update the words state based on status
             // pending = yellow (trade in progress)
@@ -995,11 +1002,10 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
           
           // Update transcript preview if available
           if (data.transcript_preview) {
-            setTranscript(prev => {
-              // Add as a new segment if different from last
+            setFinalSegments(prev => {
               const lastText = prev[prev.length - 1]?.text;
               if (lastText !== data.transcript_preview) {
-                return [...prev.slice(-29), {
+                return [...prev.slice(-200), {
                   text: data.transcript_preview,
                   timestamp: Date.now() / 1000,
                   is_final: true
@@ -1556,6 +1562,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
     // Clear state from any previous session
     setWords([]);
     setTranscript([]);
+    setFinalSegments([]);
+    setCurrentPartial(null);
     setSystemLog([]);
     setContainerState(null);
     setLastSpeakerId(null);
@@ -1604,8 +1612,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         body.desktop_port = 4403;
       }
       
-      // Always enable diarization so speaker panel works
-      body.stt_diarization = true;
+      // Speaker diarization — only enable when user wants speaker labels
+      body.stt_diarization = sttDiarization;
 
       // Add dry_run flag
       if (dryRun) {
@@ -1787,6 +1795,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       setWsUrl(null);
       setWords([]);
       setTranscript([]);
+      setFinalSegments([]);
+      setCurrentPartial(null);
       setSystemLog([]);
       setLastSpeakerId(null);
       setError(null);
@@ -2609,6 +2619,24 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               Use this for testing the system without risking real money.
             </p>
           </div>
+
+          <div className="mt-4">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={sttDiarization}
+                onChange={e => setSttDiarization(e.target.checked)}
+                className="w-4 h-4 accent-cyan-500"
+              />
+              <span className={sttDiarization ? 'text-cyan-400 font-semibold' : ''}>
+                🗣️ Speaker Diarization {sttDiarization && '(ENABLED)'}
+              </span>
+            </label>
+            <p className="text-xs text-gray-500 mt-1">
+              Identify different speakers (spk_0, spk_1, etc.). Requires diarizer model on Riva.
+              Leave off for satellite/SRT sources — Riva has no diarizer loaded.
+            </p>
+          </div>
           
           <div className="mt-8">
             <button
@@ -2759,6 +2787,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                 setContainerState(null);  // Clear container state
                 setWords([]);  // Clear word grid
                 setTranscript([]);  // Clear transcript
+                setFinalSegments([]);
+                setCurrentPartial(null);
                 setSystemLog([]);  // Clear system log
                 setLastSpeakerId(null);  // Reset speaker tracking
                 if (wsRef.current) {
@@ -3318,36 +3348,45 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
           </div>
           
           {/* Transcript - right panel, speech only with speaker markers */}
-          <div className="bg-gray-800 rounded-lg p-3 max-h-[300px] overflow-y-auto">
-            <h2 className="font-semibold text-sm mb-2 sticky top-0 bg-gray-800 pb-1">🎙️ Live Transcript</h2>
-            <div className="text-xs space-y-0.5 font-mono">
-              {(() => {
-                const recent = transcript.slice(-100);
-                // Find finals and the most recent partial
-                const finalsOnly = recent.filter(seg => seg.is_final);
-                const lastPartial = recent.filter(seg => !seg.is_final).slice(-1)[0];
-                const toShow = lastPartial 
-                  ? [...finalsOnly, lastPartial].slice(-50)
-                  : finalsOnly.slice(-50);
-                
-                return toShow.map((seg, i) => {
-                  const time = seg.timestamp ? new Date(seg.timestamp * 1000).toLocaleTimeString() : '';
-                  
-                  // Show speaker label and timestamp on speaker change
-                  const prefix = seg.show_speaker 
-                    ? <><span className="text-blue-400">[{time}]</span> <span className="text-cyan-400 font-bold">{seg.speaker_id || 'Speaker'}:</span> </>
-                    : null;
-                  
-                  // Normal transcript - white for finals, gray italic for the current partial
-                  return (
-                    <div key={i} className={seg.is_final ? 'text-white' : 'text-gray-500 italic'}>
-                      {prefix}{seg.text}
-                    </div>
-                  );
-                });
-              })()}
+          <div className="bg-gray-800 rounded-lg p-3 flex flex-col gap-1">
+            <h2 className="font-semibold text-sm sticky top-0 bg-gray-800 pb-1">🎙️ Live Transcript</h2>
+
+            {/* Finals panel — scrolls only when a new final arrives */}
+            <div
+              ref={finalsScrollRef}
+              className="text-xs font-mono overflow-y-auto h-52 space-y-0.5"
+            >
+              {finalSegments.slice(-100).map(seg => {
+                const time = seg.timestamp ? new Date(seg.timestamp * 1000).toLocaleTimeString() : '';
+                const latency = seg.latency_ms != null ? ` [${seg.latency_ms}ms]` : '';
+                return (
+                  <div key={seg.timestamp} className="text-white">
+                    {seg.show_speaker && (
+                      <>
+                        <span className="text-blue-400">[{time}]</span>{' '}
+                        <span className="text-cyan-400 font-bold">{seg.speaker_id || 'Speaker'}:</span>{' '}
+                      </>
+                    )}
+                    {seg.text}
+                    {latency && <span className="text-gray-600">{latency}</span>}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Current partial — isolated re-renders, never touches finals DOM */}
+            <div className="text-xs font-mono border-t border-gray-700 pt-1 min-h-[1.25rem]">
+              {currentPartial ? (
+                <span className="text-gray-400 italic">
+                  {currentPartial.text}
+                  {currentPartial.latency_ms != null && (
+                    <span className="text-gray-600"> [{currentPartial.latency_ms}ms]</span>
+                  )}
+                </span>
+              ) : null}
             </div>
           </div>
+
         </div>
       </div>
     );

@@ -475,9 +475,9 @@ export default function AIChatPage() {
                     <span className="inline-block w-2 h-2 bg-green-500 rounded-full"></span>
                     <span className="text-xs text-gray-500">Device linked</span>
                     <button
-                      onClick={handleClearDeviceToken}
+                      onClick={() => { handleClearDeviceToken(); setShowTokenDialog(true); }}
                       className="text-xs text-red-400 hover:text-red-600 ml-1"
-                      title="Remove device token"
+                      title="Change device token"
                     >
                       ✕
                     </button>
@@ -568,7 +568,7 @@ export default function AIChatPage() {
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
               placeholder="XXXX-XXXX-XXXX-XXXX"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md mb-4 font-mono text-center tracking-wider"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md mb-4 font-mono text-center tracking-widest text-gray-900 bg-white text-lg"
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && handleSaveDeviceToken()}
             />

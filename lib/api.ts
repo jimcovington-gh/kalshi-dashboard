@@ -1334,6 +1334,10 @@ export async function sendCopilotMessage(
   try {
     const session = await fetchAuthSession();
     const token = session.tokens?.idToken?.toString();
+    
+    if (!token) {
+      throw new Error('UNAUTHORIZED: No Cognito ID token available. Please log in again.');
+    }
 
     const bodyObj = {
       message,

@@ -829,21 +829,16 @@ Resources:
       FunctionName: dashboard-copilot-proxy
       CodeUri: ./
       Handler: copilot-proxy.lambda_handler
-      Description: Proxy dashboard chat to GitHub Copilot via VS Code extension
-      Timeout: 300  # 5 minutes - Copilot can take time for complex queries
+      Description: Proxy dashboard chat to GitHub Models API
+      Timeout: 300  # 5 minutes - Claude can take time for complex queries
       MemorySize: 256
-      # VPC config required to reach EC2 at 172.31.41.120:9876
-      VpcConfig:
-        SubnetIds: !Ref TISVpcSubnets
-        SecurityGroupIds: !Ref TISVpcSecurityGroups
+      # No VPC needed - calling GitHub Models API directly
       Environment:
         Variables:
           LOG_LEVEL: INFO
           DEVICE_TOKENS_TABLE: production-kalshi-device-tokens
           SECURITY_AUDIT_TABLE: production-kalshi-security-audit
           SNS_ALERT_TOPIC: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts'
-          VSCODE_EXTENSION_URL: 'http://172.31.23.162:9876'
-          COPILOT_WAKE_URL: 'http://172.31.23.162:9877'
       Policies:
         # DynamoDB access for device tokens
         - DynamoDBCrudPolicy:
@@ -865,6 +860,13 @@ Resources:
                 - sns:Publish
               Resource:
                 - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts'
+        # Secrets Manager access for GitHub PAT
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:production/github/models-api-token-*'
       Events:
         CopilotProxy:
           Type: Api
@@ -872,7 +874,7 @@ Resources:
             RestApiId: !Ref DashboardApi
             Path: /copilot-proxy
             Method: POST
-      # Function URL bypasses API Gateway's 29s timeout for long-running Copilot requests
+      # Function URL bypasses API Gateway's 29s timeout for long-running requests
       FunctionUrlConfig:
         AuthType: NONE
         Cors:

@@ -1,5 +1,5 @@
 """
-Copilot Web Proxy Lambda - Proxies authenticated requests to VS Code extension
+Copilot Web Proxy Lambda - Proxies authenticated requests to GitHub Models API
 
 Security:
 - Layer 1: Cognito JWT (via API Gateway authorizer)
@@ -8,7 +8,7 @@ Security:
 - SNS alerts sent for suspicious activity
 
 Architecture:
-- Browser → API Gateway → This Lambda → EC2 VS Code Extension → GitHub Copilot
+- Browser → Lambda → GitHub Models API (https://models.inference.ai.azure.com)
 """
 
 import json
@@ -30,16 +30,17 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 # AWS clients
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 sns = boto3.client('sns', region_name='us-east-1')
+secrets = boto3.client('secretsmanager', region_name='us-east-1')
 
 # Configuration from environment
 DEVICE_TOKENS_TABLE = os.environ.get('DEVICE_TOKENS_TABLE', 'production-kalshi-device-tokens')
 SECURITY_AUDIT_TABLE = os.environ.get('SECURITY_AUDIT_TABLE', 'production-kalshi-security-audit')
 SNS_ALERT_TOPIC = os.environ.get('SNS_ALERT_TOPIC', '')
-VSCODE_EXTENSION_URL = os.environ.get('VSCODE_EXTENSION_URL', '')
-if not VSCODE_EXTENSION_URL:
-    raise RuntimeError('VSCODE_EXTENSION_URL environment variable is not set. Cannot start without a configured extension URL.')
-COPILOT_WAKE_URL = os.environ.get('COPILOT_WAKE_URL', '')  # e.g. http://172.31.23.162:9877
+GITHUB_MODELS_SECRET = 'production/github/models-api-token'
 AUDIT_TTL_DAYS = 90
+
+# Cache for GitHub PAT (loaded once per Lambda container)
+_github_pat_cache = None
 
 # DynamoDB tables
 device_tokens_table = dynamodb.Table(DEVICE_TOKENS_TABLE)
@@ -282,48 +283,96 @@ def update_token_last_used(token: str) -> None:
         logger.warning(f"Failed to update last_used_at for token: {e}")
 
 
-def proxy_to_vscode(message: str, conversation_id: Optional[str], include_context: bool, system_prompt: Optional[str] = None, permissions: str = 'read_only') -> Dict[str, Any]:
-    """Proxy the chat request to the VS Code extension. Wakes the extension if needed."""
-    # Check if extension is responsive; if not, try to wake it
+def get_github_pat() -> str:
+    """Get GitHub PAT from Secrets Manager (cached in Lambda container)."""
+    global _github_pat_cache
+    if _github_pat_cache:
+        return _github_pat_cache
+    
     try:
-        health_req = urllib.request.Request(f"{VSCODE_EXTENSION_URL}/health", method='GET')
-        urllib.request.urlopen(health_req, timeout=3)
-    except Exception:
-        # Extension not responding — try to wake it
-        if COPILOT_WAKE_URL:
-            logger.info("Extension not responding, calling wake service...")
-            try:
-                wake_req = urllib.request.Request(f"{COPILOT_WAKE_URL}/wake", method='GET')
-                with urllib.request.urlopen(wake_req, timeout=90) as wake_resp:
-                    wake_result = json.loads(wake_resp.read().decode('utf-8'))
-                    logger.info(f"Wake result: {wake_result}")
-            except Exception as we:
-                logger.error(f"Wake service call failed: {we}")
-        else:
-            logger.warning("Extension not responding and no COPILOT_WAKE_URL configured")
+        response = secrets.get_secret_value(SecretId=GITHUB_MODELS_SECRET)
+        _github_pat_cache = response['SecretString']
+        return _github_pat_cache
+    except Exception as e:
+        logger.error(f"Failed to get GitHub PAT from Secrets Manager: {e}")
+        raise
 
-    payload = {
-        'message': message,
-        'include_context': include_context
-    }
-    if conversation_id:
-        payload['conversation_id'] = conversation_id
+
+def call_github_models_api(message: str, system_prompt: Optional[str], conversation_history: Optional[list] = None) -> Dict[str, Any]:
+    """Call GitHub Models API directly (claude-sonnet-4-5)."""
+    github_pat = get_github_pat()
+    
+    # Build messages array
+    messages = []
+    
+    # Add system prompt if provided
     if system_prompt:
-        payload['system_prompt'] = system_prompt
-    payload['permissions'] = permissions
+        messages.append({
+            'role': 'system',
+            'content': system_prompt
+        })
+    
+    # Add conversation history if provided
+    if conversation_history:
+        messages.extend(conversation_history)
+    
+    # Add current message
+    messages.append({
+        'role': 'user',
+        'content': message
+    })
+    
+    payload = {
+        'model': 'claude-sonnet-4-5',
+        'messages': messages,
+        'temperature': 1.0,
+        'max_tokens': 4096
+    }
     
     data = json.dumps(payload).encode('utf-8')
     
     req = urllib.request.Request(
-        f"{VSCODE_EXTENSION_URL}/chat",
+        'https://models.inference.ai.azure.com/chat/completions',
         data=data,
-        headers={'Content-Type': 'application/json'},
+        headers={
+            'Authorization': f'Bearer {github_pat}',
+            'Content-Type': 'application/json',
+            'User-Agent': 'kalshi-copilot-proxy/1.0'
+        },
         method='POST'
     )
     
-    # 5 minute timeout for long-running requests
-    with urllib.request.urlopen(req, timeout=300) as response:
-        return json.loads(response.read().decode('utf-8'))
+    try:
+        with urllib.request.urlopen(req, timeout=300) as response:
+            response_text = response.read().decode('utf-8')
+            result = json.loads(response_text)
+            
+            # Extract response from OpenAI-format response
+            if 'choices' in result and len(result['choices']) > 0:
+                response_content = result['choices'][0]['message']['content']
+                return {
+                    'response': response_content,
+                    'conversation_id': 'github-models-api',  # Placeholder - not supported by this API
+                    'model': result.get('model', 'claude-sonnet-4-5')
+                }
+            else:
+                logger.error(f"Unexpected API response format: {result}")
+                raise ValueError("Invalid response format from GitHub Models API")
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8')
+        logger.error(f"GitHub Models API error {e.code}: {error_body}")
+        if e.code == 401:
+            raise ValueError("GitHub API authentication failed - check PAT in Secrets Manager")
+        elif e.code == 429:
+            raise ValueError("GitHub Models API rate limit exceeded")
+        else:
+            raise ValueError(f"GitHub Models API error: {error_body}")
+
+
+def proxy_to_vscode(message: str, conversation_id: Optional[str], include_context: bool, system_prompt: Optional[str] = None, permissions: str = 'read_only') -> Dict[str, Any]:
+    """Call GitHub Models API (no longer uses VS Code extension)."""
+    # Call GitHub Models API directly
+    return call_github_models_api(message, system_prompt)
 
 
 def log_failed_attempt(reason: str, user_name: Optional[str], ip_address: str, 

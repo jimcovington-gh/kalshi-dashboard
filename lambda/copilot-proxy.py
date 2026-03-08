@@ -112,11 +112,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if not claims:
             headers = event.get('headers', {})
             auth_header = headers.get('authorization') or headers.get('Authorization', '')
+            logger.info(f"No requestContext.authorizer claims, checking Authorization header: {bool(auth_header)}")
             if auth_header.startswith('Bearer '):
                 claims = parse_jwt_claims(auth_header[7:])
+                logger.info(f"Parsed JWT claims: {claims}")
         user_name = claims.get('sub') or claims.get('cognito:username')
+        logger.info(f"Extracted user_name: {user_name}")
         
         if not user_name:
+            logger.error(f"Authentication failed: no user_name in claims, headers keys: {list(event.get('headers', {}).keys())}")
             return error_response(401, 'UNAUTHORIZED', 'Authentication required')
         
         # Get device token from header

@@ -296,25 +296,20 @@ def get_security_audit(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def generate_secure_token() -> str:
-    """Generate a cryptographically secure token in XXXX-XXXX-XXXX-XXXX format."""
+    """Generate a cryptographically secure token in XXXX-XXXX format (8 chars total)."""
     # Use uppercase letters and digits, avoiding ambiguous characters (0, O, I, 1, L)
     alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
     
-    groups = []
-    for _ in range(4):
-        group = ''.join(secrets.choice(alphabet) for _ in range(4))
-        groups.append(group)
+    left = ''.join(secrets.choice(alphabet) for _ in range(4))
+    right = ''.join(secrets.choice(alphabet) for _ in range(4))
     
-    return '-'.join(groups)
+    return f'{left}-{right}'
 
 
 def mask_token(token: str) -> str:
-    """Mask a token for display (show first group only)."""
+    """Mask a token for display (show first 4 chars only)."""
     if not token or len(token) < 4:
         return '****'
-    parts = token.split('-')
-    if len(parts) >= 1:
-        return f"{parts[0]}-****-****-****"
     return f"{token[:4]}-****"
 
 

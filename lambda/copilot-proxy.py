@@ -126,9 +126,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if device_token:
             # Normalize: strip whitespace, uppercase, remove dashes (support both formats)
             device_token = device_token.strip().upper().replace('-', '')
-            # Re-insert dashes in 6-6-6-6 format to match stored tokens
-            if len(device_token) == 24:
-                device_token = f"{device_token[:6]}-{device_token[6:12]}-{device_token[12:18]}-{device_token[18:24]}"
+            # Re-insert dash in 4-4 format to match stored tokens
+            if len(device_token) == 8:
+                device_token = f"{device_token[:4]}-{device_token[4:8]}"
         
         if not device_token:
             log_failed_attempt(

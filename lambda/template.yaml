@@ -843,6 +843,7 @@ Resources:
           SECURITY_AUDIT_TABLE: production-kalshi-security-audit
           SNS_ALERT_TOPIC: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts'
           VSCODE_EXTENSION_URL: 'http://172.31.23.162:9876'
+          COPILOT_WAKE_URL: 'http://172.31.23.162:9877'
       Policies:
         # DynamoDB access for device tokens
         - DynamoDBCrudPolicy:

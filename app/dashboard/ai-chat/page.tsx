@@ -583,13 +583,13 @@ export default function AIChatPage() {
               type="text"
               value={tokenInput}
               onChange={(e) => {
-                // Auto-format: strip non-alphanum, uppercase, insert dashes every 6 chars
-                const raw = e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 24);
-                const formatted = raw.match(/.{1,6}/g)?.join('-') ?? raw;
+                // Auto-format: strip non-alphanum, uppercase, insert dash after 4 chars
+                const raw = e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8);
+                const formatted = raw.length > 4 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw;
                 setTokenInput(formatted);
               }}
-              placeholder="XXXXXX-XXXXXX-XXXXXX-XXXXXX"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md mb-4 font-mono text-center tracking-widest text-gray-900 bg-white text-lg"
+              placeholder="XXXX-XXXX"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md mb-4 font-mono text-center tracking-wider text-gray-900 bg-white text-lg"
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && handleSaveDeviceToken()}
             />

@@ -324,7 +324,7 @@ def get_github_pat() -> str:
 
 
 def call_github_models_api(message: str, system_prompt: Optional[str], conversation_history: Optional[list] = None) -> Dict[str, Any]:
-    """Call GitHub Models API directly (claude-sonnet-4-5)."""
+    """Call GitHub Models API directly (https://models.github.ai endpoint)."""
     github_pat = get_github_pat()
     
     # Build messages array
@@ -347,8 +347,9 @@ def call_github_models_api(message: str, system_prompt: Optional[str], conversat
         'content': message
     })
     
+    # Use correct model ID format: publisher/model_name
     payload = {
-        'model': 'claude-sonnet',
+        'model': 'anthropic/claude-3-5-sonnet',
         'messages': messages,
         'temperature': 1.0,
         'max_tokens': 4096
@@ -356,12 +357,14 @@ def call_github_models_api(message: str, system_prompt: Optional[str], conversat
     
     data = json.dumps(payload).encode('utf-8')
     
+    # Correct endpoint: models.github.ai, not models.inference.ai.azure.com
     req = urllib.request.Request(
-        'https://models.inference.ai.azure.com/chat/completions',
+        'https://models.github.ai/inference/chat/completions',
         data=data,
         headers={
             'Authorization': f'Bearer {github_pat}',
             'Content-Type': 'application/json',
+            'X-GitHub-Api-Version': '2022-11-28',
             'User-Agent': 'kalshi-copilot-proxy/1.0'
         },
         method='POST'
@@ -372,13 +375,13 @@ def call_github_models_api(message: str, system_prompt: Optional[str], conversat
             response_text = response.read().decode('utf-8')
             result = json.loads(response_text)
             
-            # Extract response from OpenAI-format response
+            # Extract response from GitHub Models API response
             if 'choices' in result and len(result['choices']) > 0:
                 response_content = result['choices'][0]['message']['content']
                 return {
                     'response': response_content,
                     'conversation_id': 'github-models-api',  # Placeholder - not supported by this API
-                    'model': result.get('model', 'claude-sonnet')
+                    'model': result.get('model', 'anthropic/claude-3-5-sonnet')
                 }
             else:
                 logger.error(f"Unexpected API response format: {result}")

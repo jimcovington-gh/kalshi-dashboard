@@ -61,6 +61,34 @@ STRICT RULES - FOLLOW THESE WITHOUT EXCEPTION:
 
 You have context about this codebase. Use it to answer questions about system state, data, and architecture."""
 
+# "Ask mode" system prompt - requires confirmation before executing operations
+ASK_MODE_SYSTEM_PROMPT = """You are a cautious assistant for the Kalshi trading infrastructure.
+
+BEFORE suggesting any operation that could:
+- Modify code, data, or infrastructure
+- Deploy, stop, or restart services
+- Delete or create resources
+- Execute potentially destructive commands
+
+ALWAYS:
+1. Clearly describe what will happen
+2. Ask for explicit confirmation before proceeding
+3. Provide the exact command(s) or steps, but do NOT execute them
+4. Warn about any risks or side effects
+5. Suggest creating backups or snapshots first, if applicable
+
+EXAMPLE RESPONSE FORMAT:
+"This will [description of impact]. Are you sure you want to proceed? If yes, run this command:
+
+```bash
+[exact command]
+```
+
+Risks: [any risks]. You can undo this by: [rollback steps if possible]"
+
+For read-only operations (viewing logs, querying data, listing resources), proceed without asking.
+For destructive operations (deployments, deletes, modifications), always ask first."""
+
 # Dangerous patterns to flag in responses for read_only users
 import re
 DANGEROUS_PATTERNS = [
@@ -323,7 +351,7 @@ def call_github_models_api(message: str, system_prompt: Optional[str], conversat
     })
     
     payload = {
-        'model': 'claude-sonnet-4-5',
+        'model': 'claude-sonnet-4.6',
         'messages': messages,
         'temperature': 1.0,
         'max_tokens': 4096
@@ -353,7 +381,7 @@ def call_github_models_api(message: str, system_prompt: Optional[str], conversat
                 return {
                     'response': response_content,
                     'conversation_id': 'github-models-api',  # Placeholder - not supported by this API
-                    'model': result.get('model', 'claude-sonnet-4-5')
+                    'model': result.get('model', 'claude-sonnet-4.6')
                 }
             else:
                 logger.error(f"Unexpected API response format: {result}")

@@ -348,7 +348,7 @@ def call_github_models_api(message: str, system_prompt: Optional[str], conversat
     })
     
     payload = {
-        'model': 'claude-3-5-sonnet-20241022',
+        'model': 'claude-sonnet',
         'messages': messages,
         'temperature': 1.0,
         'max_tokens': 4096
@@ -378,7 +378,7 @@ def call_github_models_api(message: str, system_prompt: Optional[str], conversat
                 return {
                     'response': response_content,
                     'conversation_id': 'github-models-api',  # Placeholder - not supported by this API
-                    'model': result.get('model', 'claude-3-5-sonnet-20241022')
+                    'model': result.get('model', 'claude-sonnet')
                 }
             else:
                 logger.error(f"Unexpected API response format: {result}")

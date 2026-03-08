@@ -312,15 +312,12 @@ def update_token_last_used(token: str) -> None:
 
 
 def get_github_pat() -> str:
-    """Get GitHub PAT from Secrets Manager (cached in Lambda container)."""
-    global _github_pat_cache
-    if _github_pat_cache:
-        return _github_pat_cache
-    
+    """Get GitHub PAT from Secrets Manager (not cached - always fresh)."""
     try:
         response = secrets.get_secret_value(SecretId=GITHUB_MODELS_SECRET)
-        _github_pat_cache = response['SecretString']
-        return _github_pat_cache
+        pat = response['SecretString']
+        logger.info(f"Retrieved GitHub PAT from Secrets Manager (first 10 chars: {pat[:10]}...)")
+        return pat
     except Exception as e:
         logger.error(f"Failed to get GitHub PAT from Secrets Manager: {e}")
         raise
@@ -351,7 +348,7 @@ def call_github_models_api(message: str, system_prompt: Optional[str], conversat
     })
     
     payload = {
-        'model': 'claude-sonnet-4.6',
+        'model': 'claude-3-5-sonnet-20241022',
         'messages': messages,
         'temperature': 1.0,
         'max_tokens': 4096
@@ -381,7 +378,7 @@ def call_github_models_api(message: str, system_prompt: Optional[str], conversat
                 return {
                     'response': response_content,
                     'conversation_id': 'github-models-api',  # Placeholder - not supported by this API
-                    'model': result.get('model', 'claude-sonnet-4.6')
+                    'model': result.get('model', 'claude-3-5-sonnet-20241022')
                 }
             else:
                 logger.error(f"Unexpected API response format: {result}")

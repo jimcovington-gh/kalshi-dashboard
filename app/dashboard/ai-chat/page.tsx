@@ -101,6 +101,7 @@ export default function AIChatPage() {
   const [speechSupported, setSpeechSupported] = useState(false);
   const [chatMode, setChatMode] = useState<ChatMode>('copilot');
   const [deviceToken, setDeviceToken] = useState<string>('');
+  const [setupTokenSaved, setSetupTokenSaved] = useState(false);
   const [showTokenDialog, setShowTokenDialog] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
   const [copilotConversationId, setCopilotConversationId] = useState<string | undefined>();
@@ -114,8 +115,23 @@ export default function AIChatPage() {
     setSpeechSupported(!!SpeechRecognitionAPI);
   }, []);
 
-  // Load device token and chat mode from localStorage
+  // Load device token and chat mode from localStorage; also handle ?setup_token= URL param
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const setupToken = params.get('setup_token')?.trim().toUpperCase();
+    if (setupToken) {
+      // Auto-save the token and strip the param from the URL so it doesn't linger
+      setDeviceToken(setupToken);
+      localStorage.setItem(DEVICE_TOKEN_KEY, setupToken);
+      localStorage.setItem(CHAT_MODE_KEY, 'copilot');
+      setChatMode('copilot');
+      setSetupTokenSaved(true);
+      const url = new URL(window.location.href);
+      url.searchParams.delete('setup_token');
+      window.history.replaceState({}, '', url.toString());
+      setTimeout(() => setSetupTokenSaved(false), 5000);
+      return;
+    }
     const savedToken = localStorage.getItem(DEVICE_TOKEN_KEY);
     const savedMode = localStorage.getItem(CHAT_MODE_KEY) as ChatMode | null;
     if (savedToken) setDeviceToken(savedToken);
@@ -658,6 +674,13 @@ export default function AIChatPage() {
           </div>
         )}
       </div>
+
+      {/* Device Setup Confirmation */}
+      {setupTokenSaved && (
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm font-medium">
+          ✓ Device linked successfully. You can now use Copilot.
+        </div>
+      )}
 
       {/* Error Display */}
       {error && (

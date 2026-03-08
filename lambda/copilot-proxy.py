@@ -36,7 +36,8 @@ secrets = boto3.client('secretsmanager', region_name='us-east-1')
 DEVICE_TOKENS_TABLE = os.environ.get('DEVICE_TOKENS_TABLE', 'production-kalshi-device-tokens')
 SECURITY_AUDIT_TABLE = os.environ.get('SECURITY_AUDIT_TABLE', 'production-kalshi-security-audit')
 SNS_ALERT_TOPIC = os.environ.get('SNS_ALERT_TOPIC', '')
-GITHUB_MODELS_SECRET = 'production/github/models-api-token'
+VSCODE_WRAPPER_ENDPOINT = os.environ.get('VSCODE_WRAPPER_ENDPOINT', 'http://localhost:8765')
+WRAPPER_CONTROL_ENDPOINT = os.environ.get('WRAPPER_CONTROL_ENDPOINT', 'http://localhost:8764')
 AUDIT_TTL_DAYS = 90
 
 # Cache for GitHub PAT (loaded once per Lambda container)
@@ -113,6 +114,73 @@ def scan_response_for_danger(text: str) -> list:
     return matches
 
 
+def handle_wrapper_health() -> Dict[str, Any]:
+    """Check if wrapper (Copilot endpoint) is healthy."""
+    try:
+        req = urllib.request.Request(
+            f'{VSCODE_WRAPPER_ENDPOINT}/health',
+            headers={'User-Agent': 'dashboard-proxy/1.0'},
+            method='GET'
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return success_response({'wrapper_health': result})
+    except Exception as e:
+        logger.warning(f"Wrapper health check failed: {e}")
+        return success_response({
+            'wrapper_health': {
+                'status': 'unhealthy',
+                'error': str(e)
+            }
+        })
+
+
+def handle_wrapper_status() -> Dict[str, Any]:
+    """Get overall wrapper and control service status."""
+    try:
+        req = urllib.request.Request(
+            f'{WRAPPER_CONTROL_ENDPOINT}/status',
+            headers={'User-Agent': 'dashboard-proxy/1.0'},
+            method='GET'
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return success_response({'status': result})
+    except Exception as e:
+        logger.warning(f"Status check failed: {e}")
+        return success_response({
+            'status': {
+                'error': 'Control service not available',
+                'details': str(e)
+            }
+        })
+
+
+def handle_wrapper_control(action: str) -> Dict[str, Any]:
+    """Control wrapper (start/stop/restart)."""
+    if action not in ['start', 'stop', 'restart']:
+        return error_response(400, 'INVALID_ACTION', f'Invalid action: {action}')
+    
+    try:
+        req = urllib.request.Request(
+            f'{WRAPPER_CONTROL_ENDPOINT}/{action}',
+            headers={'User-Agent': 'dashboard-proxy/1.0', 'Content-Type': 'application/json'},
+            data=b'{}',
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=90) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            logger.info(f"Wrapper {action} result: {result.get('status')}")
+            return success_response({'control': result})
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8')
+        logger.error(f"Control request failed: {error_body}")
+        return error_response(500, 'CONTROL_ERROR', f'Failed to {action} wrapper')
+    except Exception as e:
+        logger.error(f"Control error: {e}")
+        return error_response(503, 'CONTROL_UNAVAILABLE', 'Control service not available')
+
+
 def parse_jwt_claims(token: str) -> Dict[str, Any]:
     """Decode JWT payload without signature verification (used for Function URL path).
     Security note: we rely on device token as primary secret; JWT sub just provides
@@ -130,9 +198,25 @@ def parse_jwt_claims(token: str) -> Dict[str, Any]:
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """Handle incoming chat requests from the dashboard."""
+    """Handle incoming requests from the dashboard."""
     logger.info(f"Received event: {json.dumps(event, default=str)[:500]}")
     
+    # Route control endpoints (no auth required for status/health)
+    path = event.get('path', '')
+    method = event.get('httpMethod', 'GET')
+    
+    if path == '/wrapper/health' and method == 'GET':
+        return handle_wrapper_health()
+    elif path == '/wrapper/status' and method == 'GET':
+        return handle_wrapper_status()
+    elif path == '/wrapper/start' and method == 'POST':
+        return handle_wrapper_control('start')
+    elif path == '/wrapper/stop' and method == 'POST':
+        return handle_wrapper_control('stop')
+    elif path == '/wrapper/restart' and method == 'POST':
+        return handle_wrapper_control('restart')
+    
+    # All other endpoints require auth
     try:
         # Extract user from Cognito JWT (already validated by API Gateway authorizer)
         claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
@@ -323,84 +407,60 @@ def get_github_pat() -> str:
         raise
 
 
-def call_github_models_api(message: str, system_prompt: Optional[str], conversation_history: Optional[list] = None) -> Dict[str, Any]:
-    """Call GitHub Models API directly (https://models.github.ai endpoint)."""
-    github_pat = get_github_pat()
+def call_vscode_wrapper(message: str, system_prompt: Optional[str] = None, admin: bool = False) -> Dict[str, Any]:
+    """Call VS Code Copilot Chat Wrapper extension via HTTP.
     
-    # Build messages array
-    messages = []
-    
-    # Add system prompt if provided
-    if system_prompt:
-        messages.append({
-            'role': 'system',
-            'content': system_prompt
-        })
-    
-    # Add conversation history if provided
-    if conversation_history:
-        messages.extend(conversation_history)
-    
-    # Add current message
-    messages.append({
-        'role': 'user',
-        'content': message
-    })
-    
-    # Use correct model ID format: publisher/model_name
+    The wrapper is running on http://localhost:8765 (or configured via VSCODE_WRAPPER_ENDPOINT)
+    and handles authentication to Copilot Chat, applies guardrails, and returns responses.
+    """
     payload = {
-        'model': 'anthropic/claude-3-5-sonnet',
-        'messages': messages,
-        'temperature': 1.0,
-        'max_tokens': 4096
+        'prompt': message,
+        'admin': admin
     }
     
     data = json.dumps(payload).encode('utf-8')
     
-    # Correct endpoint: models.github.ai, not models.inference.ai.azure.com
     req = urllib.request.Request(
-        'https://models.github.ai/inference/chat/completions',
+        f'{VSCODE_WRAPPER_ENDPOINT}/chat',
         data=data,
         headers={
-            'Authorization': f'Bearer {github_pat}',
             'Content-Type': 'application/json',
-            'X-GitHub-Api-Version': '2022-11-28',
             'User-Agent': 'kalshi-copilot-proxy/1.0'
         },
         method='POST'
     )
     
     try:
-        with urllib.request.urlopen(req, timeout=300) as response:
+        with urllib.request.urlopen(req, timeout=30) as response:
             response_text = response.read().decode('utf-8')
             result = json.loads(response_text)
             
-            # Extract response from GitHub Models API response
-            if 'choices' in result and len(result['choices']) > 0:
-                response_content = result['choices'][0]['message']['content']
+            # Extract response from wrapper
+            if 'response' in result:
                 return {
-                    'response': response_content,
-                    'conversation_id': 'github-models-api',  # Placeholder - not supported by this API
-                    'model': result.get('model', 'anthropic/claude-3-5-sonnet')
+                    'response': result['response'],
+                    'conversation_id': 'vscode-wrapper',
+                    'model': result.get('model', 'claude-3.5-sonnet'),
+                    'timestamp': result.get('timestamp')
                 }
+            elif 'error' in result:
+                raise ValueError(f"Wrapper error: {result['error']}")
             else:
-                logger.error(f"Unexpected API response format: {result}")
-                raise ValueError("Invalid response format from GitHub Models API")
+                logger.error(f"Unexpected wrapper response format: {result}")
+                raise ValueError("Invalid response format from VS Code wrapper")
+    except urllib.error.URLError as e:
+        logger.error(f"Failed to connect to VS Code wrapper at {VSCODE_WRAPPER_ENDPOINT}: {e}")
+        raise ValueError(f"VS Code Copilot wrapper is not available at {VSCODE_WRAPPER_ENDPOINT}. Ensure VS Code Server is running: /home/ubuntu/kalshi/scripts/copilot-server/start.sh")
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8')
-        logger.error(f"GitHub Models API error {e.code}: {error_body}")
-        if e.code == 401:
-            raise ValueError("GitHub API authentication failed - check PAT in Secrets Manager")
-        elif e.code == 429:
-            raise ValueError("GitHub Models API rate limit exceeded")
-        else:
-            raise ValueError(f"GitHub Models API error: {error_body}")
+        logger.error(f"VS Code wrapper error {e.code}: {error_body}")
+        raise ValueError(f"VS Code wrapper error: {error_body}")
+
 
 
 def proxy_to_vscode(message: str, conversation_id: Optional[str], include_context: bool, system_prompt: Optional[str] = None, permissions: str = 'read_only') -> Dict[str, Any]:
-    """Call GitHub Models API (no longer uses VS Code extension)."""
-    # Call GitHub Models API directly
-    return call_github_models_api(message, system_prompt)
+    """Call VS Code Copilot Chat Wrapper extension via HTTP."""
+    return call_vscode_wrapper(message, system_prompt, admin=permissions == 'admin')
 
 
 def log_failed_attempt(reason: str, user_name: Optional[str], ip_address: str, 

@@ -1,0 +1,59 @@
+{
+    "FunctionName": "dashboard-copilot-proxy",
+    "FunctionArn": "arn:aws:lambda:us-east-1:355149669325:function:dashboard-copilot-proxy",
+    "Runtime": "python3.12",
+    "Role": "arn:aws:iam::355149669325:role/kalshi-dashboard-api-CopilotProxyFunctionRole-ylS4RdpwkNaQ",
+    "Handler": "copilot-proxy.lambda_handler",
+    "CodeSize": 6467,
+    "Description": "Proxy dashboard chat to GitHub Models API",
+    "Timeout": 300,
+    "MemorySize": 256,
+    "LastModified": "2026-03-08T14:18:56.000+0000",
+    "CodeSha256": "5x6We1GMvnaM7H7QgdFMw0lJeLDPMczug0KcftVuCvk=",
+    "Version": "$LATEST",
+    "VpcConfig": {
+        "SubnetIds": [],
+        "SecurityGroupIds": [],
+        "VpcId": "",
+        "Ipv6AllowedForDualStack": false
+    },
+    "Environment": {
+        "Variables": {
+            "TRADES_TABLE": "production-kalshi-trades-v2",
+            "PORTFOLIO_TABLE": "production-kalshi-portfolio-snapshots-v2",
+            "POSITIONS_TABLE": "production-kalshi-market-positions",
+            "MARKET_METADATA_TABLE": "production-kalshi-market-metadata",
+            "CONFIG_BUCKET_NAME": "production-kalshi-trading-config",
+            "SNS_ALERT_TOPIC": "arn:aws:sns:us-east-1:355149669325:production-kalshi-security-alerts",
+            "SECURITY_AUDIT_TABLE": "production-kalshi-security-audit",
+            "DEVICE_TOKENS_TABLE": "production-kalshi-device-tokens",
+            "LOG_LEVEL": "INFO"
+        }
+    },
+    "TracingConfig": {
+        "Mode": "PassThrough"
+    },
+    "RevisionId": "59a7c24f-5ae1-4dcd-bace-89766ec29cca",
+    "State": "Active",
+    "LastUpdateStatus": "InProgress",
+    "LastUpdateStatusReason": "The function is being created.",
+    "LastUpdateStatusReasonCode": "Creating",
+    "PackageType": "Zip",
+    "Architectures": [
+        "x86_64"
+    ],
+    "EphemeralStorage": {
+        "Size": 512
+    },
+    "SnapStart": {
+        "ApplyOn": "None",
+        "OptimizationStatus": "Off"
+    },
+    "RuntimeVersionConfig": {
+        "RuntimeVersionArn": "arn:aws:lambda:us-east-1::runtime:27990c3d0965bea97240f3380b8d623b692705303bbde4c31fb02fa7daa05453"
+    },
+    "LoggingConfig": {
+        "LogFormat": "Text",
+        "LogGroup": "/aws/lambda/dashboard-copilot-proxy"
+    }
+}

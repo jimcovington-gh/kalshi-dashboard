@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { getPortfolio, Portfolio, Position } from '@/lib/api';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useRouter } from 'next/navigation';
+import { WrapperControl } from '@/components/WrapperControl';
 
 export default function DashboardPage() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
@@ -80,6 +81,7 @@ export default function DashboardPage() {
   if (isAdminView) {
     return (
       <div className="space-y-8">
+        <WrapperControl />
         {portfolios.map((userPortfolio, userIdx) => {
           const EXCLUDED_FROM_TOTALS = ['finalized', 'settled'];
           const totalContracts = userPortfolio.positions.filter(p => !EXCLUDED_FROM_TOTALS.includes(p.market_status || '')).reduce((sum, p) => sum + Math.abs(p.contracts), 0);
@@ -148,6 +150,8 @@ export default function DashboardPage() {
   
   return (
     <div className="space-y-4">
+      <WrapperControl />
+      
       {/* User Summary Header */}
       <div className="bg-blue-600 text-white px-3 py-2 sm:px-4 sm:py-3 rounded-lg">
         <div className="flex items-center gap-2 mb-1 sm:mb-0">

@@ -38,6 +38,7 @@ SNS_ALERT_TOPIC = os.environ.get('SNS_ALERT_TOPIC', '')
 VSCODE_EXTENSION_URL = os.environ.get('VSCODE_EXTENSION_URL', '')
 if not VSCODE_EXTENSION_URL:
     raise RuntimeError('VSCODE_EXTENSION_URL environment variable is not set. Cannot start without a configured extension URL.')
+COPILOT_WAKE_URL = os.environ.get('COPILOT_WAKE_URL', '')  # e.g. http://172.31.23.162:9877
 AUDIT_TTL_DAYS = 90
 
 # DynamoDB tables
@@ -123,7 +124,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Headers are case-insensitive in HTTP, but API Gateway may lowercase them
         device_token = headers.get('x-device-token') or headers.get('X-Device-Token')
         if device_token:
-            device_token = device_token.strip().upper()
+            # Normalize: strip whitespace, uppercase, remove dashes (support both formats)
+            device_token = device_token.strip().upper().replace('-', '')
+            # Re-insert dashes in 6-6-6-6 format to match stored tokens
+            if len(device_token) == 24:
+                device_token = f"{device_token[:6]}-{device_token[6:12]}-{device_token[12:18]}-{device_token[18:24]}"
         
         if not device_token:
             log_failed_attempt(
@@ -274,7 +279,25 @@ def update_token_last_used(token: str) -> None:
 
 
 def proxy_to_vscode(message: str, conversation_id: Optional[str], include_context: bool, system_prompt: Optional[str] = None, permissions: str = 'read_only') -> Dict[str, Any]:
-    """Proxy the chat request to the VS Code extension."""
+    """Proxy the chat request to the VS Code extension. Wakes the extension if needed."""
+    # Check if extension is responsive; if not, try to wake it
+    try:
+        health_req = urllib.request.Request(f"{VSCODE_EXTENSION_URL}/health", method='GET')
+        urllib.request.urlopen(health_req, timeout=3)
+    except Exception:
+        # Extension not responding — try to wake it
+        if COPILOT_WAKE_URL:
+            logger.info("Extension not responding, calling wake service...")
+            try:
+                wake_req = urllib.request.Request(f"{COPILOT_WAKE_URL}/wake", method='GET')
+                with urllib.request.urlopen(wake_req, timeout=90) as wake_resp:
+                    wake_result = json.loads(wake_resp.read().decode('utf-8'))
+                    logger.info(f"Wake result: {wake_result}")
+            except Exception as we:
+                logger.error(f"Wake service call failed: {we}")
+        else:
+            logger.warning("Extension not responding and no COPILOT_WAKE_URL configured")
+
     payload = {
         'message': message,
         'include_context': include_context

@@ -37,7 +37,8 @@ function ClipCard({
   onPlay: (clipId: string) => void;
   onStop: () => void;
 }) {
-  const simScore = clip.similarity_score != null ? Number(clip.similarity_score) : null;
+  const rawScore = clip.similarity_score != null ? Number(clip.similarity_score) : null;
+  const simScore = rawScore != null && !isNaN(rawScore) ? rawScore : null;
   const sourceLabel = clip.source_video ? `Video: ${clip.source_video}` : '';
   const timeLabel = clip.timestamp_s ? `@ ${clip.timestamp_s}s` : '';
 
@@ -128,6 +129,7 @@ export default function VoiceprintsPage() {
   // Load speakers on mount
   useEffect(() => {
     loadSpeakers();
+    return () => stopAudio();
   }, []);
 
   async function loadSpeakers() {
@@ -154,6 +156,7 @@ export default function VoiceprintsPage() {
 
   function selectSpeaker(speaker: string) {
     setSelectedSpeaker(speaker);
+    setFilter('all');
     setPlayingClipId(null);
     stopAudio();
     loadClips(speaker);

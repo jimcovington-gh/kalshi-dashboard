@@ -10,6 +10,7 @@ Endpoints:
 
 import json
 import os
+import re
 import boto3
 from decimal import Decimal
 from boto3.dynamodb.conditions import Key
@@ -80,10 +81,17 @@ def list_speakers():
 
 def list_clips(speaker):
     """List all clips for a speaker with presigned URLs."""
+    items = []
     result = table.query(
         KeyConditionExpression=Key('speaker').eq(speaker),
     )
-    items = result.get('Items', [])
+    items.extend(result.get('Items', []))
+    while 'LastEvaluatedKey' in result:
+        result = table.query(
+            KeyConditionExpression=Key('speaker').eq(speaker),
+            ExclusiveStartKey=result['LastEvaluatedKey'],
+        )
+        items.extend(result.get('Items', []))
 
     for item in items:
         if item.get('s3_key'):
@@ -143,10 +151,15 @@ def lambda_handler(event, context):
         return list_clips(speaker)
 
     # POST /voiceprint/clips/{clip_id}/status
-    if method == 'POST' and '/status' in path:
+    if method == 'POST' and re.match(r'^/voiceprint/clips/[^/]+/status$', path):
         clip_id = path_params.get('clip_id', '')
+        if not clip_id:
+            return response(400, {'error': 'clip_id is required'})
         raw_body = event.get('body', '{}')
-        body = json.loads(raw_body) if isinstance(raw_body, str) else (raw_body or {})
+        try:
+            body = json.loads(raw_body) if isinstance(raw_body, str) else (raw_body or {})
+        except (json.JSONDecodeError, ValueError):
+            return response(400, {'error': 'Invalid JSON in request body'})
         speaker = body.get('speaker')
         new_status = body.get('status')
         if not speaker or not new_status:
@@ -154,8 +167,10 @@ def lambda_handler(event, context):
         return update_clip_status(speaker, clip_id, new_status)
 
     # GET /voiceprint/clips/{clip_id}/url
-    if method == 'GET' and '/url' in path:
+    if method == 'GET' and re.match(r'^/voiceprint/clips/[^/]+/url$', path):
         clip_id = path_params.get('clip_id', '')
+        if not clip_id:
+            return response(400, {'error': 'clip_id is required'})
         speaker = params.get('speaker')
         if not speaker:
             return response(400, {'error': 'speaker parameter required'})

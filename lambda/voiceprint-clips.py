@@ -145,7 +145,8 @@ def lambda_handler(event, context):
     # POST /voiceprint/clips/{clip_id}/status
     if method == 'POST' and '/status' in path:
         clip_id = path_params.get('clip_id', '')
-        body = json.loads(event.get('body', '{}'))
+        raw_body = event.get('body', '{}')
+        body = json.loads(raw_body) if isinstance(raw_body, str) else (raw_body or {})
         speaker = body.get('speaker')
         new_status = body.get('status')
         if not speaker or not new_status:

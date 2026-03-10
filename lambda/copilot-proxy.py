@@ -31,6 +31,7 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 sns = boto3.client('sns', region_name='us-east-1')
 secrets = boto3.client('secretsmanager', region_name='us-east-1')
+ssm = boto3.client('ssm', region_name='us-east-1')
 
 # Configuration from environment
 DEVICE_TOKENS_TABLE = os.environ.get('DEVICE_TOKENS_TABLE', 'production-kalshi-device-tokens')
@@ -38,6 +39,7 @@ SECURITY_AUDIT_TABLE = os.environ.get('SECURITY_AUDIT_TABLE', 'production-kalshi
 SNS_ALERT_TOPIC = os.environ.get('SNS_ALERT_TOPIC', '')
 VSCODE_WRAPPER_ENDPOINT = os.environ.get('VSCODE_WRAPPER_ENDPOINT', 'http://localhost:8765')
 WRAPPER_CONTROL_ENDPOINT = os.environ.get('WRAPPER_CONTROL_ENDPOINT', 'http://localhost:8764')
+COPILOT_INSTANCE_ID = os.environ.get('COPILOT_INSTANCE_ID', 'i-06444640be633ec45')
 AUDIT_TTL_DAYS = 90
 
 # Cache for GitHub PAT (loaded once per Lambda container)
@@ -114,71 +116,88 @@ def scan_response_for_danger(text: str) -> list:
     return matches
 
 
-def handle_wrapper_health() -> Dict[str, Any]:
-    """Check if wrapper (Copilot endpoint) is healthy."""
+def _run_ssm(commands: list, timeout_seconds: int = 60):
+    """Run shell commands on the copilot EC2 instance via SSM and wait for result."""
     try:
-        req = urllib.request.Request(
-            f'{VSCODE_WRAPPER_ENDPOINT}/health',
-            headers={'User-Agent': 'dashboard-proxy/1.0'},
-            method='GET'
+        resp = ssm.send_command(
+            InstanceIds=[COPILOT_INSTANCE_ID],
+            DocumentName='AWS-RunShellScript',
+            Parameters={'commands': commands, 'executionTimeout': [str(timeout_seconds)]},
+            TimeoutSeconds=timeout_seconds + 30,
         )
-        with urllib.request.urlopen(req, timeout=5) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            return success_response({'wrapper_health': result})
+        command_id = resp['Command']['CommandId']
     except Exception as e:
-        logger.warning(f"Wrapper health check failed: {e}")
-        return success_response({
-            'wrapper_health': {
-                'status': 'unhealthy',
-                'error': str(e)
-            }
-        })
+        logger.error(f"SSM SendCommand failed: {e}")
+        return None
+
+    # Poll with increasing backoff until complete
+    backoff = 0.5
+    for _ in range(40):
+        time.sleep(backoff)
+        try:
+            result = ssm.get_command_invocation(CommandId=command_id, InstanceId=COPILOT_INSTANCE_ID)
+        except ssm.exceptions.InvocationDoesNotExist:
+            backoff = min(backoff * 1.3, 2.0)
+            continue
+        if result['Status'] not in ('InProgress', 'Pending', 'Delayed'):
+            return result
+        backoff = min(backoff * 1.3, 2.0)
+    return None  # timed out
+
+
+def handle_wrapper_health() -> Dict[str, Any]:
+    """Check if wrapper (Copilot endpoint) is healthy via SSM."""
+    result = _run_ssm(['curl -sf http://localhost:8765/health > /dev/null && echo healthy || echo unhealthy'])
+    if not result:
+        return success_response({'wrapper_health': {'status': 'unhealthy', 'error': 'SSM timeout'}})
+    healthy = result.get('StandardOutputContent', '').strip() == 'healthy'
+    return success_response({'wrapper_health': {'status': 'healthy' if healthy else 'unhealthy'}})
 
 
 def handle_wrapper_status() -> Dict[str, Any]:
-    """Get overall wrapper and control service status."""
-    try:
-        req = urllib.request.Request(
-            f'{WRAPPER_CONTROL_ENDPOINT}/status',
-            headers={'User-Agent': 'dashboard-proxy/1.0'},
-            method='GET'
-        )
-        with urllib.request.urlopen(req, timeout=5) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            return success_response({'status': result})
-    except Exception as e:
-        logger.warning(f"Status check failed: {e}")
+    """Get overall wrapper and control service status via SSM."""
+    result = _run_ssm(['curl -sf http://localhost:8764/status 2>/dev/null || '
+                       'echo \'{"control_service":{"status":"down","port":8764},'
+                       '"wrapper_service":{"status":"unhealthy","endpoint":"http://127.0.0.1:8765","port":8765}}\''])
+    if not result:
         return success_response({
-            'status': {
-                'error': 'Control service not available',
-                'details': str(e)
-            }
+            'status': {'control_service': {'status': 'down'}, 'wrapper_service': {'status': 'unhealthy', 'error': 'SSM timeout'}}
         })
+    try:
+        status_data = json.loads(result.get('StandardOutputContent', '').strip())
+    except (json.JSONDecodeError, ValueError):
+        status_data = {
+            'control_service': {'status': 'unknown'},
+            'wrapper_service': {'status': 'unknown'},
+            'raw': result.get('StandardOutputContent', '')
+        }
+    return success_response({'status': status_data})
 
 
 def handle_wrapper_control(action: str) -> Dict[str, Any]:
-    """Control wrapper (start/stop/restart)."""
+    """Control wrapper (start/stop/restart) via SSM."""
     if action not in ['start', 'stop', 'restart']:
         return error_response(400, 'INVALID_ACTION', f'Invalid action: {action}')
-    
-    try:
-        req = urllib.request.Request(
-            f'{WRAPPER_CONTROL_ENDPOINT}/{action}',
-            headers={'User-Agent': 'dashboard-proxy/1.0', 'Content-Type': 'application/json'},
-            data=b'{}',
-            method='POST'
-        )
-        with urllib.request.urlopen(req, timeout=90) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            logger.info(f"Wrapper {action} result: {result.get('status')}")
-            return success_response({'control': result})
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8')
-        logger.error(f"Control request failed: {error_body}")
-        return error_response(500, 'CONTROL_ERROR', f'Failed to {action} wrapper')
-    except Exception as e:
-        logger.error(f"Control error: {e}")
-        return error_response(503, 'CONTROL_UNAVAILABLE', 'Control service not available')
+
+    timeout = 90 if action == 'restart' else 60
+    script = f'/home/ubuntu/kalshi/scripts/copilot-server/{action}.sh'
+    result = _run_ssm([f'/bin/bash {script} 2>&1'], timeout_seconds=timeout)
+
+    if not result:
+        return error_response(500, 'CONTROL_ERROR', f'Timed out waiting for wrapper to {action}')
+
+    if result.get('Status') == 'Success':
+        logger.info(f"Wrapper {action} succeeded via SSM")
+        return success_response({'control': {
+            'action': action,
+            'status': 'success',
+            'message': f'Wrapper {action} completed',
+            'output': result.get('StandardOutputContent', ''),
+        }})
+    else:
+        output = result.get('StandardErrorContent') or result.get('StandardOutputContent') or f"SSM status: {result.get('Status')}"
+        logger.error(f"Wrapper {action} failed: {output}")
+        return error_response(500, 'CONTROL_ERROR', f'Failed to {action} wrapper: {output}')
 
 
 

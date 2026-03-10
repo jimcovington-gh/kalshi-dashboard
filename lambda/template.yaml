@@ -832,13 +832,14 @@ Resources:
       Description: Proxy dashboard chat to GitHub Models API
       Timeout: 300  # 5 minutes - Claude can take time for complex queries
       MemorySize: 256
-      # No VPC needed - calling GitHub Models API directly
+      # No VPC needed - calling GitHub Models API directly; uses SSM for EC2 control
       Environment:
         Variables:
           LOG_LEVEL: INFO
           DEVICE_TOKENS_TABLE: production-kalshi-device-tokens
           SECURITY_AUDIT_TABLE: production-kalshi-security-audit
           SNS_ALERT_TOPIC: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts'
+          COPILOT_INSTANCE_ID: i-06444640be633ec45
       Policies:
         # DynamoDB access for device tokens
         - DynamoDBCrudPolicy:
@@ -867,12 +868,54 @@ Resources:
                 - secretsmanager:GetSecretValue
               Resource:
                 - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:production/github/models-api-token-*'
+        # SSM access to run commands on copilot EC2 instance
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:SendCommand
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript'
+                - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-06444640be633ec45'
+            - Effect: Allow
+              Action:
+                - ssm:GetCommandInvocation
+              Resource: '*'
       Events:
         CopilotProxy:
           Type: Api
           Properties:
             RestApiId: !Ref DashboardApi
             Path: /copilot-proxy
+            Method: POST
+        WrapperHealth:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /wrapper/health
+            Method: GET
+        WrapperStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /wrapper/status
+            Method: GET
+        WrapperStart:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /wrapper/start
+            Method: POST
+        WrapperStop:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /wrapper/stop
+            Method: POST
+        WrapperRestart:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /wrapper/restart
             Method: POST
       # Function URL bypasses API Gateway's 29s timeout for long-running requests
       FunctionUrlConfig:

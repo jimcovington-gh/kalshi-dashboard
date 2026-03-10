@@ -855,6 +855,7 @@ Resources:
           SECURITY_AUDIT_TABLE: production-kalshi-security-audit
           SNS_ALERT_TOPIC:
             Fn::Sub: arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts
+          COPILOT_INSTANCE_ID: i-06444640be633ec45
       Policies:
       - DynamoDBCrudPolicy:
           TableName: production-kalshi-device-tokens
@@ -878,6 +879,17 @@ Resources:
           - secretsmanager:GetSecretValue
           Resource:
           - Fn::Sub: arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:production/github/models-api-token-*
+      - Statement:
+        - Effect: Allow
+          Action:
+          - ssm:SendCommand
+          Resource:
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript
+          - Fn::Sub: arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-06444640be633ec45
+        - Effect: Allow
+          Action:
+          - ssm:GetCommandInvocation
+          Resource: '*'
       Events:
         CopilotProxy:
           Type: Api
@@ -885,6 +897,41 @@ Resources:
             RestApiId:
               Ref: DashboardApi
             Path: /copilot-proxy
+            Method: POST
+        WrapperHealth:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /wrapper/health
+            Method: GET
+        WrapperStatus:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /wrapper/status
+            Method: GET
+        WrapperStart:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /wrapper/start
+            Method: POST
+        WrapperStop:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /wrapper/stop
+            Method: POST
+        WrapperRestart:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /wrapper/restart
             Method: POST
       FunctionUrlConfig:
         AuthType: NONE
@@ -1049,6 +1096,32 @@ Resources:
             Method: GET
     Metadata:
       SamResourceId: VoiceprintClipsFunction
+  SignalEngineVelocityFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-signal-engine-velocity
+      CodeUri: SignalEngineVelocityFunction
+      Handler: signal-engine-velocity.lambda_handler
+      Description: Signal Engine velocity/acceleration data for market visualization
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          VELOCITY_TABLE: production-signal-engine-velocity
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: production-signal-engine-velocity
+      Events:
+        GetVelocity:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /signal-engine/velocity
+            Method: GET
+    Metadata:
+      SamResourceId: SignalEngineVelocityFunction
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL

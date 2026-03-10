@@ -1545,8 +1545,8 @@ export async function updateVoiceprintClipStatus(
     apiName: 'DashboardAPI',
     path: `/voiceprint/clips/${encodeURIComponent(clipId)}/status`,
     options: {
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ speaker, status }),
+      headers: { Authorization: `Bearer ${token}` },
+      body: { speaker, status },
     },
   });
   await restOperation.response;

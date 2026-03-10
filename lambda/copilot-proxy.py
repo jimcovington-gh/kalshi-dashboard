@@ -181,6 +181,8 @@ def handle_wrapper_control(action: str) -> Dict[str, Any]:
         return error_response(503, 'CONTROL_UNAVAILABLE', 'Control service not available')
 
 
+
+
 def parse_jwt_claims(token: str) -> Dict[str, Any]:
     """Decode JWT payload without signature verification (used for Function URL path).
     Security note: we rely on device token as primary secret; JWT sub just provides

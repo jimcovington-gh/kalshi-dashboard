@@ -39,6 +39,9 @@ export function WrapperControl() {
 
   // Fetch status on mount and every 10 seconds
   useEffect(() => {
+    let recoveryAttempts = 0;
+    const maxRecoveryAttempts = 3;
+
     const fetchStatus = async () => {
       try {
         const response = await get({
@@ -49,8 +52,16 @@ export function WrapperControl() {
         setStatus(response.status || response);
         setLastUpdate(new Date());
         setError(null);
+        recoveryAttempts = 0; // Reset on success
       } catch (err) {
-        setError('Could not connect to wrapper service');
+        // If control service is unavailable, show recovery status and keep retrying
+        if (recoveryAttempts < maxRecoveryAttempts) {
+          recoveryAttempts++;
+          console.log(`Status check failed, retrying (${recoveryAttempts}/${maxRecoveryAttempts})`);
+          setError(`Recovering... attempt ${recoveryAttempts}/${maxRecoveryAttempts}. Control service will auto-restart if crashed.`);
+        } else {
+          setError('Control service not responding. It should auto-restart. If problem persists, restart manually: systemctl restart copilot-control');
+        }
       } finally {
         setLoading(false);
       }

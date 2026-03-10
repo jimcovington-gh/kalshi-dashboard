@@ -1485,3 +1485,69 @@ export async function getSportsCaptures(): Promise<{ captures: SportsCapture[]; 
     throw error;
   }
 }
+
+// ============================================================
+// Voiceprint Clip Curation API
+// ============================================================
+
+export interface VoiceprintClip {
+  speaker: string;
+  clip_id: string;
+  status: 'candidate' | 'approved' | 'rejected';
+  s3_key: string;
+  audio_url?: string;
+  source_video?: string;
+  timestamp_s?: number;
+  similarity_score?: number;
+  created_at?: number;
+}
+
+export interface VoiceprintSpeaker {
+  speaker: string;
+  candidate: number;
+  approved: number;
+  rejected: number;
+  total: number;
+}
+
+export async function getVoiceprintSpeakers(): Promise<{ speakers: VoiceprintSpeaker[] }> {
+  const session = await fetchAuthSession();
+  const token = session.tokens?.idToken?.toString();
+  const restOperation = get({
+    apiName: 'DashboardAPI',
+    path: '/voiceprint/speakers',
+    options: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  const resp = await restOperation.response;
+  return await resp.body.json() as unknown as { speakers: VoiceprintSpeaker[] };
+}
+
+export async function getVoiceprintClips(speaker: string): Promise<{ speaker: string; clips: VoiceprintClip[] }> {
+  const session = await fetchAuthSession();
+  const token = session.tokens?.idToken?.toString();
+  const restOperation = get({
+    apiName: 'DashboardAPI',
+    path: `/voiceprint/clips?speaker=${encodeURIComponent(speaker)}`,
+    options: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  const resp = await restOperation.response;
+  return await resp.body.json() as unknown as { speaker: string; clips: VoiceprintClip[] };
+}
+
+export async function updateVoiceprintClipStatus(
+  speaker: string,
+  clipId: string,
+  status: 'approved' | 'rejected' | 'candidate'
+): Promise<void> {
+  const session = await fetchAuthSession();
+  const token = session.tokens?.idToken?.toString();
+  const restOperation = post({
+    apiName: 'DashboardAPI',
+    path: `/voiceprint/clips/${encodeURIComponent(clipId)}/status`,
+    options: {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ speaker, status }),
+    },
+  });
+  await restOperation.response;
+}

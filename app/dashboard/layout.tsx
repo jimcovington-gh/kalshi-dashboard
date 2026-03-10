@@ -18,6 +18,8 @@ const tabs = [
     base: 'text-green-600', active: 'text-green-700 border-green-500' },
   { href: '/dashboard/voice-trader', label: '🎙️ Voice', 
     base: 'text-orange-600', active: 'text-orange-700 border-orange-500' },
+  { href: '/dashboard/voiceprints', label: '🎤 Voiceprints', 
+    base: 'text-pink-600', active: 'text-pink-700 border-pink-500' },
   { href: '/dashboard/ai-chat', label: '🤖 AI', 
     base: 'text-indigo-600', active: 'text-indigo-700 border-indigo-500' },
   { href: '/dashboard/satellite', label: '📡 Satellite', 

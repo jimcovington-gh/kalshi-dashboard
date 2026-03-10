@@ -88,6 +88,10 @@ export function WrapperControl() {
       const result = response.control || response;
       
       if (result.status === 'success') {
+        // Wait before refreshing - wrapper needs time to boot
+        const waitTime = (action === 'start' || action === 'restart') ? 3000 : 500;
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        
         // Refresh status
         try {
           const statusResponse = await get({

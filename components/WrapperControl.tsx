@@ -226,36 +226,6 @@ export function WrapperControl() {
     </div>
   );
 }
-
-
-interface WrapperStatus {
-  control_service?: {
-    status: string;
-    port: number;
-    pid?: number;
-  };
-  wrapper_service?: {
-    status: string;
-    endpoint: string;
-    port: number;
-    error?: string;
-  };
-  timestamp?: string;
-}
-
-interface ControlResult {
-  action: string;
-  status: string;
-  message?: string;
-  error?: string;
-  wrapper_status?: {
-    status: string;
-    endpoint: string;
-    port: number;
-  };
-}
-
-export function WrapperControl() {
   const [status, setStatus] = useState<WrapperStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [controlling, setControlling] = useState<string | null>(null);

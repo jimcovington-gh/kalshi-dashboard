@@ -962,6 +962,93 @@ Resources:
             Method: GET
     Metadata:
       SamResourceId: DeviceManagementFunction
+  VoiceprintClipsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: production-kalshi-voiceprint-clips
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: speaker
+        AttributeType: S
+      - AttributeName: clip_id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: speaker
+        KeyType: HASH
+      - AttributeName: clip_id
+        KeyType: RANGE
+  VoiceprintLibraryBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: production-kalshi-voiceprint-library
+      CorsConfiguration:
+        CorsRules:
+        - AllowedHeaders:
+          - '*'
+          AllowedMethods:
+          - GET
+          AllowedOrigins:
+          - '*'
+          MaxAge: 3600
+  VoiceprintClipsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-voiceprint-clips
+      CodeUri: VoiceprintClipsFunction
+      Handler: voiceprint-clips.lambda_handler
+      Description: Voiceprint clip curation - list clips, update status, presigned
+        URLs
+      Timeout: 30
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          VOICEPRINT_CLIPS_TABLE: production-kalshi-voiceprint-clips
+          VOICEPRINT_LIBRARY_BUCKET: production-kalshi-voiceprint-library
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: production-kalshi-voiceprint-clips
+      - Statement:
+        - Effect: Allow
+          Action:
+          - s3:GetObject
+          - s3:PutObject
+          - s3:ListBucket
+          Resource:
+          - arn:aws:s3:::production-kalshi-voiceprint-library
+          - arn:aws:s3:::production-kalshi-voiceprint-library/*
+      Events:
+        ListSpeakers:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voiceprint/speakers
+            Method: GET
+        ListClips:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voiceprint/clips
+            Method: GET
+        UpdateClipStatus:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voiceprint/clips/{clip_id}/status
+            Method: POST
+        GetPresignedUrl:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DashboardApi
+            Path: /voiceprint/clips/{clip_id}/url
+            Method: GET
+    Metadata:
+      SamResourceId: VoiceprintClipsFunction
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL

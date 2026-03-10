@@ -87,9 +87,10 @@ export function WrapperControl() {
 
       const result = response.control || response;
       
-      if (result.status === 'success') {
-        // Wait before refreshing - wrapper needs time to boot
-        const waitTime = (action === 'start' || action === 'restart') ? 3000 : 500;
+      // 'already_running' is a success case - wrapper is running, just refresh status
+      if (result.status === 'success' || result.status === 'already_running') {
+        // Wait before refreshing - wrapper needs time to boot (skip wait if already running)
+        const waitTime = (action === 'start' || action === 'restart') && result.status === 'success' ? 3000 : 500;
         await new Promise(resolve => setTimeout(resolve, waitTime));
         
         // Refresh status
@@ -105,7 +106,8 @@ export function WrapperControl() {
           console.error('Failed to refresh status after control action:', err);
         }
       } else {
-        setError(result.error || `Failed to ${action} wrapper`);
+        // result.status === 'failed'
+        setError(result.error || result.message || `Failed to ${action} wrapper`);
       }
     } catch (err) {
       setError(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);

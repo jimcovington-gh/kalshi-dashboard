@@ -1551,3 +1551,50 @@ export async function updateVoiceprintClipStatus(
   });
   await restOperation.response;
 }
+
+// ============================================================
+// Signal Engine Velocity API
+// ============================================================
+
+export interface VelocityMarket {
+  market_ticker: string;
+  current_price: number;
+  velocities: Record<string, number | null>;
+  accelerations: Record<string, number | null>;
+  max_velocity: number;
+  max_accel: number;
+  snapshot_count: number;
+  data_span_hours: number;
+  last_update: number;
+  price_history: Array<{ ts: number; price: number }>;
+}
+
+export interface VelocityResponse {
+  markets: VelocityMarket[];
+  total_tracked: number;
+  generated_at: number;
+}
+
+export async function getSignalEngineVelocity(
+  opts?: { ticker?: string; mode?: string; limit?: number }
+): Promise<VelocityResponse | VelocityMarket> {
+  const session = await fetchAuthSession();
+  const token = session.tokens?.idToken?.toString();
+
+  const params = new URLSearchParams();
+  if (opts?.ticker) params.set('ticker', opts.ticker);
+  if (opts?.mode) params.set('mode', opts.mode);
+  if (opts?.limit) params.set('limit', String(opts.limit));
+
+  const qs = params.toString();
+  const path = `/signal-engine/velocity${qs ? `?${qs}` : ''}`;
+
+  const restOperation = get({
+    apiName: 'DashboardAPI',
+    path,
+    options: { headers: { Authorization: `Bearer ${token}` } },
+  });
+
+  const resp = await restOperation.response;
+  return await resp.body.json() as unknown as VelocityResponse | VelocityMarket;
+}

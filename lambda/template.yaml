@@ -1033,6 +1033,31 @@ Resources:
             Path: /voiceprint/clips/{clip_id}/url
             Method: GET
 
+  # Lambda: Signal Engine Velocity API
+  SignalEngineVelocityFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-signal-engine-velocity
+      CodeUri: ./
+      Handler: signal-engine-velocity.lambda_handler
+      Description: Signal Engine velocity/acceleration data for market visualization
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          VELOCITY_TABLE: production-signal-engine-velocity
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: production-signal-engine-velocity
+      Events:
+        GetVelocity:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /signal-engine/velocity
+            Method: GET
+
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL

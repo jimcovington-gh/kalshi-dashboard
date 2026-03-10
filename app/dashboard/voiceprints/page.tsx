@@ -37,7 +37,7 @@ function ClipCard({
   onPlay: (clipId: string) => void;
   onStop: () => void;
 }) {
-  const simScore = clip.similarity_score;
+  const simScore = clip.similarity_score != null ? Number(clip.similarity_score) : null;
   const sourceLabel = clip.source_video ? `Video: ${clip.source_video}` : '';
   const timeLabel = clip.timestamp_s ? `@ ${clip.timestamp_s}s` : '';
 

@@ -24,6 +24,8 @@ const tabs = [
     base: 'text-indigo-600', active: 'text-indigo-700 border-indigo-500' },
   { href: '/dashboard/satellite', label: '📡 Satellite', 
     base: 'text-cyan-600', active: 'text-cyan-700 border-cyan-500' },
+  { href: '/dashboard/signal-engine', label: '⚡ Signals',
+    base: 'text-red-600', active: 'text-red-700 border-red-500' },
 ];
 
 export default function DashboardLayout({

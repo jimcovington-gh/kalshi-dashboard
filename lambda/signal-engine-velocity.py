@@ -131,7 +131,7 @@ def _market_summary(item, now):
 # ── Routes ──────────────────────────────────────────────────────────────────
 
 def _load_metadata(tickers):
-    """Batch-load category and event_ticker from market-metadata table."""
+    """Batch-load category, event_ticker, title, and series_ticker from market-metadata table."""
     result = {}
     unique_tickers = list(set(t for t in tickers if t))
     for chunk_start in range(0, len(unique_tickers), 100):
@@ -140,11 +140,13 @@ def _load_metadata(tickers):
             RequestItems={
                 METADATA_TABLE: {
                     "Keys": [{"market_ticker": t} for t in chunk],
-                    "ProjectionExpression": "#mt, #cat, #et",
+                    "ProjectionExpression": "#mt, #cat, #et, #ti, #st",
                     "ExpressionAttributeNames": {
                         "#mt": "market_ticker",
                         "#cat": "category",
                         "#et": "event_ticker",
+                        "#ti": "title",
+                        "#st": "series_ticker",
                     },
                 }
             }
@@ -154,8 +156,50 @@ def _load_metadata(tickers):
             result[ticker] = {
                 "category": (item.get("category") or "unknown").lower(),
                 "event_ticker": item.get("event_ticker", ""),
+                "title": item.get("title", ""),
+                "series_ticker": item.get("series_ticker", ""),
             }
     return result
+
+
+def _build_kalshi_url(series_ticker, title, event_ticker):
+    """Build a Kalshi market URL from series_ticker, title, and event_ticker."""
+    if not series_ticker or not title or not event_ticker:
+        return None
+    import re
+    slug = title.lower()
+    slug = re.sub(r'[^a-z0-9\s-]', '', slug)
+    slug = re.sub(r'\s+', '-', slug)
+    slug = re.sub(r'-+', '-', slug)
+    slug = slug.strip('-')
+    return f"https://kalshi.com/markets/{series_ticker.upper()}/{slug}/{event_ticker.upper()}"
+
+
+def _derive_cluster_name(titles):
+    """Derive a human-readable cluster name from the titles of markets in the cluster."""
+    if not titles:
+        return ""
+    # Use the shortest title as base — it's often the most general
+    # Strip common date/time/strike suffixes to get the event description
+    import re
+    # Find common prefix among all titles
+    if len(titles) == 1:
+        return titles[0]
+    # Try to find the longest common prefix
+    sorted_titles = sorted(titles, key=len)
+    base = sorted_titles[0]
+    # Walk back to find shared prefix
+    for title in sorted_titles[1:]:
+        while base and not title.startswith(base):
+            base = base[:-1]
+    # Clean up partial words
+    if base:
+        base = base.rstrip(' ,.;:-?')
+        # If we got a meaningful prefix (>10 chars), use it
+        if len(base) > 10:
+            return base.strip()
+    # Fallback: use the shortest title
+    return sorted_titles[0]
 
 
 def _get_clusters(limit):
@@ -201,6 +245,8 @@ def _get_clusters(limit):
 
         summary["category"] = category
         summary["event_ticker"] = event_ticker
+        summary["title"] = meta.get("title", "")
+        summary["series_ticker"] = meta.get("series_ticker", "")
         clusters_map[event_ticker].append(summary)
 
     # 4. Build cluster-level summaries
@@ -217,8 +263,13 @@ def _get_clusters(limit):
         top_market = max(markets, key=lambda m: m["max_accel"])
         category = markets[0]["category"]
 
+        # Derive human-readable cluster name from market titles
+        titles = [m.get("title", "") for m in markets if m.get("title")]
+        display_name = _derive_cluster_name(titles) if titles else event_ticker
+
         clusters.append({
             "event_ticker": event_ticker,
+            "display_name": display_name,
             "category": category,
             "market_count": len(markets),
             "max_accel": max_accel,
@@ -268,12 +319,22 @@ def _get_cluster_markets(event_ticker):
         summary = _market_summary(item, now)
         summary["event_ticker"] = event_ticker
         summary["category"] = meta.get("category", "unknown")
+        title = meta.get("title", "")
+        series_ticker = meta.get("series_ticker", "")
+        summary["title"] = title
+        summary["series_ticker"] = series_ticker
+        summary["kalshi_url"] = _build_kalshi_url(series_ticker, title, event_ticker)
         markets.append(summary)
 
     markets.sort(key=lambda m: m["max_accel"], reverse=True)
 
+    # Derive display name for the cluster
+    titles = [m.get("title", "") for m in markets if m.get("title")]
+    display_name = _derive_cluster_name(titles) if titles else event_ticker
+
     return {
         "event_ticker": event_ticker,
+        "display_name": display_name,
         "markets": markets,
         "market_count": len(markets),
         "generated_at": now,
@@ -289,8 +350,14 @@ def _get_single_market(ticker):
     summary = _market_summary(item, now)
     # Enrich with metadata
     meta = _load_metadata([ticker]).get(ticker, {})
-    summary["event_ticker"] = meta.get("event_ticker", "")
+    event_ticker = meta.get("event_ticker", "")
+    title = meta.get("title", "")
+    series_ticker = meta.get("series_ticker", "")
+    summary["event_ticker"] = event_ticker
     summary["category"] = meta.get("category", "unknown")
+    summary["title"] = title
+    summary["series_ticker"] = series_ticker
+    summary["kalshi_url"] = _build_kalshi_url(series_ticker, title, event_ticker)
     return summary
 
 

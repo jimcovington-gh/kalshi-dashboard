@@ -133,6 +133,15 @@ function MarketDetail({ market, onClose }: { market: VelocityMarket; onClose: ()
       <div className="flex items-start gap-6 mb-4">
         <div>
           <h2 className="text-lg font-bold text-gray-900 font-mono">{market.market_ticker}</h2>
+          {market.title && (
+            <p className="text-sm text-gray-600 mt-0.5">
+              {market.kalshi_url ? (
+                <a href={market.kalshi_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                  {market.title} ↗
+                </a>
+              ) : market.title}
+            </p>
+          )}
           <div className="flex items-center gap-3 mt-1">
             <span className="text-2xl font-bold">{(market.current_price * 100).toFixed(1)}¢</span>
             <span className="text-sm text-gray-500">
@@ -192,6 +201,7 @@ function ClusterDrillDown({
   onBack: () => void;
 }) {
   const [markets, setMarkets] = useState<VelocityMarket[]>([]);
+  const [displayName, setDisplayName] = useState<string>(eventTicker);
   const [loading, setLoading] = useState(true);
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
@@ -201,7 +211,9 @@ function ClusterDrillDown({
       try {
         const result = await getSignalEngineVelocity({ event: eventTicker });
         if (!cancelled && 'markets' in result) {
-          setMarkets((result as ClusterMarketsResponse).markets);
+          const cmr = result as ClusterMarketsResponse;
+          setMarkets(cmr.markets);
+          if (cmr.display_name) setDisplayName(cmr.display_name);
         }
       } catch (err) {
         console.error('Failed to load cluster markets:', err);
@@ -226,8 +238,12 @@ function ClusterDrillDown({
       >
         ← Back to clusters
       </button>
-      <h2 className="text-lg font-bold text-gray-900 mb-1 font-mono">{eventTicker}</h2>
-      <p className="text-sm text-gray-500 mb-4">{markets.length} markets in this cluster</p>
+      <h2 className="text-lg font-bold text-gray-900 mb-1">{displayName}</h2>
+      <p className="text-sm text-gray-500 mb-4">
+        <span className="font-mono text-xs text-gray-400">{eventTicker}</span>
+        <span className="mx-2">·</span>
+        {markets.length} markets in this cluster
+      </p>
 
       {selectedMarket && (
         <MarketDetail market={selectedMarket} onClose={() => setSelectedTicker(null)} />
@@ -237,7 +253,7 @@ function ClusterDrillDown({
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b text-left text-xs text-gray-500 uppercase tracking-wider">
-              <th className="px-3 py-2 w-[220px]">Market</th>
+              <th className="px-3 py-2 w-[280px]">Market</th>
               <th className="px-2 py-2 w-[60px] text-right">Price</th>
               <th className="px-2 py-2 w-[120px]">Sparkline</th>
               <th className="px-2 py-2 w-[70px] text-right">Max Accel</th>
@@ -258,9 +274,20 @@ function ClusterDrillDown({
                   }`}
                 >
                   <td className="px-3 py-1.5">
-                    <span className="font-mono text-xs font-medium text-gray-900 truncate block max-w-[210px]" title={market.market_ticker}>
-                      {market.market_ticker}
-                    </span>
+                    <div className="min-w-0">
+                      {market.title ? (
+                        <span className="text-xs font-medium text-gray-900 truncate block max-w-[270px]" title={market.title}>
+                          {market.kalshi_url ? (
+                            <a href={market.kalshi_url} target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 hover:underline" onClick={e => e.stopPropagation()}>
+                              {market.title}
+                            </a>
+                          ) : market.title}
+                        </span>
+                      ) : null}
+                      <span className="font-mono text-[10px] text-gray-400 truncate block max-w-[270px]" title={market.market_ticker}>
+                        {market.market_ticker}
+                      </span>
+                    </div>
                   </td>
                   <td className="px-2 py-1.5 text-right font-mono text-xs font-medium">
                     {(market.current_price * 100).toFixed(0)}¢
@@ -471,9 +498,14 @@ export default function SignalEnginePage() {
                 >
                   <td className="px-3 py-1.5">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-medium text-gray-900 truncate block max-w-[200px]" title={cluster.event_ticker}>
-                        {cluster.event_ticker}
-                      </span>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-xs font-medium text-gray-900 truncate block max-w-[200px]" title={cluster.display_name || cluster.event_ticker}>
+                          {cluster.display_name || cluster.event_ticker}
+                        </span>
+                        <span className="font-mono text-[10px] text-gray-400 truncate block max-w-[200px]">
+                          {cluster.event_ticker}
+                        </span>
+                      </div>
                       <Sparkline data={cluster.price_history} width={60} height={20} />
                     </div>
                   </td>

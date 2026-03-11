@@ -1560,6 +1560,9 @@ export interface VelocityMarket {
   market_ticker: string;
   event_ticker?: string;
   category?: string;
+  title?: string;
+  series_ticker?: string;
+  kalshi_url?: string | null;
   current_price: number;
   velocities: Record<string, number | null>;
   accelerations: Record<string, number | null>;
@@ -1573,6 +1576,7 @@ export interface VelocityMarket {
 
 export interface VelocityCluster {
   event_ticker: string;
+  display_name: string;
   category: string;
   market_count: number;
   max_accel: number;
@@ -1595,6 +1599,7 @@ export interface ClusterResponse {
 
 export interface ClusterMarketsResponse {
   event_ticker: string;
+  display_name: string;
   markets: VelocityMarket[];
   market_count: number;
   generated_at: number;

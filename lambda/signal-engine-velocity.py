@@ -133,22 +133,27 @@ def _market_summary(item, now):
 def _load_metadata(tickers):
     """Batch-load category and event_ticker from market-metadata table."""
     result = {}
-    for chunk_start in range(0, len(tickers), 100):
-        chunk = tickers[chunk_start:chunk_start + 100]
-        keys = [{"market_ticker": t} for t in chunk]
-        response = dynamodb.meta.client.batch_get_item(
+    unique_tickers = list(set(t for t in tickers if t))
+    for chunk_start in range(0, len(unique_tickers), 100):
+        chunk = unique_tickers[chunk_start:chunk_start + 100]
+        response = dynamodb.batch_get_item(
             RequestItems={
                 METADATA_TABLE: {
-                    "Keys": [{k: {"S": v} for k, v in key.items()} for key in keys],
-                    "ProjectionExpression": "market_ticker, category, event_ticker",
+                    "Keys": [{"market_ticker": t} for t in chunk],
+                    "ProjectionExpression": "#mt, #cat, #et",
+                    "ExpressionAttributeNames": {
+                        "#mt": "market_ticker",
+                        "#cat": "category",
+                        "#et": "event_ticker",
+                    },
                 }
             }
         )
         for item in response.get("Responses", {}).get(METADATA_TABLE, []):
-            ticker = item["market_ticker"]["S"]
+            ticker = item["market_ticker"]
             result[ticker] = {
-                "category": item.get("category", {}).get("S", "unknown").lower(),
-                "event_ticker": item.get("event_ticker", {}).get("S", ""),
+                "category": (item.get("category") or "unknown").lower(),
+                "event_ticker": item.get("event_ticker", ""),
             }
     return result
 

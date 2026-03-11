@@ -1091,6 +1091,7 @@ Resources:
         Variables:
           VELOCITY_TABLE: production-signal-engine-velocity
           METADATA_TABLE: production-kalshi-market-metadata
+          CODE_VERSION: "2"
       Policies:
         - DynamoDBReadPolicy:
             TableName: production-signal-engine-velocity

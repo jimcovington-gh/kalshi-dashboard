@@ -124,6 +124,7 @@ export default function VoiceprintsPage() {
   const [error, setError] = useState('');
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'candidate' | 'approved' | 'rejected'>('all');
+  const [showNewSpeaker, setShowNewSpeaker] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Load speakers on mount
@@ -211,9 +212,55 @@ export default function VoiceprintsPage() {
 
   return (
     <div className="space-y-4">
+      {/* New Speaker Modal */}
+      {showNewSpeaker && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowNewSpeaker(false)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-900 mb-3">➕ Add a New Speaker</h3>
+            <div className="space-y-3 text-sm text-gray-700">
+              <p>
+                Adding a new speaker requires extracting audio clips from YouTube interviews.
+                The Copilot AI can do this automatically.
+              </p>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="font-semibold text-blue-900 mb-1">Tell Copilot:</p>
+                <p className="font-mono text-xs text-blue-800 bg-blue-100 rounded p-2">
+                  &quot;Add a new speaker [NAME] to the voiceprint library. Find YouTube interviews with clean studio audio and extract clips.&quot;
+                </p>
+              </div>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <p className="font-semibold text-gray-800 mb-1">Reference:</p>
+                <p className="text-xs text-gray-600">
+                  The full extraction workflow is documented in<br />
+                  <code className="bg-gray-200 px-1 rounded">/memories/repo/voiceprint-clip-extraction.md</code>
+                </p>
+              </div>
+              <p className="text-xs text-gray-500">
+                The AI will search YouTube for studio interviews (avoiding rallies/crowds),
+                download via the satellite server, extract 10-second clips at 16kHz, and upload them here for your review.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowNewSpeaker(false)}
+              className="mt-4 w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 transition-colors"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white rounded-lg shadow p-4">
-        <h2 className="text-2xl font-bold text-gray-900 mb-1">🎤 Voiceprint Library</h2>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-2xl font-bold text-gray-900">🎤 Voiceprint Library</h2>
+          <button
+            onClick={() => setShowNewSpeaker(true)}
+            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-sm font-medium transition-colors border border-indigo-200"
+          >
+            + New Speaker
+          </button>
+        </div>
         <p className="text-sm text-gray-500">
           Curate speaker clips for voiceprint building. Listen, approve (👍) or reject (👎) each clip.
           Goal: 10 approved clips per speaker.

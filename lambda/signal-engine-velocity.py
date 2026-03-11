@@ -82,10 +82,13 @@ def _compute_accelerations(velocities):
             continue
         abs_long = abs(v_long)
         abs_short = abs(v_short)
+        # Sign follows short-term velocity direction: positive = accelerating up, negative = down
+        sign = 1 if v_short >= 0 else -1
         if abs_long < 0.001:
-            accels[key] = 1.0 if abs_short < 0.001 else abs_short / 0.001
+            ratio = 1.0 if abs_short < 0.001 else abs_short / 0.001
         else:
-            accels[key] = abs_short / abs_long
+            ratio = abs_short / abs_long
+        accels[key] = sign * ratio
     return accels
 
 
@@ -110,6 +113,8 @@ def _market_summary(item, now):
 
     valid_v = [abs(v) for v in velocities.values() if v is not None]
     valid_a = [a for a in accelerations.values() if a is not None]
+    # max_accel: the acceleration with the largest absolute magnitude, preserving sign
+    max_accel_val = max(valid_a, key=abs) if valid_a else 0
 
     return {
         "market_ticker": ticker,
@@ -117,7 +122,7 @@ def _market_summary(item, now):
         "velocities": {k: round(v, 6) if v is not None else None for k, v in velocities.items()},
         "accelerations": {k: round(a, 2) if a is not None else None for k, a in accelerations.items()},
         "max_velocity": round(max(valid_v), 6) if valid_v else 0,
-        "max_accel": round(max(valid_a), 2) if valid_a else 0,
+        "max_accel": round(max_accel_val, 2),
         "snapshot_count": len(snapshots),
         "data_span_hours": round(data_span_hours, 1),
         "last_update": sorted_snaps[-1]["ts"],
@@ -255,12 +260,12 @@ def _get_clusters(limit):
         if not markets:
             continue
 
-        max_accel = max(m["max_accel"] for m in markets)
+        max_accel = max((m["max_accel"] for m in markets), key=abs)
         max_velocity = max(m["max_velocity"] for m in markets)
         avg_price = sum(m["current_price"] for m in markets) / len(markets)
         latest_update = max(m["last_update"] for m in markets)
         # Use the most active market's sparkline as representative
-        top_market = max(markets, key=lambda m: m["max_accel"])
+        top_market = max(markets, key=lambda m: abs(m["max_accel"]))
         category = markets[0]["category"]
 
         # Derive human-readable cluster name from market titles
@@ -282,7 +287,7 @@ def _get_clusters(limit):
             "accelerations": top_market["accelerations"],
         })
 
-    clusters.sort(key=lambda c: c["max_accel"], reverse=True)
+    clusters.sort(key=lambda c: abs(c["max_accel"]), reverse=True)
 
     return {
         "clusters": clusters[:limit],
@@ -326,7 +331,7 @@ def _get_cluster_markets(event_ticker):
         summary["kalshi_url"] = _build_kalshi_url(series_ticker, title, event_ticker)
         markets.append(summary)
 
-    markets.sort(key=lambda m: m["max_accel"], reverse=True)
+    markets.sort(key=lambda m: abs(m["max_accel"]), reverse=True)
 
     # Derive display name for the cluster
     titles = [m.get("title", "") for m in markets if m.get("title")]

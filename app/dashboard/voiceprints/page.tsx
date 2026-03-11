@@ -178,6 +178,8 @@ export default function VoiceprintsPage() {
 
   function stopAudio() {
     if (audioRef.current) {
+      audioRef.current.onended = null;
+      audioRef.current.onerror = null;
       audioRef.current.pause();
       audioRef.current.src = '';
     }

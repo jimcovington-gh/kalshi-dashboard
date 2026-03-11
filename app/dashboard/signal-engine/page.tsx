@@ -28,12 +28,24 @@ const ACCEL_LABELS = [
 
 function accelColor(v: number | null): string {
   if (v === null || v === undefined) return 'bg-gray-100 text-gray-400';
-  if (v >= 10) return 'bg-red-600 text-white';
-  if (v >= 5) return 'bg-red-400 text-white';
-  if (v >= 3) return 'bg-orange-400 text-white';
-  if (v >= 2) return 'bg-yellow-400 text-gray-900';
-  if (v >= 1.5) return 'bg-yellow-200 text-gray-800';
-  return 'bg-green-100 text-green-800';
+  const a = Math.abs(v);
+  if (v > 0) {
+    // Accelerating UP — red shades
+    if (a >= 10) return 'bg-red-600 text-white';
+    if (a >= 5) return 'bg-red-400 text-white';
+    if (a >= 3) return 'bg-orange-400 text-white';
+    if (a >= 2) return 'bg-yellow-400 text-gray-900';
+    if (a >= 1.5) return 'bg-yellow-200 text-gray-800';
+    return 'bg-green-100 text-green-800';
+  } else {
+    // Accelerating DOWN — blue shades
+    if (a >= 10) return 'bg-blue-700 text-white';
+    if (a >= 5) return 'bg-blue-500 text-white';
+    if (a >= 3) return 'bg-blue-400 text-white';
+    if (a >= 2) return 'bg-cyan-400 text-gray-900';
+    if (a >= 1.5) return 'bg-cyan-200 text-gray-800';
+    return 'bg-green-100 text-green-800';
+  }
 }
 
 function velocityColor(v: number | null): string {
@@ -56,9 +68,11 @@ function formatVelocity(v: number | null): string {
 
 function formatAccel(v: number | null): string {
   if (v === null || v === undefined) return '—';
-  if (v >= 100) return `${v.toFixed(0)}×`;
-  if (v >= 10) return `${v.toFixed(1)}×`;
-  return `${v.toFixed(2)}×`;
+  const a = Math.abs(v);
+  const arrow = v > 0 ? '↑' : v < 0 ? '↓' : '';
+  if (a >= 100) return `${arrow}${a.toFixed(0)}×`;
+  if (a >= 10) return `${arrow}${a.toFixed(1)}×`;
+  return `${arrow}${a.toFixed(2)}×`;
 }
 
 function timeAgo(ts: number): string {
@@ -309,7 +323,7 @@ function ClusterDrillDown({
                           title={`${a}: ${formatAccel(market.accelerations[a])}`}
                         >
                           {market.accelerations[a] != null
-                            ? (market.accelerations[a]! >= 10 ? '!' : market.accelerations[a]!.toFixed(0))
+                            ? (Math.abs(market.accelerations[a]!) >= 10 ? (market.accelerations[a]! > 0 ? '↑!' : '↓!') : (market.accelerations[a]! > 0 ? '↑' : market.accelerations[a]! < 0 ? '↓' : '') + Math.abs(market.accelerations[a]!).toFixed(0))
                             : '·'}
                         </div>
                       ))}
@@ -375,7 +389,7 @@ export default function SignalEnginePage() {
   const sortedClusters = React.useMemo(() => {
     const c = [...clusters];
     switch (sortBy) {
-      case 'accel': return c.sort((a, b) => b.max_accel - a.max_accel);
+      case 'accel': return c.sort((a, b) => Math.abs(b.max_accel) - Math.abs(a.max_accel));
       case 'velocity': return c.sort((a, b) => b.max_velocity - a.max_velocity);
       case 'markets': return c.sort((a, b) => b.market_count - a.market_count);
       case 'updated': return c.sort((a, b) => b.last_update - a.last_update);
@@ -389,14 +403,17 @@ export default function SignalEnginePage() {
       <div>
         <ClusterDrillDown eventTicker={drillEvent} onBack={() => setDrillEvent(null)} />
         {/* Legend */}
-        <div className="mt-4 flex items-center gap-4 text-xs text-gray-500">
-          <span className="font-medium">Acceleration scale:</span>
+        <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-gray-500">
+          <span className="font-medium">Acceleration:</span>
           <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-800">&lt;1.5× normal</span>
-          <span className="px-1.5 py-0.5 rounded bg-yellow-200 text-gray-800">1.5-2× warming</span>
-          <span className="px-1.5 py-0.5 rounded bg-yellow-400 text-gray-900">2-3× elevated</span>
-          <span className="px-1.5 py-0.5 rounded bg-orange-400 text-white">3-5× hot</span>
-          <span className="px-1.5 py-0.5 rounded bg-red-400 text-white">5-10× alert</span>
-          <span className="px-1.5 py-0.5 rounded bg-red-600 text-white">&gt;10× extreme</span>
+          <span className="font-medium ml-2">↑ Up:</span>
+          <span className="px-1.5 py-0.5 rounded bg-yellow-200 text-gray-800">1.5-2×</span>
+          <span className="px-1.5 py-0.5 rounded bg-orange-400 text-white">3-5×</span>
+          <span className="px-1.5 py-0.5 rounded bg-red-600 text-white">&gt;10×</span>
+          <span className="font-medium ml-2">↓ Down:</span>
+          <span className="px-1.5 py-0.5 rounded bg-cyan-200 text-gray-800">1.5-2×</span>
+          <span className="px-1.5 py-0.5 rounded bg-blue-400 text-white">3-5×</span>
+          <span className="px-1.5 py-0.5 rounded bg-blue-700 text-white">&gt;10×</span>
         </div>
       </div>
     );
@@ -539,7 +556,7 @@ export default function SignalEnginePage() {
                           title={`${a}: ${formatAccel(cluster.accelerations[a])}`}
                         >
                           {cluster.accelerations[a] != null
-                            ? (cluster.accelerations[a]! >= 10 ? '!' : cluster.accelerations[a]!.toFixed(0))
+                            ? (Math.abs(cluster.accelerations[a]!) >= 10 ? (cluster.accelerations[a]! > 0 ? '↑!' : '↓!') : (cluster.accelerations[a]! > 0 ? '↑' : cluster.accelerations[a]! < 0 ? '↓' : '') + Math.abs(cluster.accelerations[a]!).toFixed(0))
                             : '·'}
                         </div>
                       ))}
@@ -556,14 +573,17 @@ export default function SignalEnginePage() {
       )}
 
       {/* Legend */}
-      <div className="mt-4 flex items-center gap-4 text-xs text-gray-500">
-        <span className="font-medium">Acceleration scale:</span>
+      <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-gray-500">
+        <span className="font-medium">Acceleration:</span>
         <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-800">&lt;1.5× normal</span>
-        <span className="px-1.5 py-0.5 rounded bg-yellow-200 text-gray-800">1.5-2× warming</span>
-        <span className="px-1.5 py-0.5 rounded bg-yellow-400 text-gray-900">2-3× elevated</span>
-        <span className="px-1.5 py-0.5 rounded bg-orange-400 text-white">3-5× hot</span>
-        <span className="px-1.5 py-0.5 rounded bg-red-400 text-white">5-10× alert</span>
-        <span className="px-1.5 py-0.5 rounded bg-red-600 text-white">&gt;10× extreme</span>
+        <span className="font-medium ml-2">↑ Up:</span>
+        <span className="px-1.5 py-0.5 rounded bg-yellow-200 text-gray-800">1.5-2×</span>
+        <span className="px-1.5 py-0.5 rounded bg-orange-400 text-white">3-5×</span>
+        <span className="px-1.5 py-0.5 rounded bg-red-600 text-white">&gt;10×</span>
+        <span className="font-medium ml-2">↓ Down:</span>
+        <span className="px-1.5 py-0.5 rounded bg-cyan-200 text-gray-800">1.5-2×</span>
+        <span className="px-1.5 py-0.5 rounded bg-blue-400 text-white">3-5×</span>
+        <span className="px-1.5 py-0.5 rounded bg-blue-700 text-white">&gt;10×</span>
       </div>
     </div>
   );

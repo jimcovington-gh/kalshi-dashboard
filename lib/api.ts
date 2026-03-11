@@ -1563,6 +1563,9 @@ export interface VelocityMarket {
   title?: string;
   series_ticker?: string;
   kalshi_url?: string | null;
+  surprise_tradable?: boolean;
+  classification_reason?: string;
+  leak_watch?: boolean;
   current_price: number;
   velocities: Record<string, number | null>;
   accelerations: Record<string, number | null>;
@@ -1587,6 +1590,7 @@ export interface VelocityCluster {
   top_market_price: number;
   price_history: Array<{ ts: number; price: number }>;
   accelerations: Record<string, number | null>;
+  leak_watch?: boolean;
 }
 
 export interface ClusterResponse {
@@ -1594,6 +1598,7 @@ export interface ClusterResponse {
   total_clusters: number;
   total_markets: number;
   excluded_count?: number;
+  filtered_not_surprise?: number;
   generated_at: number;
 }
 

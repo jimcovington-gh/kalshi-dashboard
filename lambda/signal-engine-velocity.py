@@ -21,14 +21,19 @@ import boto3
 
 VELOCITY_TABLE = os.environ.get("VELOCITY_TABLE", "production-signal-engine-velocity")
 METADATA_TABLE = os.environ.get("METADATA_TABLE", "production-kalshi-market-metadata")
+CLASSIFICATION_TABLE = os.environ.get("CLASSIFICATION_TABLE", "production-signal-engine-market-class")
 TOP_N = int(os.environ.get("TOP_N", "50"))
 
 # Categories to exclude from the velocity dashboard
 EXCLUDED_CATEGORIES = {"crypto", "mentions", "climate and weather", "financials", "sports"}
 
+# Non-surprise markets are shown within this window of close_time (leak detection)
+LEAK_WATCH_HOURS = 48
+
 dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 table = dynamodb.Table(VELOCITY_TABLE)
 metadata_table = dynamodb.Table(METADATA_TABLE)
+classification_table = dynamodb.Table(CLASSIFICATION_TABLE)
 
 
 # ── Velocity Computation ────────────────────────────────────────────────────
@@ -207,8 +212,32 @@ def _derive_cluster_name(titles):
     return sorted_titles[0]
 
 
+def _load_classifications(tickers):
+    """Batch-load AI classifications for markets."""
+    result = {}
+    unique_tickers = list(set(t for t in tickers if t))
+    for chunk_start in range(0, len(unique_tickers), 100):
+        chunk = unique_tickers[chunk_start:chunk_start + 100]
+        response = dynamodb.batch_get_item(
+            RequestItems={
+                CLASSIFICATION_TABLE: {
+                    "Keys": [{"market_ticker": t} for t in chunk],
+                    "ProjectionExpression": "market_ticker, surprise_tradable, reason, close_time",
+                }
+            }
+        )
+        for item in response.get("Responses", {}).get(CLASSIFICATION_TABLE, []):
+            ticker = item["market_ticker"]
+            result[ticker] = {
+                "surprise_tradable": bool(item.get("surprise_tradable", True)),
+                "reason": str(item.get("reason", "")),
+                "close_time": int(item.get("close_time", 0)),
+            }
+    return result
+
+
 def _get_clusters(limit):
-    """Aggregate markets into clusters by event_ticker, filter excluded categories."""
+    """Aggregate markets into clusters by event_ticker, filter excluded categories + classifications."""
     now = time.time()
 
     # 1. Scan all velocity items
@@ -228,9 +257,13 @@ def _get_clusters(limit):
     all_tickers = [item["market_ticker"] for item in items]
     metadata = _load_metadata(all_tickers)
 
-    # 3. Compute market summaries, filtering out excluded categories
+    # 2b. Batch-load AI classifications
+    classifications = _load_classifications(all_tickers)
+
+    # 3. Compute market summaries, filtering out excluded categories + non-surprise markets
     clusters_map = defaultdict(list)  # event_ticker → [market_summary]
     excluded_count = 0
+    filtered_not_surprise = 0
 
     for item in items:
         ticker = item["market_ticker"]
@@ -244,6 +277,18 @@ def _get_clusters(limit):
         if not event_ticker:
             continue
 
+        # Classification filter: show if surprise-tradable, unclassified, or within leak-watch window
+        classification = classifications.get(ticker)
+        leak_watch = False
+        if classification and not classification["surprise_tradable"]:
+            close_time = classification["close_time"]
+            hours_to_close = (close_time - now) / 3600 if close_time else float("inf")
+            if hours_to_close > LEAK_WATCH_HOURS:
+                filtered_not_surprise += 1
+                continue
+            # Within leak-watch window — include but flag it
+            leak_watch = True
+
         summary = _market_summary(item, now)
         if summary["snapshot_count"] < 2:
             continue
@@ -252,6 +297,10 @@ def _get_clusters(limit):
         summary["event_ticker"] = event_ticker
         summary["title"] = meta.get("title", "")
         summary["series_ticker"] = meta.get("series_ticker", "")
+        if classification:
+            summary["surprise_tradable"] = classification["surprise_tradable"]
+            summary["classification_reason"] = classification["reason"]
+        summary["leak_watch"] = leak_watch
         clusters_map[event_ticker].append(summary)
 
     # 4. Build cluster-level summaries
@@ -285,6 +334,7 @@ def _get_clusters(limit):
             "top_market_price": top_market["current_price"],
             "price_history": top_market["price_history"],
             "accelerations": top_market["accelerations"],
+            "leak_watch": any(m.get("leak_watch") for m in markets),
         })
 
     clusters.sort(key=lambda c: abs(c["max_accel"]), reverse=True)
@@ -294,6 +344,7 @@ def _get_clusters(limit):
         "total_clusters": len(clusters),
         "total_markets": sum(c["market_count"] for c in clusters),
         "excluded_count": excluded_count,
+        "filtered_not_surprise": filtered_not_surprise,
         "generated_at": now,
     }
 
@@ -314,6 +365,7 @@ def _get_cluster_markets(event_ticker):
 
     all_tickers = [item["market_ticker"] for item in items]
     metadata = _load_metadata(all_tickers)
+    classifications = _load_classifications(all_tickers)
 
     markets = []
     for item in items:
@@ -329,6 +381,10 @@ def _get_cluster_markets(event_ticker):
         summary["title"] = title
         summary["series_ticker"] = series_ticker
         summary["kalshi_url"] = _build_kalshi_url(series_ticker, title, event_ticker)
+        classification = classifications.get(ticker)
+        if classification:
+            summary["surprise_tradable"] = classification["surprise_tradable"]
+            summary["classification_reason"] = classification["reason"]
         markets.append(summary)
 
     markets.sort(key=lambda m: abs(m["max_accel"]), reverse=True)

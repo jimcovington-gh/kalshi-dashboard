@@ -45,12 +45,14 @@ function ClipCard({
   return (
     <div
       className={`border rounded-lg p-3 transition-all ${
-        clip.status === 'approved'
+        isPlaying
+          ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-400 shadow-lg shadow-blue-200 animate-pulse'
+          : clip.status === 'approved'
           ? 'border-green-300 bg-green-50'
           : clip.status === 'rejected'
           ? 'border-red-200 bg-red-50 opacity-60'
           : 'border-gray-200 bg-white'
-      } ${isPlaying ? 'ring-2 ring-blue-400' : ''}`}
+      }`}
     >
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">

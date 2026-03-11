@@ -351,6 +351,7 @@ export default function SignalEnginePage() {
   const [clusters, setClusters] = useState<VelocityCluster[]>([]);
   const [totalMarkets, setTotalMarkets] = useState(0);
   const [excludedCount, setExcludedCount] = useState(0);
+  const [filteredNotSurprise, setFilteredNotSurprise] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<number>(0);
@@ -366,6 +367,7 @@ export default function SignalEnginePage() {
         setClusters(cr.clusters);
         setTotalMarkets(cr.total_markets);
         setExcludedCount(cr.excluded_count ?? 0);
+        setFilteredNotSurprise(cr.filtered_not_surprise ?? 0);
         setError(null);
       }
       setLastRefresh(Date.now());
@@ -448,6 +450,7 @@ export default function SignalEnginePage() {
           <p className="text-sm text-gray-500 mt-0.5">
             {sortedClusters.length} clusters · {totalMarkets} markets
             {excludedCount > 0 && <span className="text-gray-400"> · {excludedCount} excluded</span>}
+            {filteredNotSurprise > 0 && <span className="text-gray-400"> · {filteredNotSurprise} non-surprise filtered</span>}
             {lastRefresh > 0 && (
               <span className="ml-2 text-gray-400">· refreshed {timeAgo(lastRefresh / 1000)}</span>
             )}
@@ -519,9 +522,16 @@ export default function SignalEnginePage() {
                         <span className="text-xs font-medium text-gray-900 truncate block max-w-[200px]" title={cluster.display_name || cluster.event_ticker}>
                           {cluster.display_name || cluster.event_ticker}
                         </span>
-                        <span className="font-mono text-[10px] text-gray-400 truncate block max-w-[200px]">
-                          {cluster.event_ticker}
-                        </span>
+                        <div className="flex items-center gap-1">
+                          <span className="font-mono text-[10px] text-gray-400 truncate block max-w-[170px]">
+                            {cluster.event_ticker}
+                          </span>
+                          {cluster.leak_watch && (
+                            <span className="inline-block px-1 py-0 rounded text-[9px] font-semibold bg-amber-100 text-amber-700 border border-amber-300 whitespace-nowrap" title="Non-surprise market within 48h of close (leak detection window)">
+                              LEAK WATCH
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <Sparkline data={cluster.price_history} width={60} height={20} />
                     </div>

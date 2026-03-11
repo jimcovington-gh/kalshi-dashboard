@@ -197,6 +197,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [scheduledStart, setScheduledStart] = useState('');
   const [dryRun, setDryRun] = useState(false);  // Dry run mode - no real trades
   const [sttDiarization, setSttDiarization] = useState(false);  // Speaker diarization (spk_0 labels)
+  const [llmPrediction, setLlmPrediction] = useState(false);  // LLM prediction pipeline (A10G GPU)
+  const [llmPredictionStatus, setLlmPredictionStatus] = useState<any>(null);  // Prediction server status
   const [showStarted, setShowStarted] = useState(false);  // Toggle to show already-started events
   
   // Launch state
@@ -1651,6 +1653,38 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       if (data.websocket_url) {
         setWsUrl(data.websocket_url);
         
+        // Enable LLM prediction if toggled on (fire-and-forget, non-blocking)
+        if (llmPrediction) {
+          fetch(`${EC2_BASE}/session/${data.session_id}/llm_prediction`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ threshold: 0.15 }),
+          }).then(async (r) => {
+            if (r.ok) {
+              const result = await r.json();
+              setLlmPredictionStatus(result);
+              setSystemLog(prev => [...prev, {
+                timestamp: Date.now() / 1000,
+                message: `🔮 LLM Prediction enabled — ${result.keywords?.length || 0} keywords, threshold ${result.threshold}`,
+                level: 'info' as const
+              }]);
+            } else {
+              const err = await r.json().catch(() => ({})) as Record<string, unknown>;
+              setSystemLog(prev => [...prev, {
+                timestamp: Date.now() / 1000,
+                message: `🔮 LLM Prediction failed to enable: ${err.detail || r.status}`,
+                level: 'error' as const
+              }]);
+            }
+          }).catch((e) => {
+            setSystemLog(prev => [...prev, {
+              timestamp: Date.now() / 1000,
+              message: `🔮 LLM Prediction error: ${(e as Error).message}`,
+              level: 'error' as const
+            }]);
+          });
+        }
+        
         // EC2 uses voice.apexmarkets.us with Let's Encrypt - valid cert, go straight to monitoring
         setLaunching(false);
         setLaunchStatus('');
@@ -2648,6 +2682,25 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               Leave off for satellite/SRT sources — Riva has no diarizer loaded.
             </p>
           </div>
+
+          <div className="mt-4">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={llmPrediction}
+                onChange={e => setLlmPrediction(e.target.checked)}
+                className="w-4 h-4 accent-violet-500"
+              />
+              <span className={llmPrediction ? 'text-violet-400 font-semibold' : ''}>
+                🔮 LLM Prediction {llmPrediction && '(ENABLED)'}
+              </span>
+            </label>
+            <p className="text-xs text-gray-500 mt-1">
+              Run Llama 8B on A10G GPU to predict next words before they&apos;re spoken.
+              Buys early on high-confidence predictions, auto-sells if Riva doesn&apos;t confirm within 60s.
+              Only useful with satellite audio source.
+            </p>
+          </div>
           
           <div className="mt-8">
             <button
@@ -2783,6 +2836,44 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             </button>
           </div>
         )}
+
+        {/* LLM PREDICTION BANNER */}
+        {llmPrediction && (
+          <div className="bg-violet-900/40 border border-violet-700 px-3 py-2 rounded-lg mb-2 flex items-center gap-3 text-sm">
+            <span className="text-violet-200 font-medium">🔮 LLM Prediction active</span>
+            {llmPredictionStatus && (
+              <span className="text-violet-300 text-xs">
+                {llmPredictionStatus.keywords?.length || 0} keywords · threshold {llmPredictionStatus.threshold}
+              </span>
+            )}
+            <button
+              onClick={async () => {
+                try {
+                  const r = await fetch(`${EC2_BASE}/session/${sessionId}/llm_prediction`);
+                  if (r.ok) setLlmPredictionStatus(await r.json());
+                } catch {}
+              }}
+              className="px-2 py-1 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs transition-colors"
+            >
+              Refresh Status
+            </button>
+            <button
+              onClick={async () => {
+                await fetch(`${EC2_BASE}/session/${sessionId}/llm_prediction`, { method: 'DELETE' });
+                setLlmPrediction(false);
+                setLlmPredictionStatus(null);
+                setSystemLog(prev => [...prev, {
+                  timestamp: Date.now() / 1000,
+                  message: '🔮 LLM Prediction disabled',
+                  level: 'info' as const
+                }]);
+              }}
+              className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs transition-colors"
+            >
+              Disable
+            </button>
+          </div>
+        )}
         
         {/* Header - SIMPLIFIED */}
         <div className="flex justify-between items-center mb-4">
@@ -2912,6 +3003,52 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                     : "End-of-call detection OFF - Click to enable"}
                 >
                   {containerState?.call_end_detection_enabled ? '🔔 End Detect: ON' : '🔔 End Detect: OFF'}
+                </button>
+
+                {/* LLM Prediction Toggle */}
+                <button
+                  onClick={async () => {
+                    if (llmPrediction) {
+                      // Disable
+                      await fetch(`${EC2_BASE}/session/${sessionId}/llm_prediction`, { method: 'DELETE' });
+                      setLlmPrediction(false);
+                      setLlmPredictionStatus(null);
+                      setSystemLog(prev => [...prev, {
+                        timestamp: Date.now() / 1000,
+                        message: '🔮 LLM Prediction disabled',
+                        level: 'info' as const
+                      }]);
+                    } else {
+                      // Enable
+                      try {
+                        const r = await fetch(`${EC2_BASE}/session/${sessionId}/llm_prediction`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ threshold: 0.15 }),
+                        });
+                        if (r.ok) {
+                          const result = await r.json();
+                          setLlmPrediction(true);
+                          setLlmPredictionStatus(result);
+                          setSystemLog(prev => [...prev, {
+                            timestamp: Date.now() / 1000,
+                            message: `🔮 LLM Prediction enabled — ${result.keywords?.length || 0} keywords`,
+                            level: 'info' as const
+                          }]);
+                        }
+                      } catch {}
+                    }
+                  }}
+                  className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                    llmPrediction
+                      ? 'bg-violet-600 hover:bg-violet-500 ring-1 ring-violet-400'
+                      : 'bg-gray-600 hover:bg-gray-500'
+                  }`}
+                  title={llmPrediction
+                    ? "LLM Prediction ON — A10G GPU predicting next words. Click to disable"
+                    : "LLM Prediction OFF — Click to enable GPU word prediction"}
+                >
+                  {llmPrediction ? '🔮 LLM: ON' : '🔮 LLM: OFF'}
                 </button>
                 
                 {/* Q&A Triggered Status - show if Q&A has been triggered */}

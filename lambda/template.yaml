@@ -1091,12 +1091,15 @@ Resources:
         Variables:
           VELOCITY_TABLE: production-signal-engine-velocity
           METADATA_TABLE: production-kalshi-market-metadata
-          CODE_VERSION: "4"
+          CLASSIFICATION_TABLE: !Ref SignalEngineClassificationTable
+          CODE_VERSION: "5"
       Policies:
         - DynamoDBReadPolicy:
             TableName: production-signal-engine-velocity
         - DynamoDBReadPolicy:
             TableName: production-kalshi-market-metadata
+        - DynamoDBReadPolicy:
+            TableName: !Ref SignalEngineClassificationTable
       Events:
         GetVelocity:
           Type: Api
@@ -1104,6 +1107,59 @@ Resources:
             RestApiId: !Ref DashboardApi
             Path: /signal-engine/velocity
             Method: GET
+
+  # DynamoDB table for AI market classifications (surprise-tradable vs not)
+  SignalEngineClassificationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: production-signal-engine-market-class
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: market_ticker
+          AttributeType: S
+      KeySchema:
+        - AttributeName: market_ticker
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # Lambda: AI market classifier using Bedrock Claude Haiku
+  SignalEngineClassifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-signal-engine-classifier
+      CodeUri: ./
+      Handler: signal-engine-classifier.lambda_handler
+      Description: AI classification of markets as surprise-tradable using Bedrock Haiku
+      MemorySize: 256
+      Timeout: 900
+      Environment:
+        Variables:
+          CLASSIFICATION_TABLE: !Ref SignalEngineClassificationTable
+          VELOCITY_TABLE: production-signal-engine-velocity
+          METADATA_TABLE: production-kalshi-market-metadata
+          BEDROCK_MODEL_ID: anthropic.claude-3-haiku-20240307-v1:0
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SignalEngineClassificationTable
+        - DynamoDBReadPolicy:
+            TableName: production-signal-engine-velocity
+        - DynamoDBReadPolicy:
+            TableName: production-kalshi-market-metadata
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0'
+      Events:
+        ClassifySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Description: Classify new/unclassified velocity markets every 15 min
+            Input: '{"action": "classify_new"}'
 
 Outputs:
   ApiEndpoint:

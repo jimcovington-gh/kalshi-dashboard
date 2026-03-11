@@ -183,6 +183,65 @@ def _classify_and_store(ticker, meta):
     return ticker, surprise, reason
 
 
+def _classify_specific_tickers(tickers, context):
+    """Classify a specific list of tickers (called from real-time lifecycle trigger)."""
+    start = time.time()
+    tickers = list(set(tickers))  # dedupe
+    print(f"classifier: classify_tickers mode, {len(tickers)} tickers")
+
+    # Load metadata
+    metadata = _batch_get_metadata(tickers)
+    print(f"classifier: {len(metadata)} tickers with metadata")
+
+    # Filter out excluded categories and markets without titles
+    eligible = {
+        t: m for t, m in metadata.items()
+        if m["category"] not in EXCLUDED_CATEGORIES and m["title"]
+    }
+    print(f"classifier: {len(eligible)} eligible (after category exclusion)")
+
+    # Skip already-classified (fresh) markets
+    existing = _batch_get_existing_classifications(list(eligible.keys()))
+    now = time.time()
+    stale_cutoff = now - CLASSIFICATION_TTL_DAYS * 86400
+    to_classify = {
+        t: m for t, m in eligible.items()
+        if t not in existing or existing[t] < stale_cutoff
+    }
+    print(f"classifier: {len(existing)} already classified, {len(to_classify)} to classify")
+
+    if not to_classify:
+        print("classifier: nothing to classify")
+        return {"statusCode": 200, "body": json.dumps({
+            "action": "classify_tickers", "classified": 0,
+            "elapsed": round(time.time() - start, 1)
+        })}
+
+    classified = 0
+    errors = 0
+    with ThreadPoolExecutor(max_workers=CLASSIFY_CONCURRENCY) as executor:
+        futures = {
+            executor.submit(_classify_and_store, ticker, meta): ticker
+            for ticker, meta in to_classify.items()
+        }
+        for future in as_completed(futures):
+            ticker = futures[future]
+            try:
+                t, surprise, reason = future.result()
+                classified += 1
+                print(f"classifier: {t} → surprise={surprise} ({reason})")
+            except Exception as e:
+                errors += 1
+                print(f"classifier: ERROR {ticker}: {e}")
+
+    elapsed = round(time.time() - start, 1)
+    print(f"classifier: done. classified={classified}, errors={errors}, elapsed={elapsed}s")
+    return {"statusCode": 200, "body": json.dumps({
+        "action": "classify_tickers", "classified": classified,
+        "errors": errors, "elapsed": elapsed,
+    })}
+
+
 def lambda_handler(event, context):
     start = time.time()
     action = "classify_new"
@@ -192,6 +251,13 @@ def lambda_handler(event, context):
         action = event["action"]
 
     print(f"classifier: action={action}")
+
+    # Real-time: classify specific tickers (from trade-capture lifecycle trigger)
+    if action == "classify_tickers":
+        tickers = event.get("tickers", [])
+        if not tickers:
+            return {"statusCode": 400, "body": json.dumps({"error": "no tickers provided"})}
+        return _classify_specific_tickers(tickers, context)
 
     try:
         # 1. Get all tickers from velocity table

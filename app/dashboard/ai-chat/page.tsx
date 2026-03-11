@@ -105,6 +105,7 @@ export default function AIChatPage() {
   const [showTokenDialog, setShowTokenDialog] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
   const [copilotConversationId, setCopilotConversationId] = useState<string | undefined>();
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -387,13 +388,20 @@ export default function AIChatPage() {
     inputRef.current?.focus();
   }
 
-  function handleModeSwitch(mode: ChatMode) {
-    setChatMode(mode);
-    localStorage.setItem(CHAT_MODE_KEY, mode);
-    // If switching to copilot and no token, prompt
-    if (mode === 'copilot' && !deviceToken) {
-      setShowTokenDialog(true);
-    }
+  function handleResetChatServer() {
+    // Clear Copilot conversation state
+    setCopilotConversationId(undefined);
+    // Clear messages
+    setMessages([]);
+    // Clear progress/error
+    setProgress('');
+    setError(null);
+    // Clear input
+    setInput('');
+    // Close confirmation dialog
+    setShowResetConfirm(false);
+    // Focus input
+    inputRef.current?.focus();
   }
 
   function handleSaveDeviceToken() {
@@ -460,29 +468,14 @@ export default function AIChatPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">🤖 AI Data Assistant</h1>
           <div className="flex items-center gap-3 mt-1">
-            {/* Mode Toggle */}
-            <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
-              <button
-                onClick={() => handleModeSwitch('copilot')}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                  chatMode === 'copilot'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Copilot
-              </button>
-              <button
-                onClick={() => handleModeSwitch('bedrock')}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                  chatMode === 'bedrock'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Bedrock
-              </button>
-            </div>
+            {/* Reset Chat Server Button */}
+            <button
+              onClick={() => setShowResetConfirm(true)}
+              className="px-3 py-1.5 text-xs font-medium bg-orange-50 text-orange-600 hover:bg-orange-100 rounded-md transition-colors border border-orange-200"
+              title="Reset the chat server connection and clear conversation"
+            >
+              🔄 Reset Server
+            </button>
             {/* Device Token Status (Copilot mode) */}
             {chatMode === 'copilot' && (
               <div className="flex items-center gap-1.5">
@@ -606,6 +599,33 @@ export default function AIChatPage() {
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
               >
                 Save Token
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Chat Server Confirmation Dialog */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-96 shadow-xl">
+            <h3 className="text-lg font-semibold mb-2 text-orange-600">🔄 Reset Chat Server?</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              This will clear the current conversation and reset the connection to the chat server.
+              You&rsquo;ll be able to start fresh immediately after.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleResetChatServer}
+                className="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700"
+              >
+                Reset
               </button>
             </div>
           </div>

@@ -202,8 +202,9 @@ export default function VoiceprintsPage() {
     audio.play();
   }
 
+  const approvedClips = clips.filter((c) => c.status === 'approved');
   const filteredClips = filter === 'all' ? clips : clips.filter((c) => c.status === filter);
-  const approvedCount = clips.filter((c) => c.status === 'approved').length;
+  const approvedCount = approvedClips.length;
   const candidateCount = clips.filter((c) => c.status === 'candidate').length;
 
   return (
@@ -284,6 +285,34 @@ export default function VoiceprintsPage() {
             />
             <p className="text-xs text-gray-400 mt-1">{approvedCount}/10 target</p>
           </div>
+
+          {/* Reference audio — approved clips for comparison */}
+          {approvedClips.length > 0 && (
+            <div className="mb-4 border border-green-200 bg-green-50 rounded-lg p-3">
+              <h4 className="text-xs font-semibold text-green-800 uppercase tracking-wide mb-2">
+                ✅ Reference Audio ({approvedClips.length} approved)
+              </h4>
+              <div className="flex flex-wrap gap-2">
+                {approvedClips.map((clip) => (
+                  <button
+                    key={clip.clip_id}
+                    onClick={() => (playingClipId === clip.clip_id ? stopAudio() : playClip(clip.clip_id))}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                      playingClipId === clip.clip_id
+                        ? 'bg-green-600 text-white ring-2 ring-green-400'
+                        : 'bg-white text-green-700 border border-green-300 hover:bg-green-100'
+                    }`}
+                    title={`${clip.source_video || ''} ${clip.timestamp_s ? `@ ${clip.timestamp_s}s` : ''}`}
+                  >
+                    {playingClipId === clip.clip_id ? '⏹' : '▶'} {clip.clip_id}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-green-600 mt-2">
+                Play these to remind yourself what {selectedSpeaker} sounds like before reviewing candidates below.
+              </p>
+            </div>
+          )}
 
           {loading ? (
             <p className="text-gray-400 text-sm py-8 text-center">Loading clips...</p>

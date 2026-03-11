@@ -17,6 +17,7 @@ import os
 import time
 import logging
 import uuid
+import shlex
 import urllib.request
 import urllib.error
 import base64
@@ -429,53 +430,45 @@ def get_github_pat() -> str:
 
 
 def call_vscode_wrapper(message: str, system_prompt: Optional[str] = None, admin: bool = False) -> Dict[str, Any]:
-    """Call VS Code Copilot Chat Wrapper extension via HTTP.
+    """Call VS Code Copilot Chat Wrapper on EC2 via SSM.
     
-    The wrapper is running on http://localhost:8765 (or configured via VSCODE_WRAPPER_ENDPOINT)
-    and handles authentication to Copilot Chat, applies guardrails, and returns responses.
+    The wrapper runs on the EC2 instance at localhost:8765. Since the Lambda can't
+    reach EC2's localhost directly, we use SSM Run Command to curl the wrapper.
     """
-    payload = {
-        'prompt': message,
-        'admin': admin
-    }
-    
-    data = json.dumps(payload).encode('utf-8')
-    
-    req = urllib.request.Request(
-        f'{VSCODE_WRAPPER_ENDPOINT}/chat',
-        data=data,
-        headers={
-            'Content-Type': 'application/json',
-            'User-Agent': 'kalshi-copilot-proxy/1.0'
-        },
-        method='POST'
+    payload_str = json.dumps({'prompt': message, 'admin': admin})
+    cmd = (
+        f"curl -sf -X POST http://localhost:8765/chat "
+        f"-H 'Content-Type: application/json' "
+        f"-d {shlex.quote(payload_str)} "
+        f"--max-time 25 2>&1"
     )
-    
+    result = _run_ssm([cmd], timeout_seconds=30)
+
+    if not result:
+        logger.error('SSM timed out waiting for wrapper response')
+        raise urllib.error.URLError(OSError('[Errno 111] Connection refused'))
+
+    stdout = result.get('StandardOutputContent', '').strip()
+    if result.get('Status') != 'Success' or not stdout:
+        err = result.get('StandardErrorContent', '') or stdout or f"SSM status: {result.get('Status')}"
+        logger.error(f'Wrapper SSM call failed: {err}')
+        raise urllib.error.URLError(OSError(f'Wrapper not reachable: {err[:200]}'))
+
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            response_text = response.read().decode('utf-8')
-            result = json.loads(response_text)
-            
-            # Extract response from wrapper
-            if 'response' in result:
-                return {
-                    'response': result['response'],
-                    'conversation_id': 'vscode-wrapper',
-                    'model': result.get('model', 'claude-3.5-sonnet'),
-                    'timestamp': result.get('timestamp')
-                }
-            elif 'error' in result:
-                raise ValueError(f"Wrapper error: {result['error']}")
-            else:
-                logger.error(f"Unexpected wrapper response format: {result}")
-                raise ValueError("Invalid response format from VS Code wrapper")
-    except urllib.error.URLError as e:
-        logger.error(f"Failed to connect to VS Code wrapper at {VSCODE_WRAPPER_ENDPOINT}: {e}")
-        raise ValueError(f"VS Code Copilot wrapper is not available at {VSCODE_WRAPPER_ENDPOINT}. Ensure VS Code Server is running: /home/ubuntu/kalshi/scripts/copilot-server/start.sh")
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8')
-        logger.error(f"VS Code wrapper error {e.code}: {error_body}")
-        raise ValueError(f"VS Code wrapper error: {error_body}")
+        parsed = json.loads(stdout)
+    except json.JSONDecodeError:
+        logger.error(f'Invalid JSON from wrapper: {stdout[:200]}')
+        raise ValueError(f'Invalid response format from VS Code wrapper: {stdout[:200]}')
+
+    if 'error' in parsed:
+        raise ValueError(f"Wrapper error: {parsed['error']}")
+
+    return {
+        'response': parsed.get('response', ''),
+        'conversation_id': 'vscode-wrapper',
+        'model': parsed.get('model', 'copilot'),
+        'timestamp': parsed.get('timestamp'),
+    }
 
 
 

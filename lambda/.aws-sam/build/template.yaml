@@ -1109,9 +1109,12 @@ Resources:
       Environment:
         Variables:
           VELOCITY_TABLE: production-signal-engine-velocity
+          METADATA_TABLE: production-kalshi-market-metadata
       Policies:
       - DynamoDBReadPolicy:
           TableName: production-signal-engine-velocity
+      - DynamoDBReadPolicy:
+          TableName: production-kalshi-market-metadata
       Events:
         GetVelocity:
           Type: Api

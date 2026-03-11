@@ -1,7 +1,13 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { getSignalEngineVelocity, VelocityMarket, VelocityResponse } from '@/lib/api';
+import {
+  getSignalEngineVelocity,
+  VelocityMarket,
+  VelocityCluster,
+  ClusterResponse,
+  ClusterMarketsResponse,
+} from '@/lib/api';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -63,6 +69,17 @@ function timeAgo(ts: number): string {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
+function categoryBadge(cat: string): string {
+  const map: Record<string, string> = {
+    politics: 'bg-purple-100 text-purple-700',
+    economics: 'bg-blue-100 text-blue-700',
+    entertainment: 'bg-pink-100 text-pink-700',
+    elections: 'bg-indigo-100 text-indigo-700',
+    social: 'bg-teal-100 text-teal-700',
+  };
+  return map[cat?.toLowerCase()] ?? 'bg-gray-100 text-gray-600';
+}
+
 // ── Sparkline Component ────────────────────────────────────────────────────
 
 function Sparkline({ data, width = 120, height = 32 }: {
@@ -70,7 +87,7 @@ function Sparkline({ data, width = 120, height = 32 }: {
   width?: number;
   height?: number;
 }) {
-  if (!data || data.length < 2) return <div className="w-[120px] h-[32px] bg-gray-50 rounded" />;
+  if (!data || data.length < 2) return <div style={{ width, height }} className="bg-gray-50 rounded" />;
 
   const prices = data.map(d => d.price);
   const min = Math.min(...prices);
@@ -101,18 +118,18 @@ function Sparkline({ data, width = 120, height = 32 }: {
   );
 }
 
-// ── Detail Panel ───────────────────────────────────────────────────────────
+// ── Market Detail Panel ────────────────────────────────────────────────────
 
 function MarketDetail({ market, onClose }: { market: VelocityMarket; onClose: () => void }) {
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-lg p-5 mb-6 relative">
-      <button 
+      <button
         onClick={onClose}
         className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 text-xl leading-none"
       >
         ×
       </button>
-      
+
       <div className="flex items-start gap-6 mb-4">
         <div>
           <h2 className="text-lg font-bold text-gray-900 font-mono">{market.market_ticker}</h2>
@@ -165,28 +182,156 @@ function MarketDetail({ market, onClose }: { market: VelocityMarket; onClose: ()
   );
 }
 
+// ── Cluster Drill-Down View ────────────────────────────────────────────────
+
+function ClusterDrillDown({
+  eventTicker,
+  onBack,
+}: {
+  eventTicker: string;
+  onBack: () => void;
+}) {
+  const [markets, setMarkets] = useState<VelocityMarket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await getSignalEngineVelocity({ event: eventTicker });
+        if (!cancelled && 'markets' in result) {
+          setMarkets((result as ClusterMarketsResponse).markets);
+        }
+      } catch (err) {
+        console.error('Failed to load cluster markets:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [eventTicker]);
+
+  const selectedMarket = markets.find(m => m.market_ticker === selectedTicker) ?? null;
+
+  if (loading) {
+    return <div className="py-10 text-center text-gray-500">Loading markets for {eventTicker}...</div>;
+  }
+
+  return (
+    <div>
+      <button
+        onClick={onBack}
+        className="mb-4 px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 flex items-center gap-1"
+      >
+        ← Back to clusters
+      </button>
+      <h2 className="text-lg font-bold text-gray-900 mb-1 font-mono">{eventTicker}</h2>
+      <p className="text-sm text-gray-500 mb-4">{markets.length} markets in this cluster</p>
+
+      {selectedMarket && (
+        <MarketDetail market={selectedMarket} onClose={() => setSelectedTicker(null)} />
+      )}
+
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 border-b text-left text-xs text-gray-500 uppercase tracking-wider">
+              <th className="px-3 py-2 w-[220px]">Market</th>
+              <th className="px-2 py-2 w-[60px] text-right">Price</th>
+              <th className="px-2 py-2 w-[120px]">Sparkline</th>
+              <th className="px-2 py-2 w-[70px] text-right">Max Accel</th>
+              <th className="px-2 py-2 text-center">Acceleration Heatmap</th>
+              <th className="px-2 py-2 w-[50px] text-right">Span</th>
+              <th className="px-2 py-2 w-[60px] text-right">Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {markets.map((market) => {
+              const isSelected = selectedTicker === market.market_ticker;
+              return (
+                <tr
+                  key={market.market_ticker}
+                  onClick={() => setSelectedTicker(isSelected ? null : market.market_ticker)}
+                  className={`border-b border-gray-100 cursor-pointer transition-colors ${
+                    isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <td className="px-3 py-1.5">
+                    <span className="font-mono text-xs font-medium text-gray-900 truncate block max-w-[210px]" title={market.market_ticker}>
+                      {market.market_ticker}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-mono text-xs font-medium">
+                    {(market.current_price * 100).toFixed(0)}¢
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <Sparkline data={market.price_history} width={100} height={24} />
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-bold font-mono ${accelColor(market.max_accel)}`}>
+                      {formatAccel(market.max_accel)}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <div className="flex gap-0.5 justify-center">
+                      {ACCEL_LABELS.map(a => (
+                        <div
+                          key={a}
+                          className={`w-5 h-5 rounded-sm text-[9px] flex items-center justify-center font-mono ${accelColor(market.accelerations[a])}`}
+                          title={`${a}: ${formatAccel(market.accelerations[a])}`}
+                        >
+                          {market.accelerations[a] != null
+                            ? (market.accelerations[a]! >= 10 ? '!' : market.accelerations[a]!.toFixed(0))
+                            : '·'}
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-2 py-1.5 text-right text-xs text-gray-500">
+                    {market.data_span_hours.toFixed(0)}h
+                  </td>
+                  <td className="px-2 py-1.5 text-right text-xs text-gray-400">
+                    {timeAgo(market.last_update)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────
 
 export default function SignalEnginePage() {
-  const [data, setData] = useState<VelocityResponse | null>(null);
-  const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+  const [clusters, setClusters] = useState<VelocityCluster[]>([]);
+  const [totalMarkets, setTotalMarkets] = useState(0);
+  const [excludedCount, setExcludedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<number>(0);
-  const [sortBy, setSortBy] = useState<'accel' | 'velocity' | 'price' | 'updated'>('accel');
+  const [sortBy, setSortBy] = useState<'accel' | 'velocity' | 'markets' | 'updated'>('accel');
+  const [drillEvent, setDrillEvent] = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
       const result = await getSignalEngineVelocity({ mode: 'all' });
-      if ('markets' in result) {
-        setData(result);
+      if ('clusters' in result) {
+        const cr = result as ClusterResponse;
+        setClusters(cr.clusters);
+        setTotalMarkets(cr.total_markets);
+        setExcludedCount(cr.excluded_count ?? 0);
         setError(null);
       }
       setLastRefresh(Date.now());
-    } catch (err: any) {
-      console.error('Failed to fetch velocity data:', err);
-      setError(err.message || 'Failed to load');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load';
+      console.error('Failed to fetch cluster data:', err);
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -200,22 +345,35 @@ export default function SignalEnginePage() {
     };
   }, [fetchData]);
 
-  const sortedMarkets = React.useMemo(() => {
-    if (!data?.markets) return [];
-    const m = [...data.markets];
+  const sortedClusters = React.useMemo(() => {
+    const c = [...clusters];
     switch (sortBy) {
-      case 'accel': return m.sort((a, b) => b.max_accel - a.max_accel);
-      case 'velocity': return m.sort((a, b) => b.max_velocity - a.max_velocity);
-      case 'price': return m.sort((a, b) => b.current_price - a.current_price);
-      case 'updated': return m.sort((a, b) => b.last_update - a.last_update);
-      default: return m;
+      case 'accel': return c.sort((a, b) => b.max_accel - a.max_accel);
+      case 'velocity': return c.sort((a, b) => b.max_velocity - a.max_velocity);
+      case 'markets': return c.sort((a, b) => b.market_count - a.market_count);
+      case 'updated': return c.sort((a, b) => b.last_update - a.last_update);
+      default: return c;
     }
-  }, [data, sortBy]);
+  }, [clusters, sortBy]);
 
-  const selectedMarket = React.useMemo(() => {
-    if (!selectedTicker || !data?.markets) return null;
-    return data.markets.find(m => m.market_ticker === selectedTicker) ?? null;
-  }, [selectedTicker, data]);
+  // Drill-down view
+  if (drillEvent) {
+    return (
+      <div>
+        <ClusterDrillDown eventTicker={drillEvent} onBack={() => setDrillEvent(null)} />
+        {/* Legend */}
+        <div className="mt-4 flex items-center gap-4 text-xs text-gray-500">
+          <span className="font-medium">Acceleration scale:</span>
+          <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-800">&lt;1.5× normal</span>
+          <span className="px-1.5 py-0.5 rounded bg-yellow-200 text-gray-800">1.5-2× warming</span>
+          <span className="px-1.5 py-0.5 rounded bg-yellow-400 text-gray-900">2-3× elevated</span>
+          <span className="px-1.5 py-0.5 rounded bg-orange-400 text-white">3-5× hot</span>
+          <span className="px-1.5 py-0.5 rounded bg-red-400 text-white">5-10× alert</span>
+          <span className="px-1.5 py-0.5 rounded bg-red-600 text-white">&gt;10× extreme</span>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -225,14 +383,11 @@ export default function SignalEnginePage() {
     );
   }
 
-  if (error && !data) {
+  if (error && clusters.length === 0) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-lg p-4">
         <h3 className="text-red-800 font-semibold">Error loading velocity data</h3>
         <p className="text-red-600 text-sm mt-1">{error}</p>
-        <p className="text-gray-500 text-xs mt-2">
-          The signal engine pipeline may not be deployed yet. Deploy with <code className="bg-gray-100 px-1 rounded">sam build && sam deploy</code> from kalshi-market-capture/.
-        </p>
         <button onClick={fetchData} className="mt-3 px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700">
           Retry
         </button>
@@ -245,10 +400,10 @@ export default function SignalEnginePage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">⚡ Signal Engine — Velocity Monitor</h1>
+          <h1 className="text-xl font-bold text-gray-900">⚡ Signal Engine — Cluster Velocity</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Tracking {data?.total_tracked ?? 0} markets · 
-            15 time windows · 9 acceleration pairs
+            {sortedClusters.length} clusters · {totalMarkets} markets
+            {excludedCount > 0 && <span className="text-gray-400"> · {excludedCount} excluded</span>}
             {lastRefresh > 0 && (
               <span className="ml-2 text-gray-400">· refreshed {timeAgo(lastRefresh / 1000)}</span>
             )}
@@ -256,7 +411,7 @@ export default function SignalEnginePage() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-400">Sort:</span>
-          {(['accel', 'velocity', 'price', 'updated'] as const).map(s => (
+          {(['accel', 'velocity', 'markets', 'updated'] as const).map(s => (
             <button
               key={s}
               onClick={() => setSortBy(s)}
@@ -266,7 +421,7 @@ export default function SignalEnginePage() {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              {s === 'accel' ? '🔥 Accel' : s === 'velocity' ? '📈 Velocity' : s === 'price' ? '💰 Price' : '🕐 Recent'}
+              {s === 'accel' ? '🔥 Accel' : s === 'velocity' ? '📈 Velocity' : s === 'markets' ? '📊 Markets' : '🕐 Recent'}
             </button>
           ))}
           <button
@@ -284,13 +439,8 @@ export default function SignalEnginePage() {
         </div>
       )}
 
-      {/* Detail Panel (expanded market) */}
-      {selectedMarket && (
-        <MarketDetail market={selectedMarket} onClose={() => setSelectedTicker(null)} />
-      )}
-
-      {/* Market Table */}
-      {sortedMarkets.length === 0 ? (
+      {/* Cluster Table */}
+      {sortedClusters.length === 0 ? (
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
           <p className="text-gray-500 text-lg">No velocity data yet</p>
           <p className="text-gray-400 text-sm mt-2">
@@ -302,68 +452,72 @@ export default function SignalEnginePage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b text-left text-xs text-gray-500 uppercase tracking-wider">
-                <th className="px-3 py-2 w-[200px]">Market</th>
-                <th className="px-2 py-2 w-[60px] text-right">Price</th>
-                <th className="px-2 py-2 w-[120px]">Sparkline</th>
+                <th className="px-3 py-2 w-[260px]">Cluster</th>
+                <th className="px-2 py-2 w-[90px]">Category</th>
+                <th className="px-2 py-2 w-[55px] text-right">Mkts</th>
+                <th className="px-2 py-2 w-[60px] text-right">Avg ¢</th>
+                <th className="px-2 py-2 w-[120px]">Top Market</th>
                 <th className="px-2 py-2 w-[70px] text-right">Max Accel</th>
                 <th className="px-2 py-2 text-center">Acceleration Heatmap</th>
-                <th className="px-2 py-2 w-[50px] text-right">Span</th>
                 <th className="px-2 py-2 w-[60px] text-right">Updated</th>
               </tr>
             </thead>
             <tbody>
-              {sortedMarkets.map((market) => {
-                const isSelected = selectedTicker === market.market_ticker;
-                return (
-                  <tr
-                    key={market.market_ticker}
-                    onClick={() => setSelectedTicker(isSelected ? null : market.market_ticker)}
-                    className={`border-b border-gray-100 cursor-pointer transition-colors ${
-                      isSelected
-                        ? 'bg-blue-50'
-                        : 'hover:bg-gray-50'
-                    }`}
-                  >
-                    <td className="px-3 py-1.5">
-                      <span className="font-mono text-xs font-medium text-gray-900 truncate block max-w-[190px]" title={market.market_ticker}>
-                        {market.market_ticker}
+              {sortedClusters.map((cluster) => (
+                <tr
+                  key={cluster.event_ticker}
+                  onClick={() => setDrillEvent(cluster.event_ticker)}
+                  className="border-b border-gray-100 cursor-pointer transition-colors hover:bg-gray-50"
+                >
+                  <td className="px-3 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-medium text-gray-900 truncate block max-w-[200px]" title={cluster.event_ticker}>
+                        {cluster.event_ticker}
                       </span>
-                    </td>
-                    <td className="px-2 py-1.5 text-right font-mono text-xs font-medium">
-                      {(market.current_price * 100).toFixed(0)}¢
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <Sparkline data={market.price_history} width={100} height={24} />
-                    </td>
-                    <td className="px-2 py-1.5 text-right">
-                      <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-bold font-mono ${accelColor(market.max_accel)}`}>
-                        {formatAccel(market.max_accel)}
-                      </span>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <div className="flex gap-0.5 justify-center">
-                        {ACCEL_LABELS.map(a => (
-                          <div
-                            key={a}
-                            className={`w-5 h-5 rounded-sm text-[9px] flex items-center justify-center font-mono ${accelColor(market.accelerations[a])}`}
-                            title={`${a}: ${formatAccel(market.accelerations[a])}`}
-                          >
-                            {market.accelerations[a] !== null && market.accelerations[a] !== undefined
-                              ? (market.accelerations[a]! >= 10 ? '!' : market.accelerations[a]!.toFixed(0))
-                              : '·'}
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-2 py-1.5 text-right text-xs text-gray-500">
-                      {market.data_span_hours.toFixed(0)}h
-                    </td>
-                    <td className="px-2 py-1.5 text-right text-xs text-gray-400">
-                      {timeAgo(market.last_update)}
-                    </td>
-                  </tr>
-                );
-              })}
+                      <Sparkline data={cluster.price_history} width={60} height={20} />
+                    </div>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${categoryBadge(cluster.category)}`}>
+                      {cluster.category}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-mono text-xs">
+                    {cluster.market_count}
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-mono text-xs font-medium">
+                    {(cluster.avg_price * 100).toFixed(0)}¢
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <span className="font-mono text-[10px] text-gray-500 truncate block max-w-[110px]" title={cluster.top_market_ticker}>
+                      {cluster.top_market_ticker}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-bold font-mono ${accelColor(cluster.max_accel)}`}>
+                      {formatAccel(cluster.max_accel)}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <div className="flex gap-0.5 justify-center">
+                      {ACCEL_LABELS.map(a => (
+                        <div
+                          key={a}
+                          className={`w-5 h-5 rounded-sm text-[9px] flex items-center justify-center font-mono ${accelColor(cluster.accelerations[a])}`}
+                          title={`${a}: ${formatAccel(cluster.accelerations[a])}`}
+                        >
+                          {cluster.accelerations[a] != null
+                            ? (cluster.accelerations[a]! >= 10 ? '!' : cluster.accelerations[a]!.toFixed(0))
+                            : '·'}
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-2 py-1.5 text-right text-xs text-gray-400">
+                    {timeAgo(cluster.last_update)}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

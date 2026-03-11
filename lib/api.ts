@@ -1558,6 +1558,8 @@ export async function updateVoiceprintClipStatus(
 
 export interface VelocityMarket {
   market_ticker: string;
+  event_ticker?: string;
+  category?: string;
   current_price: number;
   velocities: Record<string, number | null>;
   accelerations: Record<string, number | null>;
@@ -1569,6 +1571,35 @@ export interface VelocityMarket {
   price_history: Array<{ ts: number; price: number }>;
 }
 
+export interface VelocityCluster {
+  event_ticker: string;
+  category: string;
+  market_count: number;
+  max_accel: number;
+  max_velocity: number;
+  avg_price: number;
+  last_update: number;
+  top_market_ticker: string;
+  top_market_price: number;
+  price_history: Array<{ ts: number; price: number }>;
+  accelerations: Record<string, number | null>;
+}
+
+export interface ClusterResponse {
+  clusters: VelocityCluster[];
+  total_clusters: number;
+  total_markets: number;
+  excluded_count?: number;
+  generated_at: number;
+}
+
+export interface ClusterMarketsResponse {
+  event_ticker: string;
+  markets: VelocityMarket[];
+  market_count: number;
+  generated_at: number;
+}
+
 export interface VelocityResponse {
   markets: VelocityMarket[];
   total_tracked: number;
@@ -1576,13 +1607,14 @@ export interface VelocityResponse {
 }
 
 export async function getSignalEngineVelocity(
-  opts?: { ticker?: string; mode?: string; limit?: number }
-): Promise<VelocityResponse | VelocityMarket> {
+  opts?: { ticker?: string; event?: string; mode?: string; limit?: number }
+): Promise<ClusterResponse | ClusterMarketsResponse | VelocityMarket> {
   const session = await fetchAuthSession();
   const token = session.tokens?.idToken?.toString();
 
   const params = new URLSearchParams();
   if (opts?.ticker) params.set('ticker', opts.ticker);
+  if (opts?.event) params.set('event', opts.event);
   if (opts?.mode) params.set('mode', opts.mode);
   if (opts?.limit) params.set('limit', String(opts.limit));
 
@@ -1596,5 +1628,5 @@ export async function getSignalEngineVelocity(
   });
 
   const resp = await restOperation.response;
-  return await resp.body.json() as unknown as VelocityResponse | VelocityMarket;
+  return await resp.body.json() as unknown as ClusterResponse | ClusterMarketsResponse | VelocityMarket;
 }

@@ -1096,7 +1096,8 @@ Resources:
           VELOCITY_TABLE: production-signal-engine-velocity
           METADATA_TABLE: production-kalshi-market-metadata
           CLASSIFICATION_TABLE: !Ref SignalEngineClassificationTable
-          CODE_VERSION: "5"
+          CLUSTER_TABLE: !Ref SignalEngineClusterTable
+          CODE_VERSION: "6"
       Policies:
         - DynamoDBReadPolicy:
             TableName: production-signal-engine-velocity
@@ -1104,6 +1105,8 @@ Resources:
             TableName: production-kalshi-market-metadata
         - DynamoDBReadPolicy:
             TableName: !Ref SignalEngineClassificationTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SignalEngineClusterTable
       Events:
         GetVelocity:
           Type: Api
@@ -1164,6 +1167,62 @@ Resources:
             Schedule: rate(15 minutes)
             Description: Classify new/unclassified velocity markets every 15 min
             Input: '{"action": "classify_new"}'
+
+  # DynamoDB table for AI-powered cross-event clusters
+  SignalEngineClusterTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: production-signal-engine-clusters
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: cluster_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: cluster_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # Lambda: AI cross-event clusterer using Bedrock Claude Haiku
+  SignalEngineClustererFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dashboard-signal-engine-clusterer
+      CodeUri: ./
+      Handler: signal-engine-clusterer.lambda_handler
+      Description: AI cross-event clustering of markets using Bedrock Haiku
+      MemorySize: 256
+      Timeout: 900
+      Environment:
+        Variables:
+          CLUSTER_TABLE: !Ref SignalEngineClusterTable
+          VELOCITY_TABLE: production-signal-engine-velocity
+          METADATA_TABLE: production-kalshi-market-metadata
+          CLASSIFICATION_TABLE: !Ref SignalEngineClassificationTable
+          BEDROCK_MODEL_ID: anthropic.claude-3-haiku-20240307-v1:0
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SignalEngineClusterTable
+        - DynamoDBReadPolicy:
+            TableName: production-signal-engine-velocity
+        - DynamoDBReadPolicy:
+            TableName: production-kalshi-market-metadata
+        - DynamoDBReadPolicy:
+            TableName: !Ref SignalEngineClassificationTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0'
+      Events:
+        ReclusterSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(30 minutes)
+            Description: Recluster all active markets every 30 min
+            Input: '{"action": "recluster"}'
 
 Outputs:
   ApiEndpoint:

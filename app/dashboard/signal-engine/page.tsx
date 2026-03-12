@@ -208,14 +208,18 @@ function MarketDetail({ market, onClose }: { market: VelocityMarket; onClose: ()
 // ── Cluster Drill-Down View ────────────────────────────────────────────────
 
 function ClusterDrillDown({
-  eventTicker,
+  cluster,
   onBack,
 }: {
-  eventTicker: string;
+  cluster: { type: 'ai'; clusterId: string } | { type: 'event'; eventTicker: string };
   onBack: () => void;
 }) {
   const [markets, setMarkets] = useState<VelocityMarket[]>([]);
-  const [displayName, setDisplayName] = useState<string>(eventTicker);
+  const [displayName, setDisplayName] = useState<string>(
+    cluster.type === 'ai' ? cluster.clusterId : cluster.eventTicker
+  );
+  const [description, setDescription] = useState<string>('');
+  const [eventTickers, setEventTickers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
@@ -223,11 +227,16 @@ function ClusterDrillDown({
     let cancelled = false;
     (async () => {
       try {
-        const result = await getSignalEngineVelocity({ event: eventTicker });
+        const opts = cluster.type === 'ai'
+          ? { cluster: cluster.clusterId }
+          : { event: cluster.eventTicker };
+        const result = await getSignalEngineVelocity(opts);
         if (!cancelled && 'markets' in result) {
           const cmr = result as ClusterMarketsResponse;
           setMarkets(cmr.markets);
           if (cmr.display_name) setDisplayName(cmr.display_name);
+          if (cmr.description) setDescription(cmr.description);
+          if (cmr.event_tickers) setEventTickers(cmr.event_tickers);
         }
       } catch (err) {
         console.error('Failed to load cluster markets:', err);
@@ -236,12 +245,12 @@ function ClusterDrillDown({
       }
     })();
     return () => { cancelled = true; };
-  }, [eventTicker]);
+  }, [cluster]);
 
   const selectedMarket = markets.find(m => m.market_ticker === selectedTicker) ?? null;
 
   if (loading) {
-    return <div className="py-10 text-center text-gray-500">Loading markets for {eventTicker}...</div>;
+    return <div className="py-10 text-center text-gray-500">Loading cluster markets...</div>;
   }
 
   return (
@@ -252,9 +261,26 @@ function ClusterDrillDown({
       >
         ← Back to clusters
       </button>
-      <h2 className="text-lg font-bold text-gray-900 mb-1">{displayName}</h2>
+      <h2 className="text-lg font-bold text-gray-900 mb-1">
+        {displayName}
+        {cluster.type === 'ai' && (
+          <span className="ml-2 inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-100 text-violet-700">AI Cluster</span>
+        )}
+      </h2>
+      {description && (
+        <p className="text-sm text-gray-600 mb-1">{description}</p>
+      )}
       <p className="text-sm text-gray-500 mb-4">
-        <span className="font-mono text-xs text-gray-400">{eventTicker}</span>
+        {cluster.type === 'ai' ? (
+          <>
+            <span className="font-mono text-xs text-gray-400">{cluster.clusterId}</span>
+            {eventTickers.length > 1 && (
+              <span className="ml-2 text-xs text-gray-400">· spans {eventTickers.length} events</span>
+            )}
+          </>
+        ) : (
+          <span className="font-mono text-xs text-gray-400">{cluster.eventTicker}</span>
+        )}
         <span className="mx-2">·</span>
         {markets.length} markets in this cluster
       </p>
@@ -352,11 +378,12 @@ export default function SignalEnginePage() {
   const [totalMarkets, setTotalMarkets] = useState(0);
   const [excludedCount, setExcludedCount] = useState(0);
   const [filteredNotSurprise, setFilteredNotSurprise] = useState(0);
+  const [aiClusterCount, setAiClusterCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<number>(0);
   const [sortBy, setSortBy] = useState<'accel' | 'velocity' | 'markets' | 'updated'>('accel');
-  const [drillEvent, setDrillEvent] = useState<string | null>(null);
+  const [drillCluster, setDrillCluster] = useState<{ type: 'ai'; clusterId: string } | { type: 'event'; eventTicker: string } | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -368,6 +395,7 @@ export default function SignalEnginePage() {
         setTotalMarkets(cr.total_markets);
         setExcludedCount(cr.excluded_count ?? 0);
         setFilteredNotSurprise(cr.filtered_not_surprise ?? 0);
+        setAiClusterCount(cr.ai_clusters ?? 0);
         setError(null);
       }
       setLastRefresh(Date.now());
@@ -400,10 +428,10 @@ export default function SignalEnginePage() {
   }, [clusters, sortBy]);
 
   // Drill-down view
-  if (drillEvent) {
+  if (drillCluster) {
     return (
       <div>
-        <ClusterDrillDown eventTicker={drillEvent} onBack={() => setDrillEvent(null)} />
+        <ClusterDrillDown cluster={drillCluster} onBack={() => setDrillCluster(null)} />
         {/* Legend */}
         <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-gray-500">
           <span className="font-medium">Acceleration:</span>
@@ -449,6 +477,7 @@ export default function SignalEnginePage() {
           <h1 className="text-xl font-bold text-gray-900">⚡ Signal Engine — Cluster Velocity</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {sortedClusters.length} clusters · {totalMarkets} markets
+            {aiClusterCount > 0 && <span className="text-violet-500"> · {aiClusterCount} AI-grouped</span>}
             {excludedCount > 0 && <span className="text-gray-400"> · {excludedCount} excluded</span>}
             {filteredNotSurprise > 0 && <span className="text-gray-400"> · {filteredNotSurprise} non-surprise filtered</span>}
             {lastRefresh > 0 && (
@@ -512,8 +541,12 @@ export default function SignalEnginePage() {
             <tbody>
               {sortedClusters.map((cluster) => (
                 <tr
-                  key={cluster.event_ticker}
-                  onClick={() => setDrillEvent(cluster.event_ticker)}
+                  key={cluster.cluster_id ?? cluster.event_ticker}
+                  onClick={() =>
+                    cluster.is_ai_cluster && cluster.cluster_id
+                      ? setDrillCluster({ type: 'ai', clusterId: cluster.cluster_id })
+                      : setDrillCluster({ type: 'event', eventTicker: cluster.event_ticker })
+                  }
                   className="border-b border-gray-100 cursor-pointer transition-colors hover:bg-gray-50"
                 >
                   <td className="px-3 py-1.5">
@@ -526,6 +559,11 @@ export default function SignalEnginePage() {
                           <span className="font-mono text-[10px] text-gray-400 truncate block max-w-[170px]">
                             {cluster.event_ticker}
                           </span>
+                          {cluster.is_ai_cluster && (
+                            <span className="inline-block px-1 py-0 rounded text-[9px] font-semibold bg-violet-100 text-violet-700 border border-violet-300 whitespace-nowrap" title={`AI cluster spanning ${cluster.event_tickers?.length ?? 1} events`}>
+                              AI
+                            </span>
+                          )}
                           {cluster.leak_watch && (
                             <span className="inline-block px-1 py-0 rounded text-[9px] font-semibold bg-amber-100 text-amber-700 border border-amber-300 whitespace-nowrap" title="Non-surprise market within 48h of close (leak detection window)">
                               LEAK WATCH

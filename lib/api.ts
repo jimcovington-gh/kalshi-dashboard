@@ -1591,6 +1591,10 @@ export interface VelocityCluster {
   price_history: Array<{ ts: number; price: number }>;
   accelerations: Record<string, number | null>;
   leak_watch?: boolean;
+  cluster_id?: string;
+  is_ai_cluster?: boolean;
+  description?: string;
+  event_tickers?: string[];
 }
 
 export interface ClusterResponse {
@@ -1599,15 +1603,20 @@ export interface ClusterResponse {
   total_markets: number;
   excluded_count?: number;
   filtered_not_surprise?: number;
+  ai_clusters?: number;
   generated_at: number;
 }
 
 export interface ClusterMarketsResponse {
-  event_ticker: string;
+  event_ticker?: string;
   display_name: string;
   markets: VelocityMarket[];
   market_count: number;
   generated_at: number;
+  cluster_id?: string;
+  is_ai_cluster?: boolean;
+  description?: string;
+  event_tickers?: string[];
 }
 
 export interface VelocityResponse {
@@ -1617,7 +1626,7 @@ export interface VelocityResponse {
 }
 
 export async function getSignalEngineVelocity(
-  opts?: { ticker?: string; event?: string; mode?: string; limit?: number }
+  opts?: { ticker?: string; event?: string; cluster?: string; mode?: string; limit?: number }
 ): Promise<ClusterResponse | ClusterMarketsResponse | VelocityMarket> {
   const session = await fetchAuthSession();
   const token = session.tokens?.idToken?.toString();
@@ -1625,6 +1634,7 @@ export async function getSignalEngineVelocity(
   const params = new URLSearchParams();
   if (opts?.ticker) params.set('ticker', opts.ticker);
   if (opts?.event) params.set('event', opts.event);
+  if (opts?.cluster) params.set('cluster', opts.cluster);
   if (opts?.mode) params.set('mode', opts.mode);
   if (opts?.limit) params.set('limit', String(opts.limit));
 

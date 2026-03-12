@@ -5,7 +5,8 @@ Authenticated via Cognito (same as all dashboard APIs).
 
 Query params:
   (default)            → top clusters ranked by acceleration (cluster view)
-  ?event=EVT_TICKER    → all markets within a single cluster (drill-down)
+  ?cluster=CLUSTER_ID  → all markets within an AI cluster (drill-down)
+  ?event=EVT_TICKER    → all markets within a single event (legacy drill-down)
   ?ticker=XYZ          → single market detail with full velocity profile
   ?mode=all            → all clusters (no limit)
   ?limit=N             → override default top-N (max 200)
@@ -22,6 +23,7 @@ import boto3
 VELOCITY_TABLE = os.environ.get("VELOCITY_TABLE", "production-signal-engine-velocity")
 METADATA_TABLE = os.environ.get("METADATA_TABLE", "production-kalshi-market-metadata")
 CLASSIFICATION_TABLE = os.environ.get("CLASSIFICATION_TABLE", "production-signal-engine-market-class")
+CLUSTER_TABLE = os.environ.get("CLUSTER_TABLE", "production-signal-engine-clusters")
 TOP_N = int(os.environ.get("TOP_N", "50"))
 
 # Categories to exclude from the velocity dashboard
@@ -34,6 +36,7 @@ dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 table = dynamodb.Table(VELOCITY_TABLE)
 metadata_table = dynamodb.Table(METADATA_TABLE)
 classification_table = dynamodb.Table(CLASSIFICATION_TABLE)
+ai_cluster_table = dynamodb.Table(CLUSTER_TABLE)
 
 
 # ── Velocity Computation ────────────────────────────────────────────────────
@@ -236,8 +239,33 @@ def _load_classifications(tickers):
     return result
 
 
+def _load_ai_clusters():
+    """Load all AI cluster definitions from the cluster table.
+
+    Returns:
+        clusters: list of cluster dicts {cluster_id, cluster_name, description, member_tickers}
+        ticker_to_clusters: dict mapping market_ticker → list of cluster_ids
+    """
+    items = []
+    params = {}
+    while True:
+        response = ai_cluster_table.scan(**params)
+        items.extend(response.get("Items", []))
+        if "LastEvaluatedKey" not in response:
+            break
+        params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+
+    ticker_to_clusters = defaultdict(list)
+    for cluster in items:
+        cid = cluster["cluster_id"]
+        for ticker in cluster.get("member_tickers", []):
+            ticker_to_clusters[ticker].append(cid)
+
+    return items, dict(ticker_to_clusters)
+
+
 def _get_clusters(limit):
-    """Aggregate markets into clusters by event_ticker, filter excluded categories + classifications."""
+    """Aggregate markets into clusters using AI clusters (with event_ticker fallback)."""
     now = time.time()
 
     # 1. Scan all velocity items
@@ -253,15 +281,17 @@ def _get_clusters(limit):
     if not items:
         return {"clusters": [], "total_clusters": 0, "total_markets": 0, "generated_at": now}
 
-    # 2. Batch-load metadata (category + event_ticker) for all tickers
+    # 2. Batch-load metadata + classifications
     all_tickers = [item["market_ticker"] for item in items]
     metadata = _load_metadata(all_tickers)
-
-    # 2b. Batch-load AI classifications
     classifications = _load_classifications(all_tickers)
 
-    # 3. Compute market summaries, filtering out excluded categories + non-surprise markets
-    clusters_map = defaultdict(list)  # event_ticker → [market_summary]
+    # 3. Load AI cluster assignments
+    ai_clusters, ticker_to_clusters = _load_ai_clusters()
+    ai_cluster_map = {c["cluster_id"]: c for c in ai_clusters}
+
+    # 4. Compute market summaries, filtering excluded categories + non-surprise markets
+    market_summaries = {}  # ticker → summary
     excluded_count = 0
     filtered_not_surprise = 0
 
@@ -277,7 +307,7 @@ def _get_clusters(limit):
         if not event_ticker:
             continue
 
-        # Classification filter: show if surprise-tradable, unclassified, or within leak-watch window
+        # Classification filter
         classification = classifications.get(ticker)
         leak_watch = False
         if classification and not classification["surprise_tradable"]:
@@ -286,7 +316,6 @@ def _get_clusters(limit):
             if hours_to_close > LEAK_WATCH_HOURS:
                 filtered_not_surprise += 1
                 continue
-            # Within leak-watch window — include but flag it
             leak_watch = True
 
         summary = _market_summary(item, now)
@@ -301,28 +330,65 @@ def _get_clusters(limit):
             summary["surprise_tradable"] = classification["surprise_tradable"]
             summary["classification_reason"] = classification["reason"]
         summary["leak_watch"] = leak_watch
-        clusters_map[event_ticker].append(summary)
+        market_summaries[ticker] = summary
 
-    # 4. Build cluster-level summaries
+    # 5. Group markets into clusters (AI clusters first, event_ticker fallback)
+    cluster_members = defaultdict(list)  # cluster_key → [market_summary]
+    cluster_meta = {}  # cluster_key → {name, description, is_ai}
+    clustered_tickers = set()
+
+    # First pass: assign markets to AI clusters
+    for cluster in ai_clusters:
+        cid = cluster["cluster_id"]
+        cname = cluster.get("cluster_name", cid)
+        cdesc = cluster.get("description", "")
+        members = []
+        for ticker in cluster.get("member_tickers", []):
+            if ticker in market_summaries:
+                members.append(market_summaries[ticker])
+                clustered_tickers.add(ticker)
+        if members:
+            cluster_key = f"ai:{cid}"
+            cluster_members[cluster_key] = members
+            cluster_meta[cluster_key] = {"name": cname, "description": cdesc, "is_ai": True, "cluster_id": cid}
+
+    # Second pass: unclustered markets fall back to event_ticker grouping
+    for ticker, summary in market_summaries.items():
+        if ticker not in clustered_tickers:
+            et = summary["event_ticker"]
+            fallback_key = f"evt:{et}"
+            cluster_members[fallback_key].append(summary)
+            if fallback_key not in cluster_meta:
+                cluster_meta[fallback_key] = {"name": None, "description": "", "is_ai": False, "event_ticker": et}
+
+    # 6. Build cluster-level summaries
     clusters = []
-    for event_ticker, markets in clusters_map.items():
+    for cluster_key, markets in cluster_members.items():
         if not markets:
             continue
 
+        meta_info = cluster_meta[cluster_key]
         max_accel = max((m["max_accel"] for m in markets), key=abs)
         max_velocity = max(m["max_velocity"] for m in markets)
         avg_price = sum(m["current_price"] for m in markets) / len(markets)
         latest_update = max(m["last_update"] for m in markets)
-        # Use the most active market's sparkline as representative
         top_market = max(markets, key=lambda m: abs(m["max_accel"]))
         category = markets[0]["category"]
 
-        # Derive human-readable cluster name from market titles
-        titles = [m.get("title", "") for m in markets if m.get("title")]
-        display_name = _derive_cluster_name(titles) if titles else event_ticker
+        # AI cluster name, or derive from titles for fallback
+        if meta_info["is_ai"]:
+            display_name = meta_info["name"]
+            cluster_id = meta_info["cluster_id"]
+        else:
+            titles = [m.get("title", "") for m in markets if m.get("title")]
+            display_name = _derive_cluster_name(titles) if titles else meta_info.get("event_ticker", "")
+            cluster_id = None
 
-        clusters.append({
-            "event_ticker": event_ticker,
+        # Collect unique event_tickers in this cluster (for cross-event visibility)
+        event_tickers = list(set(m["event_ticker"] for m in markets if m.get("event_ticker")))
+
+        cluster_entry = {
+            "event_ticker": event_tickers[0] if len(event_tickers) == 1 else event_tickers[0],
             "display_name": display_name,
             "category": category,
             "market_count": len(markets),
@@ -335,7 +401,17 @@ def _get_clusters(limit):
             "price_history": top_market["price_history"],
             "accelerations": top_market["accelerations"],
             "leak_watch": any(m.get("leak_watch") for m in markets),
-        })
+        }
+
+        if cluster_id:
+            cluster_entry["cluster_id"] = cluster_id
+            cluster_entry["is_ai_cluster"] = True
+            cluster_entry["description"] = meta_info.get("description", "")
+            cluster_entry["event_tickers"] = event_tickers
+        else:
+            cluster_entry["is_ai_cluster"] = False
+
+        clusters.append(cluster_entry)
 
     clusters.sort(key=lambda c: abs(c["max_accel"]), reverse=True)
 
@@ -345,15 +421,33 @@ def _get_clusters(limit):
         "total_markets": sum(c["market_count"] for c in clusters),
         "excluded_count": excluded_count,
         "filtered_not_surprise": filtered_not_surprise,
+        "ai_clusters": sum(1 for c in clusters if c.get("is_ai_cluster")),
         "generated_at": now,
     }
 
 
-def _get_cluster_markets(event_ticker):
-    """Get all markets for a specific cluster (event_ticker)."""
+def _get_cluster_markets(event_ticker=None, cluster_id=None):
+    """Get all markets for a specific cluster (AI cluster_id or event_ticker fallback)."""
     now = time.time()
 
-    # Scan velocity table for all items (we need to match by event_ticker from metadata)
+    # Determine member tickers from AI cluster, or scan for event_ticker matches
+    target_tickers = None
+    cluster_name = None
+    cluster_description = ""
+
+    if cluster_id:
+        # Look up AI cluster members directly
+        try:
+            resp = ai_cluster_table.get_item(Key={"cluster_id": cluster_id})
+            cluster_item = resp.get("Item")
+            if cluster_item:
+                target_tickers = set(cluster_item.get("member_tickers", []))
+                cluster_name = cluster_item.get("cluster_name", cluster_id)
+                cluster_description = cluster_item.get("description", "")
+        except Exception as e:
+            print(f"WARN: Failed to load AI cluster {cluster_id}: {e}")
+
+    # Scan velocity table
     items = []
     params = {}
     while True:
@@ -371,16 +465,24 @@ def _get_cluster_markets(event_ticker):
     for item in items:
         ticker = item["market_ticker"]
         meta = metadata.get(ticker, {})
-        if meta.get("event_ticker") != event_ticker:
-            continue
+
+        # Filter: match by AI cluster members or event_ticker
+        if target_tickers is not None:
+            if ticker not in target_tickers:
+                continue
+        else:
+            if meta.get("event_ticker") != event_ticker:
+                continue
+
         summary = _market_summary(item, now)
-        summary["event_ticker"] = event_ticker
+        et = meta.get("event_ticker", "")
+        summary["event_ticker"] = et
         summary["category"] = meta.get("category", "unknown")
         title = meta.get("title", "")
         series_ticker = meta.get("series_ticker", "")
         summary["title"] = title
         summary["series_ticker"] = series_ticker
-        summary["kalshi_url"] = _build_kalshi_url(series_ticker, title, event_ticker)
+        summary["kalshi_url"] = _build_kalshi_url(series_ticker, title, et)
         classification = classifications.get(ticker)
         if classification:
             summary["surprise_tradable"] = classification["surprise_tradable"]
@@ -389,17 +491,28 @@ def _get_cluster_markets(event_ticker):
 
     markets.sort(key=lambda m: abs(m["max_accel"]), reverse=True)
 
-    # Derive display name for the cluster
-    titles = [m.get("title", "") for m in markets if m.get("title")]
-    display_name = _derive_cluster_name(titles) if titles else event_ticker
+    # Display name: AI cluster name, or derive from titles
+    if not cluster_name:
+        titles = [m.get("title", "") for m in markets if m.get("title")]
+        cluster_name = _derive_cluster_name(titles) if titles else (event_ticker or "Unknown")
 
-    return {
-        "event_ticker": event_ticker,
-        "display_name": display_name,
+    result = {
+        "display_name": cluster_name,
         "markets": markets,
         "market_count": len(markets),
         "generated_at": now,
     }
+
+    if cluster_id:
+        result["cluster_id"] = cluster_id
+        result["is_ai_cluster"] = True
+        result["description"] = cluster_description
+        result["event_tickers"] = list(set(m["event_ticker"] for m in markets if m.get("event_ticker")))
+    else:
+        result["event_ticker"] = event_ticker
+        result["is_ai_cluster"] = False
+
+    return result
 
 
 def _get_single_market(ticker):
@@ -456,19 +569,23 @@ def lambda_handler(event, context):
         params = event.get("queryStringParameters") or {}
         ticker = params.get("ticker", "").strip()
         event_ticker = params.get("event", "").strip()
+        cluster_id = params.get("cluster", "").strip()
         mode = params.get("mode", "top")
         limit = min(int(params.get("limit", TOP_N)), 200)
 
-        print(f"signal-engine-velocity: user={current_user} ticker={ticker} event={event_ticker} mode={mode} limit={limit}")
+        print(f"signal-engine-velocity: user={current_user} ticker={ticker} event={event_ticker} cluster={cluster_id} mode={mode} limit={limit}")
 
         if ticker:
             # Single market drill-down
             data = _get_single_market(ticker)
             if data is None:
                 return cors_response(404, {"error": f"Market {ticker} not found"})
+        elif cluster_id:
+            # AI cluster drill-down
+            data = _get_cluster_markets(cluster_id=cluster_id)
         elif event_ticker:
-            # Cluster drill-down — all markets in this event
-            data = _get_cluster_markets(event_ticker)
+            # Event-ticker cluster drill-down (fallback / legacy)
+            data = _get_cluster_markets(event_ticker=event_ticker)
         elif mode == "all":
             data = _get_clusters(limit=9999)
         else:

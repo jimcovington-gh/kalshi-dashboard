@@ -153,15 +153,16 @@ const EC2_BASE = `https://${VOICE_TRADER_HOST}:8080`;  // Direct EC2 endpoint
 const WS_BASE = `wss://${VOICE_TRADER_HOST}:8765`;  // WebSocket endpoint
 
 // Satellite channel picker thumbnail — auto-refreshes JPEG snapshot every 5s
-function SatSnapshotImg({ streamId, ec2Base }: { streamId: number; ec2Base: string }) {
+function SatSnapshotImg({ streamId, ec2Base, authToken }: { streamId: number; ec2Base: string; authToken?: string | null }) {
   const [ts, setTs] = React.useState(Date.now());
   React.useEffect(() => {
     const iv = setInterval(() => setTs(Date.now()), 5000);
     return () => clearInterval(iv);
   }, []);
+  const tokenParam = authToken ? `&token=${encodeURIComponent(authToken)}` : '';
   return (
     <img
-      src={`${ec2Base}/satellite/snapshot/${streamId}?t=${ts}`}
+      src={`${ec2Base}/satellite/snapshot/${streamId}?t=${ts}${tokenParam}`}
       className="w-full aspect-video object-cover bg-black"
       alt=""
       style={{ minHeight: '90px' }}
@@ -265,6 +266,18 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   
   // Auth token
   const [authToken, setAuthToken] = useState<string | null>(null);
+
+  // Authenticated fetch helper — adds Authorization header to all EC2 requests
+  const fetchWithAuth = useCallback((url: string, opts: RequestInit = {}) => {
+    const existingHeaders = (opts.headers as Record<string, string>) ?? {};
+    return fetch(url, {
+      ...opts,
+      headers: {
+        ...existingHeaders,
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+    });
+  }, [authToken]);
   
   // Wake lock to prevent screen sleep during monitoring
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -404,7 +417,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       
       // Fallback: Try EC2 directly (faster if EC2 is running)
       try {
-        const response = await fetch(`${EC2_BASE}/events`);
+        const response = await fetchWithAuth(`${EC2_BASE}/events`);
         
         if (response.ok) {
           const data = await response.json();
@@ -427,7 +440,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       const timeoutId = setTimeout(() => controller.abort(), 3000);
       
       try {
-        const response = await fetch(`${EC2_BASE}/status`, { signal: controller.signal });
+        const response = await fetchWithAuth(`${EC2_BASE}/status`, { signal: controller.signal });
         clearTimeout(timeoutId);
         
         if (response.ok) {
@@ -461,7 +474,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       const timeoutId = setTimeout(() => controller.abort(), 3000);
       
       try {
-        const response = await fetch(`${EC2_BASE}/health`, { signal: controller.signal });
+        const response = await fetchWithAuth(`${EC2_BASE}/health`, { signal: controller.signal });
         clearTimeout(timeoutId);
         
         if (response.ok) {
@@ -501,7 +514,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       const timeoutId = setTimeout(() => controller.abort(), 3000);
       
       try {
-        const response = await fetch(`${EC2_BASE}/riva/status`, { signal: controller.signal });
+        const response = await fetchWithAuth(`${EC2_BASE}/riva/status`, { signal: controller.signal });
         clearTimeout(timeoutId);
         if (response.ok) {
           const data = await response.json();
@@ -541,7 +554,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
       try {
-        const response = await fetch(`${EC2_BASE}/queue`, { signal: controller.signal });
+        const response = await fetchWithAuth(`${EC2_BASE}/queue`, { signal: controller.signal });
         clearTimeout(timeoutId);
         if (response.ok) {
           const data = await response.json();
@@ -966,7 +979,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
     const pollState = async () => {
       try {
         // Poll EC2 directly for session status
-        const response = await fetch(`${EC2_BASE}/status`);
+const response = await fetchWithAuth(`${EC2_BASE}/status`);
         
         if (!response.ok) return;
         
@@ -1445,7 +1458,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         setQueueError(data.error || 'Failed to add event to queue');
       } else {
         // Refresh queue list
-        const queueRes = await fetch(`${EC2_BASE}/queue`);
+        const queueRes = await fetchWithAuth(`${EC2_BASE}/queue`);
         if (queueRes.ok) {
           const queueData = await queueRes.json();
           setQueuedEvents(queueData.events || []);
@@ -1481,7 +1494,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         setQueueError(data.error || 'Failed to remove event from queue');
       } else {
         // Refresh queue list
-        const queueRes = await fetch(`${EC2_BASE}/queue`);
+        const queueRes = await fetchWithAuth(`${EC2_BASE}/queue`);
         if (queueRes.ok) {
           const queueData = await queueRes.json();
           setQueuedEvents(queueData.events || []);
@@ -1539,7 +1552,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         : { endpoint: '/prime/start', url: primeUrl, port: 4400, novnc: '/prime/novnc', label: 'Prime' };
 
       try {
-        const pipelineRes = await fetch(`${EC2_BASE}${pipelineConfig.endpoint}`, {
+        const pipelineRes = await fetchWithAuth(`${EC2_BASE}${pipelineConfig.endpoint}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: pipelineConfig.url || undefined, desktop_port: pipelineConfig.port }),
@@ -1632,11 +1645,9 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         body.dry_run = true;
       }
       
-      const response = await fetch(`${EC2_BASE}/connect`, {
+      const response = await fetchWithAuth(`${EC2_BASE}/connect`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
       
@@ -1651,11 +1662,15 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       
       // EC2 launch returns websocket_url immediately
       if (data.websocket_url) {
-        setWsUrl(data.websocket_url);
+        // Append token so auth middleware can validate the WS upgrade request
+        const wsUrlWithToken = authToken
+          ? `${data.websocket_url}?token=${encodeURIComponent(authToken)}`
+          : data.websocket_url;
+        setWsUrl(wsUrlWithToken);
         
         // Enable LLM prediction if toggled on (fire-and-forget, non-blocking)
         if (llmPrediction) {
-          fetch(`${EC2_BASE}/session/${data.session_id}/llm_prediction`, {
+          fetchWithAuth(`${EC2_BASE}/session/${data.session_id}/llm_prediction`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ threshold: 0.15 }),
@@ -1733,7 +1748,10 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
     }
     
     if (container.websocket_url) {
-      setWsUrl(container.websocket_url);
+      const wsUrlWithToken = authToken
+        ? `${container.websocket_url}?token=${encodeURIComponent(authToken)}`
+        : container.websocket_url;
+      setWsUrl(wsUrlWithToken);
       
       // Go directly to monitoring - EC2 uses Let's Encrypt, cert is valid
       setPageState('monitoring');
@@ -1825,7 +1843,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         wsRef.current = null;
       }
       
-      const response = await fetch(`${EC2_BASE}/stop/${encodeURIComponent(sessionId)}`, {
+      const response = await fetchWithAuth(`${EC2_BASE}/stop/${encodeURIComponent(sessionId)}`, {
         method: 'POST'
       });
       console.log('Stop response:', response.status);
@@ -2408,7 +2426,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                 setSatError(null);
                 setSatLoading(true);
                 setSelectedSatStreamId(null);
-                fetch(`${EC2_BASE}/satellite/streams`)
+                fetchWithAuth(`${EC2_BASE}/satellite/streams`)
                   .then(r => r.json())
                   .then(d => { setSatStreams(d.streams || []); setSatLoading(false); })
                   .catch(() => { setSatError('Could not reach satellite server'); setSatLoading(false); });
@@ -2568,7 +2586,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                 <button
                   onClick={() => {
                     setSatLoading(true); setSatError(null); setSelectedSatStreamId(null);
-                    fetch(`${EC2_BASE}/satellite/streams`)
+                    fetchWithAuth(`${EC2_BASE}/satellite/streams`)
                       .then(r => r.json())
                       .then(d => { setSatStreams(d.streams || []); setSatLoading(false); })
                       .catch(() => { setSatError('Could not reach satellite server'); setSatLoading(false); });
@@ -2599,7 +2617,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                           : 'border-gray-600 hover:border-gray-400'
                       }`}
                     >
-                      <SatSnapshotImg streamId={s.stream_id} ec2Base={EC2_BASE} />
+                      <SatSnapshotImg streamId={s.stream_id} ec2Base={EC2_BASE} authToken={authToken} />
                       <div className="absolute bottom-0 left-0 right-0 bg-black/70 px-2 py-1">
                         <div className="text-xs font-medium truncate">{s.channel_name}</div>
                         <div className="text-xs text-gray-400">Stream {s.stream_id}</div>
@@ -2789,7 +2807,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               🖥️ Open VNC Viewer
             </button>
             <button
-              onClick={async () => { await fetch(`${EC2_BASE}/prime/stop`, { method: 'POST' }); }}
+              onClick={async () => { await fetchWithAuth(`${EC2_BASE}/prime/stop`, { method: 'POST' }); }}
               className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
             >
               Stop Capture
@@ -2809,7 +2827,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               🖥️ Open VNC Viewer
             </button>
             <button
-              onClick={async () => { await fetch(`${EC2_BASE}/paramount/stop`, { method: 'POST' }); }}
+              onClick={async () => { await fetchWithAuth(`${EC2_BASE}/paramount/stop`, { method: 'POST' }); }}
               className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
             >
               Stop Capture
@@ -2829,7 +2847,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               🖥️ Open VNC Viewer
             </button>
             <button
-              onClick={async () => { await fetch(`${EC2_BASE}/netflix/stop`, { method: 'POST' }); }}
+              onClick={async () => { await fetchWithAuth(`${EC2_BASE}/netflix/stop`, { method: 'POST' }); }}
               className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
             >
               Stop Capture
@@ -2849,7 +2867,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             <button
               onClick={async () => {
                 try {
-                  const r = await fetch(`${EC2_BASE}/session/${sessionId}/llm_prediction`);
+                  const r = await fetchWithAuth(`${EC2_BASE}/session/${sessionId}/llm_prediction`);
                   if (r.ok) setLlmPredictionStatus(await r.json());
                 } catch {}
               }}
@@ -2859,7 +2877,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             </button>
             <button
               onClick={async () => {
-                await fetch(`${EC2_BASE}/session/${sessionId}/llm_prediction`, { method: 'DELETE' });
+                await fetchWithAuth(`${EC2_BASE}/session/${sessionId}/llm_prediction`, { method: 'DELETE' });
                 setLlmPrediction(false);
                 setLlmPredictionStatus(null);
                 setSystemLog(prev => [...prev, {
@@ -3010,7 +3028,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                   onClick={async () => {
                     if (llmPrediction) {
                       // Disable
-                      await fetch(`${EC2_BASE}/session/${sessionId}/llm_prediction`, { method: 'DELETE' });
+                      await fetchWithAuth(`${EC2_BASE}/session/${sessionId}/llm_prediction`, { method: 'DELETE' });
                       setLlmPrediction(false);
                       setLlmPredictionStatus(null);
                       setSystemLog(prev => [...prev, {
@@ -3021,7 +3039,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
                     } else {
                       // Enable
                       try {
-                        const r = await fetch(`${EC2_BASE}/session/${sessionId}/llm_prediction`, {
+                        const r = await fetchWithAuth(`${EC2_BASE}/session/${sessionId}/llm_prediction`, {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ threshold: 0.15 }),

@@ -93,20 +93,40 @@ export default function SatellitePage() {
   const [authToken, setAuthToken] = useState<string | null>(null);
 
   // Fetch Cognito auth token
+  // Fetch (and periodically refresh) Cognito auth token
   useEffect(() => {
-    fetchAuthSession().then(session => {
-      const token = session.tokens?.idToken?.toString() ?? null;
-      setAuthToken(token);
-    }).catch(err => console.error('fetchAuthSession failed:', err));
+    const refresh = () => {
+      fetchAuthSession({ forceRefresh: false }).then(session => {
+        const token = session.tokens?.idToken?.toString() ?? null;
+        setAuthToken(token);
+      }).catch(err => console.error('fetchAuthSession failed:', err));
+    };
+    refresh();
+    // Cognito ID tokens expire after 60 min — refresh every 50 min
+    const id = setInterval(refresh, 50 * 60 * 1000);
+    return () => clearInterval(id);
   }, []);
 
-  // Authenticated fetch — adds Authorization header
-  const fetchWithAuth = useCallback((url: string, opts: RequestInit = {}) => {
+  // Authenticated fetch — adds Authorization header, refreshes token on 401
+  const fetchWithAuth = useCallback(async (url: string, opts: RequestInit = {}) => {
     const existing = (opts.headers as Record<string, string>) ?? {};
-    return fetch(url, {
+    const doFetch = (tok: string | null) => fetch(url, {
       ...opts,
-      headers: { ...existing, ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+      headers: { ...existing, ...(tok ? { Authorization: `Bearer ${tok}` } : {}) },
     });
+    const resp = await doFetch(authToken);
+    if (resp.status === 401) {
+      // Token may have expired — get a fresh one and retry once
+      try {
+        const session = await fetchAuthSession({ forceRefresh: true });
+        const newToken = session.tokens?.idToken?.toString() ?? null;
+        if (newToken && newToken !== authToken) {
+          setAuthToken(newToken);
+          return doFetch(newToken);
+        }
+      } catch (_) {}
+    }
+    return resp;
   }, [authToken]);
 
   // Move/scan log popup state
@@ -134,12 +154,22 @@ export default function SatellitePage() {
   }, [logLines]);
 
   // WebSocket for real-time adapter/dish status
-  const connectWs = useCallback(() => {
+  const connectWs = useCallback(async () => {
     if (!authToken) return; // Don't connect until we have a valid token
     if (wsRef.current) {
       try { wsRef.current.close(); } catch (_) {}
     }
-    const wsUrl = `${WS_PROXY}/api/ws/status?token=${encodeURIComponent(authToken)}`;
+    // Always get a fresh token for WS connections (handles expiry)
+    let token = authToken;
+    try {
+      const session = await fetchAuthSession({ forceRefresh: false });
+      const fresh = session.tokens?.idToken?.toString() ?? null;
+      if (fresh) {
+        token = fresh;
+        if (fresh !== authToken) setAuthToken(fresh);
+      }
+    } catch (_) {}
+    const wsUrl = `${WS_PROXY}/api/ws/status?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

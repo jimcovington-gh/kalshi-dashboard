@@ -55,7 +55,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-get-trades
-      CodeUri: GetTradesFunction
+      CodeUri: ../..
       Handler: get-trades.lambda_handler
       Description: Get trade history for a market ticker
       AutoPublishAlias: live
@@ -80,13 +80,11 @@ Resources:
               Ref: DashboardApi
             Path: /trades
             Method: GET
-    Metadata:
-      SamResourceId: GetTradesFunction
   GetPortfolioFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-get-portfolio
-      CodeUri: GetPortfolioFunction
+      CodeUri: ../..
       Handler: get-portfolio.lambda_handler
       Description: Get portfolio data for user(s) via TIS
       AutoPublishAlias: live
@@ -134,13 +132,11 @@ Resources:
               Ref: DashboardApi
             Path: /portfolio
             Method: GET
-    Metadata:
-      SamResourceId: GetPortfolioFunction
   GetAnalyticsFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-get-analytics
-      CodeUri: GetAnalyticsFunction
+      CodeUri: ../..
       Handler: get-analytics.lambda_handler
       Description: Get analytics data (PnL by category)
       AutoPublishAlias: live
@@ -171,13 +167,11 @@ Resources:
               Ref: DashboardApi
             Path: /analytics
             Method: GET
-    Metadata:
-      SamResourceId: GetAnalyticsFunction
   GetSettlementsAnalyticsFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-get-settlements-analytics
-      CodeUri: GetSettlementsAnalyticsFunction
+      CodeUri: ../..
       Handler: get-settlements-analytics.lambda_handler
       Description: Get settlement analytics from enriched trades-v2 table
       AutoPublishAlias: live
@@ -211,13 +205,11 @@ Resources:
               Ref: DashboardApi
             Path: /analytics/settlements
             Method: GET
-    Metadata:
-      SamResourceId: GetSettlementsAnalyticsFunction
   TradingStatusFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-trading-status
-      CodeUri: TradingStatusFunction
+      CodeUri: ../..
       Handler: trading-status.lambda_handler
       Description: Get and set trading shutdown status (admin only for POST)
       AutoPublishAlias: live
@@ -248,13 +240,11 @@ Resources:
               Ref: DashboardApi
             Path: /trading-status
             Method: POST
-    Metadata:
-      SamResourceId: TradingStatusFunction
   RecorderSettingsFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-recorder-settings
-      CodeUri: RecorderSettingsFunction
+      CodeUri: ../..
       Handler: recorder-settings.lambda_handler
       Description: Get and set orderbook recorder feature flags; proxy recorder status
         from TIS
@@ -308,13 +298,11 @@ Resources:
               Ref: DashboardApi
             Path: /sports-captures
             Method: GET
-    Metadata:
-      SamResourceId: RecorderSettingsFunction
   AdminStatsFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-admin-stats
-      CodeUri: AdminStatsFunction
+      CodeUri: ../..
       Handler: get-admin-stats.lambda_handler
       Description: Get admin statistics (market capture runs, recent orders/trades)
       AutoPublishAlias: live
@@ -347,13 +335,11 @@ Resources:
               Ref: DashboardApi
             Path: /admin-stats
             Method: GET
-    Metadata:
-      SamResourceId: AdminStatsFunction
   VolatileWatchlistFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-volatile-watchlist
-      CodeUri: VolatileWatchlistFunction
+      CodeUri: ../..
       Handler: get-volatile-watchlist.lambda_handler
       Description: Get volatile watchlist entries (admin only)
       AutoPublishAlias: live
@@ -378,13 +364,11 @@ Resources:
               Ref: DashboardApi
             Path: /volatile-watchlist
             Method: GET
-    Metadata:
-      SamResourceId: VolatileWatchlistFunction
   VolatileOrdersFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-volatile-orders
-      CodeUri: VolatileOrdersFunction
+      CodeUri: ../..
       Handler: get-volatile-orders.handler
       Description: Get volatile dip-buy orders from last 24h (admin only)
       AutoPublishAlias: live
@@ -412,13 +396,11 @@ Resources:
               Ref: DashboardApi
             Path: /volatile-orders
             Method: GET
-    Metadata:
-      SamResourceId: VolatileOrdersFunction
   MentionMonitorsFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-mention-monitors
-      CodeUri: MentionMonitorsFunction
+      CodeUri: ../..
       Handler: mention-monitors.lambda_handler
       Description: Get and clear mention monitor status (admin only)
       Timeout: 60
@@ -458,13 +440,11 @@ Resources:
               Ref: DashboardApi
             Path: /mention-monitors/clear
             Method: POST
-    Metadata:
-      SamResourceId: MentionMonitorsFunction
   VoiceTraderRouterFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-voice-trader-router
-      CodeUri: VoiceTraderRouterFunction
+      CodeUri: ../..
       Handler: voice-trader-router.lambda_handler
       Description: Launch and manage voice trading containers for mention markets
       Timeout: 60
@@ -656,13 +636,11 @@ Resources:
               Ref: DashboardApi
             Path: /voice-trader/ec2/workers
             Method: GET
-    Metadata:
-      SamResourceId: VoiceTraderRouterFunction
   AIChatFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-ai-chat
-      CodeUri: AIChatFunction
+      CodeUri: ../..
       Handler: ai-chat.lambda_handler
       Description: AI chat assistant with read-only access to trading data
       Timeout: 900
@@ -795,13 +773,11 @@ Resources:
               Ref: DashboardApi
             Path: /ai-chat/conversations
             Method: POST
-    Metadata:
-      SamResourceId: AIChatFunction
   VoiceTraderSchedulerFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-voice-trader-scheduler
-      CodeUri: VoiceTraderSchedulerFunction
+      CodeUri: ../..
       Handler: voice-trader-scheduler.lambda_handler
       Description: Auto-start Voice Trader EC2 before scheduled events
       Timeout: 30
@@ -826,24 +802,21 @@ Resources:
             Schedule: rate(5 minutes)
             Description: Check for upcoming voice trader events and start EC2
             Enabled: true
-    Metadata:
-      SamResourceId: VoiceTraderSchedulerFunction
   SharedCodeLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
       LayerName: dashboard-shared-code
       Description: Shared utilities (s3_config_loader)
-      ContentUri: SharedCodeLayer
+      ContentUri: ../../layer
       CompatibleRuntimes:
       - python3.12
     Metadata:
       BuildMethod: python3.12
-      SamResourceId: SharedCodeLayer
   CopilotProxyFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-copilot-proxy
-      CodeUri: CopilotProxyFunction
+      CodeUri: ../..
       Handler: copilot-proxy.lambda_handler
       Description: Proxy dashboard chat to GitHub Models API
       Timeout: 900
@@ -947,13 +920,11 @@ Resources:
           - X-Device-Token
           AllowMethods:
           - POST
-    Metadata:
-      SamResourceId: CopilotProxyFunction
   DeviceManagementFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-device-management
-      CodeUri: DeviceManagementFunction
+      CodeUri: ../..
       Handler: device-management.lambda_handler
       Description: Admin API for managing device tokens
       Timeout: 30
@@ -1010,8 +981,6 @@ Resources:
               Ref: DashboardApi
             Path: /admin/security-audit
             Method: GET
-    Metadata:
-      SamResourceId: DeviceManagementFunction
   VoiceprintClipsTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -1044,7 +1013,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-voiceprint-clips
-      CodeUri: VoiceprintClipsFunction
+      CodeUri: ../..
       Handler: voiceprint-clips.lambda_handler
       Description: Voiceprint clip curation - list clips, update status, presigned
         URLs
@@ -1097,8 +1066,6 @@ Resources:
               Ref: DashboardApi
             Path: /voiceprint/clips/{clip_id}/url
             Method: GET
-    Metadata:
-      SamResourceId: VoiceprintClipsFunction
   SignalEngineVelocityFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1106,6 +1073,8 @@ Resources:
       CodeUri: SignalEngineVelocityFunction
       Handler: signal-engine-velocity.lambda_handler
       Description: Signal Engine velocity/acceleration data for market visualization
+      Timeout: 120
+      MemorySize: 512
       AutoPublishAlias: live
       ProvisionedConcurrencyConfig:
         ProvisionedConcurrentExecutions: 1
@@ -1157,7 +1126,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-signal-engine-classifier
-      CodeUri: SignalEngineClassifierFunction
+      CodeUri: ../..
       Handler: signal-engine-classifier.lambda_handler
       Description: AI classification of markets as surprise-tradable using Bedrock
         Haiku
@@ -1191,8 +1160,6 @@ Resources:
             Schedule: rate(15 minutes)
             Description: Classify new/unclassified velocity markets every 15 min
             Input: '{"action": "classify_new"}'
-    Metadata:
-      SamResourceId: SignalEngineClassifierFunction
   SignalEngineClusterTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -1211,7 +1178,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: dashboard-signal-engine-clusterer
-      CodeUri: SignalEngineClustererFunction
+      CodeUri: ../..
       Handler: signal-engine-clusterer.lambda_handler
       Description: AI cross-event clustering of markets using Bedrock Haiku
       MemorySize: 512
@@ -1249,8 +1216,6 @@ Resources:
             Schedule: rate(30 minutes)
             Description: Recluster all active markets every 30 min
             Input: '{"action": "recluster"}'
-    Metadata:
-      SamResourceId: SignalEngineClustererFunction
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL

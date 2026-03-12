@@ -264,39 +264,68 @@ def _load_ai_clusters():
     return items, dict(ticker_to_clusters)
 
 
+def _scan_velocity_tickers():
+    """Fast scan of velocity table — returns only market_ticker + snapshot_count (no snapshot data)."""
+    tickers = {}  # ticker → snapshot_count
+    params = {"ProjectionExpression": "market_ticker, snapshot_count"}
+    while True:
+        response = table.scan(**params)
+        for item in response.get("Items", []):
+            ticker = item["market_ticker"]
+            count = int(item.get("snapshot_count", 0))
+            tickers[ticker] = count
+        if "LastEvaluatedKey" not in response:
+            break
+        params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+    return tickers
+
+
+def _batch_load_velocity(tickers):
+    """Load full velocity items (with snapshots) for a specific set of tickers."""
+    items = {}
+    unique_tickers = list(set(tickers))
+    for chunk_start in range(0, len(unique_tickers), 100):
+        chunk = unique_tickers[chunk_start:chunk_start + 100]
+        response = dynamodb.batch_get_item(
+            RequestItems={
+                VELOCITY_TABLE: {
+                    "Keys": [{"market_ticker": t} for t in chunk],
+                }
+            }
+        )
+        for item in response.get("Responses", {}).get(VELOCITY_TABLE, []):
+            items[item["market_ticker"]] = item
+    return items
+
+
 def _get_clusters(limit):
     """Aggregate markets into clusters using AI clusters (with event_ticker fallback)."""
     now = time.time()
 
-    # 1. Scan all velocity items
-    items = []
-    params = {}
-    while True:
-        response = table.scan(**params)
-        items.extend(response.get("Items", []))
-        if "LastEvaluatedKey" not in response:
-            break
-        params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+    # 1. Fast scan: get only tickers + snapshot_count (no snapshot data)
+    ticker_counts = _scan_velocity_tickers()
 
-    if not items:
+    if not ticker_counts:
         return {"clusters": [], "total_clusters": 0, "total_markets": 0, "generated_at": now}
 
-    # 2. Batch-load metadata + classifications
-    all_tickers = [item["market_ticker"] for item in items]
-    metadata = _load_metadata(all_tickers)
-    classifications = _load_classifications(all_tickers)
+    # Filter: need at least 2 snapshots for velocity calculation
+    eligible_tickers = [t for t, c in ticker_counts.items() if c >= 2]
+
+    # 2. Batch-load metadata + classifications (for eligible tickers only)
+    metadata = _load_metadata(eligible_tickers)
+    classifications = _load_classifications(eligible_tickers)
 
     # 3. Load AI cluster assignments
     ai_clusters, ticker_to_clusters = _load_ai_clusters()
     ai_cluster_map = {c["cluster_id"]: c for c in ai_clusters}
 
-    # 4. Compute market summaries, filtering excluded categories + non-surprise markets
-    market_summaries = {}  # ticker → summary
+    # 4. Pre-filter by category + classification before loading full snapshot data
+    filtered_tickers = []
+    ticker_meta = {}  # ticker → {category, event_ticker, title, series_ticker, leak_watch, classification}
     excluded_count = 0
     filtered_not_surprise = 0
 
-    for item in items:
-        ticker = item["market_ticker"]
+    for ticker in eligible_tickers:
         meta = metadata.get(ticker, {})
         category = meta.get("category", "unknown")
         event_ticker = meta.get("event_ticker", "")
@@ -307,7 +336,6 @@ def _get_clusters(limit):
         if not event_ticker:
             continue
 
-        # Classification filter
         classification = classifications.get(ticker)
         leak_watch = False
         if classification and not classification["surprise_tradable"]:
@@ -318,18 +346,34 @@ def _get_clusters(limit):
                 continue
             leak_watch = True
 
+        filtered_tickers.append(ticker)
+        ticker_meta[ticker] = {
+            "category": category, "event_ticker": event_ticker,
+            "title": meta.get("title", ""), "series_ticker": meta.get("series_ticker", ""),
+            "leak_watch": leak_watch, "classification": classification,
+        }
+
+    # 5. Now load full velocity data ONLY for markets that passed all filters
+    velocity_items = _batch_load_velocity(filtered_tickers)
+
+    # 6. Compute market summaries
+    market_summaries = {}
+    for ticker in filtered_tickers:
+        item = velocity_items.get(ticker)
+        if not item:
+            continue
+        tm = ticker_meta[ticker]
         summary = _market_summary(item, now)
         if summary["snapshot_count"] < 2:
             continue
-
-        summary["category"] = category
-        summary["event_ticker"] = event_ticker
-        summary["title"] = meta.get("title", "")
-        summary["series_ticker"] = meta.get("series_ticker", "")
-        if classification:
-            summary["surprise_tradable"] = classification["surprise_tradable"]
-            summary["classification_reason"] = classification["reason"]
-        summary["leak_watch"] = leak_watch
+        summary["category"] = tm["category"]
+        summary["event_ticker"] = tm["event_ticker"]
+        summary["title"] = tm["title"]
+        summary["series_ticker"] = tm["series_ticker"]
+        if tm["classification"]:
+            summary["surprise_tradable"] = tm["classification"]["surprise_tradable"]
+            summary["classification_reason"] = tm["classification"]["reason"]
+        summary["leak_watch"] = tm["leak_watch"]
         market_summaries[ticker] = summary
 
     # 5. Group markets into occurrence clusters (AI-identified first, event_ticker fallback)
@@ -447,32 +491,26 @@ def _get_cluster_markets(event_ticker=None, cluster_id=None):
         except Exception as e:
             print(f"WARN: Failed to load AI cluster {cluster_id}: {e}")
 
-    # Scan velocity table
-    items = []
-    params = {}
-    while True:
-        response = table.scan(**params)
-        items.extend(response.get("Items", []))
-        if "LastEvaluatedKey" not in response:
-            break
-        params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+    if target_tickers is not None:
+        # AI cluster: load only the specific tickers we need (no full table scan)
+        velocity_items = _batch_load_velocity(list(target_tickers))
+        all_tickers = list(velocity_items.keys())
+    else:
+        # Event ticker fallback: fast scan to find matching tickers, then load full data
+        ticker_counts = _scan_velocity_tickers()
+        all_tickers_fast = list(ticker_counts.keys())
+        metadata_fast = _load_metadata(all_tickers_fast)
+        matching = [t for t in all_tickers_fast if metadata_fast.get(t, {}).get("event_ticker") == event_ticker]
+        velocity_items = _batch_load_velocity(matching)
+        all_tickers = list(velocity_items.keys())
 
-    all_tickers = [item["market_ticker"] for item in items]
     metadata = _load_metadata(all_tickers)
+    classifications = _load_classifications(all_tickers)
     classifications = _load_classifications(all_tickers)
 
     markets = []
-    for item in items:
-        ticker = item["market_ticker"]
+    for ticker, item in velocity_items.items():
         meta = metadata.get(ticker, {})
-
-        # Filter: match by AI cluster members or event_ticker
-        if target_tickers is not None:
-            if ticker not in target_tickers:
-                continue
-        else:
-            if meta.get("event_ticker") != event_ticker:
-                continue
 
         summary = _market_summary(item, now)
         et = meta.get("event_ticker", "")

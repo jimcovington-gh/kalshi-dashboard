@@ -1088,6 +1088,8 @@ Resources:
       CodeUri: ./
       Handler: signal-engine-velocity.lambda_handler
       Description: Signal Engine velocity/acceleration data for market visualization
+      Timeout: 120
+      MemorySize: 512
       AutoPublishAlias: live
       ProvisionedConcurrencyConfig:
         ProvisionedConcurrentExecutions: 1

@@ -190,7 +190,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [sessionId, setSessionId] = useState<string | null>(null);
   
   // Setup form state
-  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'nbc_multi' | 'desktop' | 'paramount' | 'netflix'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'nbc_multi' | 'desktop' | 'paramount' | 'netflix' | 'listener'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
@@ -1633,6 +1633,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
         user_name: 'jimc',  // TODO: Get from auth
         audio_source: audioSource === 'satellite' ? 'satellite_transcript'
                     : audioSource === 'nbc_multi' ? 'satellite_transcript'
+                    : audioSource === 'listener' ? 'satellite_transcript'
                     : audioSource === 'paramount' ? 'desktop'
                     : audioSource === 'netflix' ? 'desktop'
                     : audioSource,
@@ -2501,6 +2502,12 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             >
               🎬 Netflix
             </button>
+            <button
+              className={`px-4 py-2 rounded ${audioSource === 'listener' ? 'bg-teal-600' : 'bg-gray-700'}`}
+              onClick={() => setAudioSource('listener')}
+            >
+              🎧 Field Listener
+            </button>
 
           </div>
           
@@ -2619,6 +2626,20 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                 <p className="font-medium">🎬 How it works</p>
                 <p className="text-xs text-red-300">Chrome opens on the EC2 server on a separate display. After launch, click <strong>Open VNC</strong> to see and control the browser — navigate to your show and press play. Audio streams automatically to the voice trader.</p>
               </div>
+            </div>
+          )}
+
+          {audioSource === 'listener' && (
+            <div className="space-y-3 mb-6">
+              <div className="bg-teal-900/30 border border-teal-700 rounded-lg p-3 text-sm text-teal-200 space-y-1">
+                <p className="font-medium">🎧 How it works</p>
+                <p className="text-xs text-teal-300">A field listener streams audio from their phone (web page or call-in). Transcripts are injected into your trading session in real time. Make sure the listener below is assigned to your trader and has the event set.</p>
+              </div>
+              <ListenerAdminPanel
+                ec2Base={EC2_BASE}
+                eventTicker={selectedEvent?.event_ticker}
+                defaultTrader="jimc"
+              />
             </div>
           )}
 

@@ -14,6 +14,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useRouter } from 'next/navigation';
+import { ListenerAdminPanel } from './ListenerAdminPanel';
+import { ListenerStatusBar } from './ListenerStatusBar';
 
 interface MentionEvent {
   event_ticker: string;
@@ -204,6 +206,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [selectedSatStreamId, setSelectedSatStreamId] = useState<number | null>(null);
   const [scheduledStart, setScheduledStart] = useState('');
   const [dryRun, setDryRun] = useState(false);  // Dry run mode - no real trades
+  const [listenersExpanded, setListenersExpanded] = useState(false);
   const [sttDiarization, setSttDiarization] = useState(false);  // Speaker diarization (spk_0 labels)
   const [llmPrediction, setLlmPrediction] = useState(false);  // LLM prediction pipeline (A10G GPU)
   const [llmPredictionStatus, setLlmPredictionStatus] = useState<any>(null);  // Prediction server status
@@ -2311,6 +2314,25 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             </div>
           )}
         </div>
+
+        {/* Field Listeners Section */}
+        <div className="mb-6 border border-gray-700 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setListenersExpanded(!listenersExpanded)}
+            className="w-full flex items-center justify-between px-4 py-3 bg-gray-700/30 hover:bg-gray-700/50 transition-colors"
+          >
+            <span className="text-sm font-semibold text-gray-300">🎧 Field Listeners</span>
+            <span className="text-gray-500 text-xs">{listenersExpanded ? '▲ Collapse' : '▼ Expand'}</span>
+          </button>
+          {listenersExpanded && (
+            <div className="p-4 border-t border-gray-700">
+              <ListenerAdminPanel
+                ec2Base={EC2_BASE}
+                defaultTrader="jimc"
+              />
+            </div>
+          )}
+        </div>
         
         {/* Upcoming Events Section */}
         <div className="flex items-center justify-between mb-4">
@@ -2686,6 +2708,26 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             </p>
           </div>
           
+          {/* Field Listeners */}
+          <div className="mt-6 border border-gray-700 rounded-lg overflow-hidden">
+            <button
+              onClick={() => setListenersExpanded(!listenersExpanded)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-gray-700/30 hover:bg-gray-700/50 transition-colors"
+            >
+              <span className="text-sm font-semibold text-gray-300">🎧 Field Listeners</span>
+              <span className="text-gray-500 text-xs">{listenersExpanded ? '▲ Collapse' : '▼ Expand'}</span>
+            </button>
+            {listenersExpanded && (
+              <div className="p-4 border-t border-gray-700">
+                <ListenerAdminPanel
+                  ec2Base={EC2_BASE}
+                  eventTicker={selectedEvent?.event_ticker}
+                  defaultTrader="jimc"
+                />
+              </div>
+            )}
+          </div>
+
           <div className="mt-6">
             <label className="flex items-center gap-2">
               <input
@@ -3224,6 +3266,9 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             🔊 = hear call &nbsp;|&nbsp; 🎤 = talk to operator
           </div>
         </div>
+
+        {/* Listener Status Bar */}
+        <ListenerStatusBar ec2Base={EC2_BASE} traderFilter="jimc" />
         
         <div className="grid grid-cols-3 gap-4">
           {/* Left column: Word Grid - 5 columns for density */}

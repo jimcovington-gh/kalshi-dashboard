@@ -140,16 +140,16 @@ def _run_ssm(commands: list, timeout_seconds: int = 60):
 
     # Poll with increasing backoff until complete
     backoff = 0.5
-    for _ in range(40):
+    for _ in range(400):
         time.sleep(backoff)
         try:
             result = ssm.get_command_invocation(CommandId=command_id, InstanceId=COPILOT_INSTANCE_ID)
         except ssm.exceptions.InvocationDoesNotExist:
-            backoff = min(backoff * 1.3, 2.0)
+            backoff = min(backoff * 1.3, 3.0)
             continue
         if result['Status'] not in ('InProgress', 'Pending', 'Delayed'):
             return result
-        backoff = min(backoff * 1.3, 2.0)
+        backoff = min(backoff * 1.3, 3.0)
     return None  # timed out
 
 
@@ -501,9 +501,9 @@ def call_vscode_wrapper(message: str, system_prompt: Optional[str] = None, admin
         f"curl -sf -X POST http://localhost:8765/chat "
         f"-H 'Content-Type: application/json' "
         f"-d {shlex.quote(payload_str)} "
-        f"--max-time 25 2>&1"
+        f"--max-time 870 2>&1"
     )
-    result = _run_ssm([cmd], timeout_seconds=30)
+    result = _run_ssm([cmd], timeout_seconds=890)
 
     if not result:
         logger.error('SSM timed out waiting for wrapper response')

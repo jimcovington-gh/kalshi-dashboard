@@ -1,8 +1,10 @@
-"""
-Signal Engine AI Clusterer — uses Bedrock Claude Haiku to group markets
-into semantic clusters that cross event boundaries.
+"""Signal Engine Occurrence Clusterer -- uses Bedrock Claude Haiku to identify
+specific real-world occurrences (yes/no events) and link prediction markets
+that would be causally affected by each occurrence.
 
-Markets can belong to MULTIPLE clusters. Clusters have AI-generated names.
+An "occurrence" is a single concrete event (e.g., "Kristi Noem departs DHS")
+that drives price movement across multiple markets, potentially spanning
+different Kalshi event_tickers. Markets can belong to MULTIPLE occurrences.
 
 Invocation modes:
   {"action": "recluster"}       → full recluster of all active velocity markets
@@ -37,42 +39,70 @@ velocity_table = dynamodb.Table(VELOCITY_TABLE)
 classification_table = dynamodb.Table(CLASSIFICATION_TABLE)
 
 
-CLUSTER_SYSTEM_PROMPT = """You group prediction markets into thematic clusters. Given a list of markets (each with a ticker, title, event_ticker, and category), group them into meaningful clusters.
+CLUSTER_SYSTEM_PROMPT = """You identify specific real-world occurrences that would causally move prediction market prices, and group the affected markets under each occurrence.
+
+An "occurrence" is a SINGLE, SPECIFIC event that either will or won't happen — something you could ask "has this happened yet?" about.
+
+EXAMPLE: Given these markets:
+- KXCABDEPART-26 | Will there be 3+ cabinet departures by Dec 2026?
+- KXNOEM-DHS | Will Kristi Noem be DHS Secretary on June 1?
+- KXSD-SENATE | Will Republicans win the SD Senate special election?
+- KXDHS-HEAD | Will DHS have a new secretary by July?
+
+Good output:
+[{"name": "Kristi Noem departs as DHS Secretary", "description": "Her departure affects cabinet departure count, DHS leadership succession, and triggers a SD Senate special election", "tickers": ["KXCABDEPART-26", "KXNOEM-DHS", "KXSD-SENATE", "KXDHS-HEAD"]}]
 
 RULES:
-1. Group markets that are about the SAME topic, person, policy, or event — even if they have different event_tickers.
-2. A market can belong to MULTIPLE clusters if it spans multiple themes.
-3. Each cluster should have 2+ markets. Don't create singleton clusters.
-4. Give each cluster a short, descriptive name (3-8 words). The name should describe the THEME, not just repeat a ticker.
-5. Include a brief 1-sentence description of what unifies the cluster.
+1. Each occurrence must be SPECIFIC and CONCRETE — a single yes/no event, not a category.
+   GOOD: "Pete Hegseth leaves as Defense Secretary", "Fed cuts rates in June 2026"
+   BAD: "2026 Cabinet Changes", "Political Events", "Federal Reserve Policy"
+2. A market CAN and SHOULD belong to MULTIPLE occurrences if multiple events would move it.
+   Example: "Number of cabinet departures by July" is affected by EVERY individual departure.
+3. Each occurrence must have 2+ markets that would be causally affected by it happening.
+4. Name each occurrence as a concise statement of what happens (3-10 words).
+5. Include a 1-sentence description of the CAUSAL LINK — WHY would this event move these markets?
+6. Think about CROSS-EVENT connections: a person leaving office affects markets about that person, their department, successor races, aggregate counting markets, etc.
+7. Be GRANULAR. "Trump tariff on China" and "Trump tariff on EU" are DIFFERENT occurrences.
 
-GOOD cluster names: "Trump Tariff Policy", "Fed Interest Rate Decisions", "Ukraine Conflict Escalation", "NCAA March Madness Outcomes", "Supreme Court Rulings 2026"
-BAD cluster names: "KXTARIFF Markets", "Various Political Events", "Miscellaneous"
+Respond with ONLY a JSON array:
+[{"name": "Occurrence Name", "description": "Why this occurrence causally moves these markets", "tickers": ["TICKER1", "TICKER2", ...]}]
 
-Respond with ONLY a JSON array. Each element:
-{"name": "Cluster Name", "description": "What unifies these markets", "tickers": ["TICKER1", "TICKER2", ...]}
-
-If a market doesn't fit any cluster, omit it (it will remain unclustered)."""
+If a market doesn't fit any concrete occurrence, omit it."""
 
 
-ASSIGN_SYSTEM_PROMPT = """You assign new prediction markets to existing thematic clusters. Given:
-1. A list of EXISTING clusters (each with name, description, and sample market titles)
-2. A list of NEW markets (each with ticker, title, event_ticker)
+ASSIGN_SYSTEM_PROMPT = """You assign new prediction markets to existing occurrence-based clusters.
+Each cluster represents a specific real-world event (occurrence) that either will or won't happen.
 
-For each new market, decide which existing cluster(s) it belongs to, or if it needs a NEW cluster.
+Given:
+1. EXISTING occurrences (name, description, sample markets)
+2. NEW markets to assign
 
-RULES:
-1. A market can belong to MULTIPLE clusters.
-2. Only create a new cluster if the market truly doesn't fit any existing cluster.
-3. New cluster names should be 3-8 words, descriptive of the theme.
+For each new market, determine which occurrence(s) would causally affect it.
+A market can belong to MULTIPLE occurrences.
+
+Only create a NEW occurrence if the market is affected by a specific event not already captured.
+New occurrences must be SPECIFIC (a single yes/no event), not a category.
 
 Respond with ONLY a JSON object:
 {
-  "assignments": [{"ticker": "MKTTICKER", "cluster_names": ["Existing Cluster", "Another Cluster"]}],
-  "new_clusters": [{"name": "New Cluster Name", "description": "What unifies it", "tickers": ["T1", "T2"]}]
-}
+  "assignments": [{"ticker": "MKTTICKER", "cluster_names": ["Occurrence A", "Occurrence B"]}],
+  "new_clusters": [{"name": "New Occurrence", "description": "Causal link", "tickers": ["T1", "T2"]}]
+}"""
 
-If a market doesn't fit any cluster and can't form a new one (no related peers), omit it from assignments."""
+
+CONSOLIDATION_PROMPT = """Given these occurrence names from a prediction market clustering task, identify any that refer to the SAME specific real-world event but are phrased differently, and should be merged.
+
+RULES:
+1. Only merge occurrences that are truly the SAME event phrased differently.
+   MERGE: "Fed cuts rates in June 2026" + "Federal Reserve June 2026 rate cut"
+   DO NOT MERGE: "Fed cuts rates in June" + "Fed cuts rates in July" (different events)
+   DO NOT MERGE: "Pete Hegseth leaves Defense" + "Cabinet departures" (related but different)
+2. Choose the clearest, most specific name as the canonical name.
+
+Respond with ONLY a JSON array:
+[{"keep": "Best Name", "merge": ["Duplicate Name 1", "Duplicate Name 2"]}]
+
+If no duplicates exist, respond with []. Only include groups with actual duplicates."""
 
 
 def _generate_cluster_id(name):
@@ -208,6 +238,64 @@ def _call_bedrock(system_prompt, user_msg, max_tokens=8192):
         raise
 
 
+def _consolidate_occurrences(all_clusters):
+    """Use Bedrock to find and merge duplicate occurrence names across batches.
+
+    Two occurrences that describe the same real-world event but were named differently
+    in different batches (e.g., "Fed cuts rates June 2026" vs "Federal Reserve June rate cut")
+    get merged into one.
+    """
+    unique_names = list(set(c.get("name", "").strip() for c in all_clusters if c.get("name")))
+    if len(unique_names) <= 15:
+        # Not enough to warrant a consolidation call
+        return all_clusters
+
+    user_msg = "OCCURRENCE NAMES:\n" + "\n".join(f"- {n}" for n in sorted(unique_names))
+
+    try:
+        merges = _call_bedrock(CONSOLIDATION_PROMPT, user_msg, max_tokens=4096)
+    except Exception as e:
+        print(f"clusterer: consolidation call failed, skipping: {e}")
+        return all_clusters
+
+    if not isinstance(merges, list) or not merges:
+        print("clusterer: consolidation found no duplicates")
+        return all_clusters
+
+    # Build merge map: old_name_lower → canonical_name
+    merge_map = {}
+    for group in merges:
+        canonical = group.get("keep", "")
+        if not canonical:
+            continue
+        for old_name in group.get("merge", []):
+            merge_map[old_name.lower().strip()] = canonical
+
+    if not merge_map:
+        print("clusterer: consolidation found no duplicates")
+        return all_clusters
+
+    # Re-merge using canonical names
+    merged = {}
+    for cluster in all_clusters:
+        name = cluster.get("name", "").strip()
+        canonical = merge_map.get(name.lower().strip(), name)
+        key = canonical.lower().strip()
+        if key in merged:
+            existing_tickers = set(merged[key].get("tickers", []))
+            existing_tickers.update(cluster.get("tickers", []))
+            merged[key]["tickers"] = list(existing_tickers)
+        else:
+            cluster_copy = dict(cluster)
+            cluster_copy["name"] = canonical
+            merged[key] = cluster_copy
+
+    before = len(all_clusters)
+    after = len(merged)
+    print(f"clusterer: consolidation merged {before} → {after} occurrences ({before - after} duplicates)")
+    return list(merged.values())
+
+
 def _get_active_markets():
     """Get all active velocity markets with metadata, filtered by category and classification."""
     # 1. Get all velocity tickers
@@ -257,12 +345,13 @@ def _store_clusters(clusters_data, active_tickers):
     for cluster in clusters_data:
         name = cluster["name"]
         cluster_id = _generate_cluster_id(name)
-        new_cluster_ids.add(cluster_id)
 
         # Filter to only active tickers
         member_tickers = [t for t in cluster.get("tickers", []) if t in active_tickers]
         if not member_tickers:
             continue
+
+        new_cluster_ids.add(cluster_id)
 
         cluster_table.put_item(Item={
             "cluster_id": cluster_id,
@@ -338,7 +427,10 @@ def _recluster(context):
             merged[key] = cluster
 
     final_clusters = list(merged.values())
-    print(f"clusterer: {len(final_clusters)} clusters after merging duplicates")
+    print(f"clusterer: {len(final_clusters)} occurrences after exact-name merge")
+
+    # Consolidate: use Bedrock to find fuzzy duplicate occurrence names across batches
+    final_clusters = _consolidate_occurrences(final_clusters)
 
     stored = _store_clusters(final_clusters, active_tickers)
 

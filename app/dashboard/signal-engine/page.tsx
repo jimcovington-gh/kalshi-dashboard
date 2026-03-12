@@ -264,7 +264,7 @@ function ClusterDrillDown({
       <h2 className="text-lg font-bold text-gray-900 mb-1">
         {displayName}
         {cluster.type === 'ai' && (
-          <span className="ml-2 inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-100 text-violet-700">AI Cluster</span>
+          <span className="ml-2 inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-100 text-violet-700">Occurrence</span>
         )}
       </h2>
       {description && (
@@ -477,7 +477,7 @@ export default function SignalEnginePage() {
           <h1 className="text-xl font-bold text-gray-900">⚡ Signal Engine — Cluster Velocity</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {sortedClusters.length} clusters · {totalMarkets} markets
-            {aiClusterCount > 0 && <span className="text-violet-500"> · {aiClusterCount} AI-grouped</span>}
+            {aiClusterCount > 0 && <span className="text-violet-500"> · {aiClusterCount} occurrences</span>}
             {excludedCount > 0 && <span className="text-gray-400"> · {excludedCount} excluded</span>}
             {filteredNotSurprise > 0 && <span className="text-gray-400"> · {filteredNotSurprise} non-surprise filtered</span>}
             {lastRefresh > 0 && (
@@ -560,8 +560,8 @@ export default function SignalEnginePage() {
                             {cluster.event_ticker}
                           </span>
                           {cluster.is_ai_cluster && (
-                            <span className="inline-block px-1 py-0 rounded text-[9px] font-semibold bg-violet-100 text-violet-700 border border-violet-300 whitespace-nowrap" title={`AI cluster spanning ${cluster.event_tickers?.length ?? 1} events`}>
-                              AI
+                            <span className="inline-block px-1 py-0 rounded text-[9px] font-semibold bg-violet-100 text-violet-700 border border-violet-300 whitespace-nowrap" title={`Occurrence spanning ${cluster.event_tickers?.length ?? 1} Kalshi events`}>
+                              {cluster.event_tickers?.length ?? 1} evt{(cluster.event_tickers?.length ?? 1) > 1 ? 's' : ''}
                             </span>
                           )}
                           {cluster.leak_watch && (

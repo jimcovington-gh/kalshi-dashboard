@@ -332,12 +332,12 @@ def _get_clusters(limit):
         summary["leak_watch"] = leak_watch
         market_summaries[ticker] = summary
 
-    # 5. Group markets into clusters (AI clusters first, event_ticker fallback)
+    # 5. Group markets into occurrence clusters (AI-identified first, event_ticker fallback)
     cluster_members = defaultdict(list)  # cluster_key → [market_summary]
     cluster_meta = {}  # cluster_key → {name, description, is_ai}
     clustered_tickers = set()
 
-    # First pass: assign markets to AI clusters
+    # First pass: assign markets to occurrence clusters (a market can be in multiple)
     for cluster in ai_clusters:
         cid = cluster["cluster_id"]
         cname = cluster.get("cluster_name", cid)
@@ -418,7 +418,7 @@ def _get_clusters(limit):
     return {
         "clusters": clusters[:limit],
         "total_clusters": len(clusters),
-        "total_markets": sum(c["market_count"] for c in clusters),
+        "total_markets": len(market_summaries),
         "excluded_count": excluded_count,
         "filtered_not_surprise": filtered_not_surprise,
         "ai_clusters": sum(1 for c in clusters if c.get("is_ai_cluster")),

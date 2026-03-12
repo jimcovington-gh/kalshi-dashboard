@@ -846,7 +846,7 @@ Resources:
       CodeUri: CopilotProxyFunction
       Handler: copilot-proxy.lambda_handler
       Description: Proxy dashboard chat to GitHub Models API
-      Timeout: 300
+      Timeout: 900
       MemorySize: 256
       Environment:
         Variables:

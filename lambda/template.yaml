@@ -830,7 +830,7 @@ Resources:
       CodeUri: ./
       Handler: copilot-proxy.lambda_handler
       Description: Proxy dashboard chat to GitHub Models API
-      Timeout: 300  # 5 minutes - Claude can take time for complex queries
+      Timeout: 900  # 15 minutes - Lambda maximum; long multi-tool queries need the full window
       MemorySize: 256
       # No VPC needed - calling GitHub Models API directly; uses SSM for EC2 control
       Environment:

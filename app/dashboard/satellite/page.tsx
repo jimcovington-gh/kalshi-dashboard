@@ -97,7 +97,7 @@ export default function SatellitePage() {
     fetchAuthSession().then(session => {
       const token = session.tokens?.idToken?.toString() ?? null;
       setAuthToken(token);
-    }).catch(() => {});
+    }).catch(err => console.error('fetchAuthSession failed:', err));
   }, []);
 
   // Authenticated fetch — adds Authorization header
@@ -135,10 +135,11 @@ export default function SatellitePage() {
 
   // WebSocket for real-time adapter/dish status
   const connectWs = useCallback(() => {
+    if (!authToken) return; // Don't connect until we have a valid token
     if (wsRef.current) {
       try { wsRef.current.close(); } catch (_) {}
     }
-    const wsUrl = authToken ? `${WS_PROXY}/api/ws/status?token=${encodeURIComponent(authToken)}` : `${WS_PROXY}/api/ws/status`;
+    const wsUrl = `${WS_PROXY}/api/ws/status?token=${encodeURIComponent(authToken)}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

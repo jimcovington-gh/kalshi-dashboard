@@ -17,6 +17,7 @@ import json
 import os
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
 
@@ -28,8 +29,10 @@ MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307
 
 EXCLUDED_CATEGORIES = {"crypto", "mentions", "climate and weather", "financials", "sports"}
 # Max markets to send per Bedrock call (context window management)
-BATCH_SIZE = 75
+BATCH_SIZE = 150
 CLUSTER_TTL_DAYS = 7
+# Max parallel Bedrock calls (Haiku supports high concurrency)
+MAX_BEDROCK_WORKERS = 10
 
 dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
@@ -41,33 +44,60 @@ classification_table = dynamodb.Table(CLASSIFICATION_TABLE)
 
 CLUSTER_SYSTEM_PROMPT = """You identify specific real-world occurrences that would causally move prediction market prices, and group the affected markets under each occurrence.
 
-An "occurrence" is a SINGLE, SPECIFIC event that either will or won't happen — something you could ask "has this happened yet?" about.
+An "occurrence" is a SINGLE, SPECIFIC event that either will or won't happen — something you could bet on.
 
-EXAMPLE: Given these markets:
-- KXCABDEPART-26 | Will there be 3+ cabinet departures by Dec 2026?
-- KXNOEM-DHS | Will Kristi Noem be DHS Secretary on June 1?
-- KXSD-SENATE | Will Republicans win the SD Senate special election?
-- KXDHS-HEAD | Will DHS have a new secretary by July?
+EXAMPLE INPUT:
+- KXCABDEPART-26 | KXCABDEPART | politics | Will there be 3+ cabinet departures by Dec 2026?
+- KXNOEM-DHS | KXNOEM | politics | Will Kristi Noem be DHS Secretary on June 1?
+- KXSD-SENATE | KXSDSN | politics | Will Republicans win the SD Senate special election?
+- KXDHS-HEAD | KXDHS | politics | Will DHS have a new secretary by July?
+- KXHEGSETH | KXHEG | politics | Will Pete Hegseth be Defense Secretary on June 1?
+- KXFED-MAR26 | KXFED | economics | Will the Fed cut rates at March 2026 FOMC?
+- KXFED-JUN26 | KXFED | economics | Will the Fed cut rates at June 2026 FOMC?
+- KXFEDCUTS26 | KXFED | economics | Will there be 3+ Fed rate cuts in 2026?
 
-Good output:
-[{"name": "Kristi Noem departs as DHS Secretary", "description": "Her departure affects cabinet departure count, DHS leadership succession, and triggers a SD Senate special election", "tickers": ["KXCABDEPART-26", "KXNOEM-DHS", "KXSD-SENATE", "KXDHS-HEAD"]}]
+CORRECT OUTPUT — each occurrence is ONE specific event:
+[
+  {"name": "Kristi Noem departs as DHS Secretary", "description": "Her departure would increase cabinet departure count, change DHS leadership, and trigger SD Senate special election", "tickers": ["KXCABDEPART-26", "KXNOEM-DHS", "KXSD-SENATE", "KXDHS-HEAD"]},
+  {"name": "Pete Hegseth departs as Defense Secretary", "description": "His departure would increase cabinet departure count", "tickers": ["KXCABDEPART-26", "KXHEGSETH"]},
+  {"name": "Fed cuts rates at March 2026 FOMC", "description": "A March cut would contribute to the total cuts count for 2026", "tickers": ["KXFED-MAR26", "KXFEDCUTS26"]},
+  {"name": "Fed cuts rates at June 2026 FOMC", "description": "A June cut would contribute to the total cuts count for 2026", "tickers": ["KXFED-JUN26", "KXFEDCUTS26"]}
+]
+
+WRONG OUTPUT — these are categories, not occurrences:
+[
+  {"name": "Trump administration departures", "tickers": ["KXCABDEPART-26", "KXNOEM-DHS", "KXHEGSETH"]},
+  {"name": "Federal Reserve Policy Decisions", "tickers": ["KXFED-MAR26", "KXFED-JUN26", "KXFEDCUTS26"]}
+]
+^ WRONG because "Trump administration departures" is a CATEGORY containing multiple different events.
+Each individual person departing is a SEPARATE occurrence with different causal chains.
+"Federal Reserve Policy Decisions" lumps separate FOMC meetings into one cluster.
 
 RULES:
-1. Each occurrence must be SPECIFIC and CONCRETE — a single yes/no event, not a category.
-   GOOD: "Pete Hegseth leaves as Defense Secretary", "Fed cuts rates in June 2026"
-   BAD: "2026 Cabinet Changes", "Political Events", "Federal Reserve Policy"
-2. A market CAN and SHOULD belong to MULTIPLE occurrences if multiple events would move it.
-   Example: "Number of cabinet departures by July" is affected by EVERY individual departure.
-3. Each occurrence must have 2+ markets that would be causally affected by it happening.
-4. Name each occurrence as a concise statement of what happens (3-10 words).
-5. Include a 1-sentence description of the CAUSAL LINK — WHY would this event move these markets?
-6. Think about CROSS-EVENT connections: a person leaving office affects markets about that person, their department, successor races, aggregate counting markets, etc.
-7. Be GRANULAR. "Trump tariff on China" and "Trump tariff on EU" are DIFFERENT occurrences.
+1. SPECIFIC AND CONCRETE ONLY. Each occurrence is ONE event you can answer yes/no to.
+   GOOD: "Pete Hegseth leaves as Defense Secretary", "Fed cuts rates at June 2026 FOMC"
+   FORBIDDEN — NEVER output names like these:
+   - "2026 Congressional Elections" (category)
+   - "Entertainment industry events" (category)
+   - "Trump Policy Actions" (category)
+   - "Potential changes to X" (vague category)
+   - "Federal Reserve Policy Decisions" (category — split into individual FOMC meetings)
+2. A market CAN belong to MULTIPLE occurrences. This is ESSENTIAL for counting/aggregate
+   markets (e.g., "3+ cabinet departures" belongs to every individual departure occurrence).
+3. It's OK if an occurrence only has 1 market in THIS batch. Markets in other batches may
+   also belong to it. Include it — duplicates across batches will be merged later.
+4. Name: verb phrase describing what happens (3-10 words).
+5. Description: 1 sentence explaining the CAUSAL LINK.
+6. CROSS-EVENT CONNECTIONS are the whole point. Look for:
+   - Individual events that feed into counting/aggregate markets
+   - Person-level events that affect department, successor, and vacancy markets
+   - Geographic events that affect state/district level races
+7. Be MAXIMALLY GRANULAR. Each person, each date, each meeting = separate occurrence.
+8. EVERY market should belong to at least one occurrence. If you can't find a cross-event
+   connection, create an occurrence for the most specific event the market directly bets on.
 
 Respond with ONLY a JSON array:
-[{"name": "Occurrence Name", "description": "Why this occurrence causally moves these markets", "tickers": ["TICKER1", "TICKER2", ...]}]
-
-If a market doesn't fit any concrete occurrence, omit it."""
+[{"name": "Occurrence Name", "description": "Causal link", "tickers": ["T1", "T2", ...]}]"""
 
 
 ASSIGN_SYSTEM_PROMPT = """You assign new prediction markets to existing occurrence-based clusters.
@@ -327,6 +357,20 @@ def _get_active_markets():
     return result
 
 
+# Patterns that indicate a category name rather than a specific occurrence
+_CATEGORY_WORDS = {"events", "races", "elections", "miscellaneous", "various", "other", "general"}
+_CATEGORY_PHRASES = ["potential changes", "policy decisions", "political appointments"]
+
+
+def _is_category_name(name):
+    """Return True if the name looks like a broad category rather than a specific occurrence."""
+    lower = name.lower()
+    words = set(lower.split())
+    if words & _CATEGORY_WORDS:
+        return True
+    return any(p in lower for p in _CATEGORY_PHRASES)
+
+
 def _format_markets_for_prompt(markets):
     """Format market dict into a compact string for the LLM prompt."""
     lines = []
@@ -348,7 +392,7 @@ def _store_clusters(clusters_data, active_tickers):
 
         # Filter to only active tickers
         member_tickers = [t for t in cluster.get("tickers", []) if t in active_tickers]
-        if not member_tickers:
+        if len(member_tickers) < 2:
             continue
 
         new_cluster_ids.add(cluster_id)
@@ -376,6 +420,28 @@ def _store_clusters(clusters_data, active_tickers):
     return len(new_cluster_ids)
 
 
+def _process_one_batch(batch_info):
+    """Process a single batch of markets through Bedrock. Thread-safe."""
+    batch_start, batch, total = batch_info
+    prompt_text = _format_markets_for_prompt(batch)
+    label = f"{batch_start+1}-{batch_start+len(batch)} of {total}"
+
+    print(f"clusterer: sending batch of {len(batch)} markets to Bedrock ({label})")
+
+    try:
+        result = _call_bedrock(CLUSTER_SYSTEM_PROMPT, prompt_text)
+        if isinstance(result, list):
+            print(f"clusterer: Bedrock returned {len(result)} clusters for batch {label}")
+            return result
+        else:
+            print(f"clusterer: unexpected Bedrock response type for batch {label}: {type(result)}")
+            return []
+    except Exception as e:
+        print(f"clusterer: Bedrock error on batch {label}: {e}")
+        traceback.print_exc()
+        return []
+
+
 def _recluster(context):
     """Full recluster: get all active markets, call Bedrock to cluster them."""
     start = time.time()
@@ -385,27 +451,23 @@ def _recluster(context):
 
     active_tickers = set(markets.keys())
 
-    # Split into batches if too many markets
+    # Split into batches
     market_list = list(markets.items())
-    all_clusters = []
-
+    batches = []
     for batch_start in range(0, len(market_list), BATCH_SIZE):
         batch = dict(market_list[batch_start:batch_start + BATCH_SIZE])
-        prompt_text = _format_markets_for_prompt(batch)
+        batches.append((batch_start, batch, len(markets)))
 
-        print(f"clusterer: sending batch of {len(batch)} markets to Bedrock "
-              f"({batch_start+1}-{batch_start+len(batch)} of {len(markets)})")
+    print(f"clusterer: processing {len(batches)} batches with {MAX_BEDROCK_WORKERS} parallel workers")
 
-        try:
-            result = _call_bedrock(CLUSTER_SYSTEM_PROMPT, prompt_text)
-            if isinstance(result, list):
+    # Process all batches in parallel
+    all_clusters = []
+    with ThreadPoolExecutor(max_workers=MAX_BEDROCK_WORKERS) as executor:
+        futures = {executor.submit(_process_one_batch, b): b for b in batches}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
                 all_clusters.extend(result)
-                print(f"clusterer: Bedrock returned {len(result)} clusters for this batch")
-            else:
-                print(f"clusterer: unexpected Bedrock response type: {type(result)}")
-        except Exception as e:
-            print(f"clusterer: Bedrock error on batch: {e}")
-            traceback.print_exc()
 
     if not all_clusters:
         print("clusterer: no clusters returned from Bedrock")
@@ -429,8 +491,26 @@ def _recluster(context):
     final_clusters = list(merged.values())
     print(f"clusterer: {len(final_clusters)} occurrences after exact-name merge")
 
+    # Filter out category-style names (but keep singletons — they may merge across batches)
+    before_filter = len(final_clusters)
+    final_clusters = [
+        c for c in final_clusters
+        if not _is_category_name(c.get("name", ""))
+    ]
+    if before_filter != len(final_clusters):
+        print(f"clusterer: removed {before_filter - len(final_clusters)} category-style names")
+
     # Consolidate: use Bedrock to find fuzzy duplicate occurrence names across batches
     final_clusters = _consolidate_occurrences(final_clusters)
+
+    # NOW enforce minimum 2 active markets (after cross-batch merge + consolidation)
+    before_min = len(final_clusters)
+    final_clusters = [
+        c for c in final_clusters
+        if len([t for t in c.get("tickers", []) if t in active_tickers]) >= 2
+    ]
+    if before_min != len(final_clusters):
+        print(f"clusterer: removed {before_min - len(final_clusters)} singletons after consolidation")
 
     stored = _store_clusters(final_clusters, active_tickers)
 

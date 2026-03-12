@@ -270,6 +270,13 @@ export default function AIChatPage() {
     setError(null);
     setProgress('');
 
+    // Capture history BEFORE adding the new messages to state
+    // Limit to last 20 messages (10 turns) to avoid token overload
+    const historySnapshot = messages
+      .filter(m => !m.isLoading && m.content)
+      .slice(-20)
+      .map(m => ({ role: m.role, content: m.content }));
+
     // Add user message to display
     const newUserMessage: DisplayMessage = {
       role: 'user',
@@ -296,7 +303,8 @@ export default function AIChatPage() {
           userMessage,
           deviceToken,
           copilotConversationId,
-          true
+          true,
+          historySnapshot
         );
         setCopilotConversationId(response.conversation_id);
         setMessages(prev => {

@@ -1192,7 +1192,7 @@ Resources:
       CodeUri: ./
       Handler: signal-engine-clusterer.lambda_handler
       Description: AI cross-event clustering of markets using Bedrock Haiku
-      MemorySize: 256
+      MemorySize: 512
       Timeout: 900
       Environment:
         Variables:

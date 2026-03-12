@@ -1329,7 +1329,8 @@ export async function sendCopilotMessage(
   message: string,
   deviceToken: string,
   conversationId?: string,
-  includeContext: boolean = true
+  includeContext: boolean = true,
+  history?: Array<{ role: string; content: string }>
 ): Promise<CopilotChatResponse> {
   try {
     const session = await fetchAuthSession();
@@ -1343,6 +1344,7 @@ export async function sendCopilotMessage(
       message,
       include_context: includeContext,
       ...(conversationId && { conversation_id: conversationId }),
+      ...(history && history.length > 0 && { history }),
     };
 
     // Use Lambda Function URL directly — no 29s API Gateway timeout

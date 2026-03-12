@@ -325,6 +325,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         conversation_id = body.get('conversation_id')
         include_context = body.get('include_context', True)
+        history = body.get('history', [])
         permissions = validation_result.get('permissions', 'read_only')
         
         # Inject system prompt for non-admin users
@@ -332,7 +333,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         # Proxy request to VS Code extension
         try:
-            response = proxy_to_vscode(message, conversation_id, include_context, system_prompt, permissions)
+            response = proxy_to_vscode(message, conversation_id, include_context, system_prompt, permissions, history)
             
             # Response filtering: warn if read_only response contains dangerous patterns
             if permissions != 'admin':
@@ -487,7 +488,7 @@ def load_project_context() -> str:
     return _context_cache
 
 
-def call_vscode_wrapper(message: str, system_prompt: Optional[str] = None, admin: bool = False, context: Optional[str] = None) -> Dict[str, Any]:
+def call_vscode_wrapper(message: str, system_prompt: Optional[str] = None, admin: bool = False, context: Optional[str] = None, history: Optional[list] = None) -> Dict[str, Any]:
     """Call VS Code Copilot Chat Wrapper on EC2 via SSM.
     
     The wrapper runs on the EC2 instance at localhost:8765. Since the Lambda can't
@@ -496,6 +497,8 @@ def call_vscode_wrapper(message: str, system_prompt: Optional[str] = None, admin
     payload: Dict[str, Any] = {'prompt': message, 'admin': admin}
     if context:
         payload['context'] = context
+    if history:
+        payload['history'] = history
     payload_str = json.dumps(payload)
     cmd = (
         f"curl -sf -X POST http://localhost:8765/chat "
@@ -533,7 +536,7 @@ def call_vscode_wrapper(message: str, system_prompt: Optional[str] = None, admin
 
 
 
-def proxy_to_vscode(message: str, conversation_id: Optional[str], include_context: bool, system_prompt: Optional[str] = None, permissions: str = 'read_only') -> Dict[str, Any]:
+def proxy_to_vscode(message: str, conversation_id: Optional[str], include_context: bool, system_prompt: Optional[str] = None, permissions: str = 'read_only', history: Optional[list] = None) -> Dict[str, Any]:
     """Call VS Code Copilot Chat Wrapper extension via HTTP."""
     context: Optional[str] = None
     if include_context:
@@ -541,7 +544,7 @@ def proxy_to_vscode(message: str, conversation_id: Optional[str], include_contex
             context = load_project_context() or None
         except Exception as e:
             logger.warning(f"Failed to load project context, proceeding without it: {e}")
-    return call_vscode_wrapper(message, system_prompt, admin=permissions == 'admin', context=context)
+    return call_vscode_wrapper(message, system_prompt, admin=permissions == 'admin', context=context, history=history)
 
 
 def log_failed_attempt(reason: str, user_name: Optional[str], ip_address: str, 

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { fetchAuthSession } from 'aws-amplify/auth';
 
-const SATELLITE_PROXY = 'https://voice.apexmarkets.us:8090';
+const SATELLITE_PROXY = 'https://voice.apexmarkets.us:8091';
 const WS_PROXY = SATELLITE_PROXY.replace('https:', 'wss:');
 
 const pages = [
@@ -44,10 +45,12 @@ function streamJobLog(
   jobId: string,
   onLine: (line: string) => void,
   onStatus?: (phase: string) => void,
+  token?: string | null,
 ): Promise<'completed' | 'failed' | 'cancelled'> {
   return new Promise((resolve, reject) => {
     let resolved = false;
-    const ws = new WebSocket(`${WS_PROXY}/api/ops/${jobId}/stream`);
+    const wsUrl = token ? `${WS_PROXY}/api/ops/${jobId}/stream?token=${encodeURIComponent(token)}` : `${WS_PROXY}/api/ops/${jobId}/stream`;
+    const ws = new WebSocket(wsUrl);
     let lastStatus = '';
     ws.onmessage = (evt) => {
       try {
@@ -87,6 +90,24 @@ export default function SatellitePage() {
   const [confirmTarget, setConfirmTarget] = useState<Satellite | null>(null);
   const [moving, setMoving] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
+  const [authToken, setAuthToken] = useState<string | null>(null);
+
+  // Fetch Cognito auth token
+  useEffect(() => {
+    fetchAuthSession().then(session => {
+      const token = session.tokens?.idToken?.toString() ?? null;
+      setAuthToken(token);
+    }).catch(() => {});
+  }, []);
+
+  // Authenticated fetch — adds Authorization header
+  const fetchWithAuth = useCallback((url: string, opts: RequestInit = {}) => {
+    const existing = (opts.headers as Record<string, string>) ?? {};
+    return fetch(url, {
+      ...opts,
+      headers: { ...existing, ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+    });
+  }, [authToken]);
 
   // Move/scan log popup state
   const [logOpen, setLogOpen] = useState(false);
@@ -98,13 +119,14 @@ export default function SatellitePage() {
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
-  // Fetch satellite list once
+  // Fetch satellite list once (after auth token is available)
   useEffect(() => {
-    fetch(`${SATELLITE_PROXY}/api/satellites`)
+    if (!authToken) return;
+    fetchWithAuth(`${SATELLITE_PROXY}/api/satellites`)
       .then(r => r.json())
       .then(data => setSatellites(data.satellites || []))
       .catch(() => {});
-  }, []);
+  }, [authToken, fetchWithAuth]);
 
   // Auto-scroll log popup
   useEffect(() => {
@@ -116,7 +138,8 @@ export default function SatellitePage() {
     if (wsRef.current) {
       try { wsRef.current.close(); } catch (_) {}
     }
-    const ws = new WebSocket(`${WS_PROXY}/api/ws/status`);
+    const wsUrl = authToken ? `${WS_PROXY}/api/ws/status?token=${encodeURIComponent(authToken)}` : `${WS_PROXY}/api/ws/status`;
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => setWsConnected(true);
@@ -134,7 +157,7 @@ export default function SatellitePage() {
         }
       } catch (_) {}
     };
-  }, []);
+  }, [authToken]);
 
   useEffect(() => {
     connectWs();
@@ -142,7 +165,7 @@ export default function SatellitePage() {
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
       if (wsRef.current) wsRef.current.close();
     };
-  }, [connectWs]);
+  }, [connectWs, authToken]);
 
   const addLog = useCallback((line: string) => {
     setLogLines(prev => [...prev, line]);
@@ -160,13 +183,13 @@ export default function SatellitePage() {
       setLogPhase('Stopping streams…');
       addLog('⏹ Stopping all active streams…');
       try {
-        const streamsRes = await fetch(`${SATELLITE_PROXY}/api/streams`);
+        const streamsRes = await fetchWithAuth(`${SATELLITE_PROXY}/api/streams`);
         if (streamsRes.ok) {
           const streamsData = await streamsRes.json();
           const active = streamsData.streams || [];
           if (active.length > 0) {
             await Promise.all(active.map((s: { stream_id: string }) =>
-              fetch(`${SATELLITE_PROXY}/api/streams/${s.stream_id}`, { method: 'DELETE' }).catch(() => {})
+              fetchWithAuth(`${SATELLITE_PROXY}/api/streams/${s.stream_id}`, { method: 'DELETE' }).catch(() => {})
             ));
             addLog(`  Stopped ${active.length} stream(s)`);
           } else {
@@ -180,7 +203,7 @@ export default function SatellitePage() {
       // Phase 2: Move dish
       setLogPhase(`Moving dish → ${formatSatLabel(sat)}`);
       addLog(`\n📡 Moving dish to ${formatSatLabel(sat)}…`);
-      const moveRes = await fetch(`${SATELLITE_PROXY}/api/ops/move-dish`, {
+      const moveRes = await fetchWithAuth(`${SATELLITE_PROXY}/api/ops/move-dish`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ satellite: sat.slug }),
@@ -190,7 +213,7 @@ export default function SatellitePage() {
         throw new Error(d.detail || moveRes.statusText);
       }
       const moveJob = await moveRes.json();
-      const moveResult = await streamJobLog(moveJob.job_id, addLog, setLogPhase);
+      const moveResult = await streamJobLog(moveJob.job_id, addLog, setLogPhase, authToken);
       if (moveResult !== 'completed') {
         addLog(`\n❌ Move ${moveResult}`);
         setLogPhase(`Move ${moveResult}`);
@@ -201,7 +224,7 @@ export default function SatellitePage() {
       // Phase 3: Lineup scan
       setLogPhase(`Scanning lineup on ${sat.display_name}…`);
       addLog(`\n🔍 Starting lineup scan on ${sat.display_name}…`);
-      const scanRes = await fetch(`${SATELLITE_PROXY}/api/ops/scan-lineup`, {
+      const scanRes = await fetchWithAuth(`${SATELLITE_PROXY}/api/ops/scan-lineup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ satellite: sat.slug, auto_reload: true }),
@@ -212,7 +235,7 @@ export default function SatellitePage() {
         setLogPhase('Scan failed to start');
       } else {
         const scanJob = await scanRes.json();
-        const scanResult = await streamJobLog(scanJob.job_id, addLog, setLogPhase);
+        const scanResult = await streamJobLog(scanJob.job_id, addLog, setLogPhase, authToken);
         if (scanResult === 'completed') {
           addLog('\n✅ Lineup scan complete');
         } else {
@@ -240,7 +263,9 @@ export default function SatellitePage() {
   };
 
   const currentPage = pages.find(p => p.id === activePage) || pages[0];
-  const iframeSrc = `${SATELLITE_PROXY}${currentPage.path}?embed=1`;
+  const iframeSrc = authToken
+    ? `${SATELLITE_PROXY}${currentPage.path}?embed=1&token=${encodeURIComponent(authToken)}`
+    : `${SATELLITE_PROXY}${currentPage.path}?embed=1`;
   const dishLabel = dish ? formatSatLabel(dish) : 'Connecting…';
 
   return (

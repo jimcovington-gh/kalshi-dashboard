@@ -271,10 +271,8 @@ export default function AIChatPage() {
     setProgress('');
 
     // Capture history BEFORE adding the new messages to state
-    // Limit to last 20 messages (10 turns) to avoid token overload
     const historySnapshot = messages
       .filter(m => !m.isLoading && m.content)
-      .slice(-20)
       .map(m => ({ role: m.role, content: m.content }));
 
     // Add user message to display

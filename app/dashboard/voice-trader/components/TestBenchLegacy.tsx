@@ -3185,12 +3185,19 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             )}
             {isConnecting && (
               <button
-                onClick={() => {
-                  // Cancel dialing - send stop command and reset state
+                onClick={async () => {
+                  // Cancel dialing - send cancel via WebSocket and stop the session
                   if (wsRef.current?.readyState === WebSocket.OPEN) {
                     wsRef.current.send(JSON.stringify({ type: 'cancel' }));
                   }
+                  // Also call stop endpoint to ensure worker is killed
+                  if (sessionId) {
+                    try {
+                      await fetchWithAuth(`${EC2_BASE}/stop/${encodeURIComponent(sessionId)}`, { method: 'POST' });
+                    } catch (e) { /* best-effort */ }
+                  }
                   setDialing(false);
+                  setContainerState(prev => prev ? { ...prev, call_state: 'disconnected' } : prev);
                   setError('Dialing cancelled');
                 }}
                 className="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded animate-pulse"

@@ -18,6 +18,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useRouter } from 'next/navigation';
+import { ListenerAdminPanel } from './ListenerAdminPanel';
+import { ListenerStatusBar } from './ListenerStatusBar';
 
 // =============================================================================
 // Types - V2 Native Format
@@ -543,6 +545,7 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
   const [netflixVncOpen, setNetflixVncOpen] = useState(false);
   const [dryRun, setDryRun] = useState(true);
   const [launching, setLaunching] = useState(false);
+  const [listenersExpanded, setListenersExpanded] = useState(false);
 
   // Satellite TV channel picker
   interface SatStream { stream_id: number; channel_name: string; status: string; thumb_url: string; }
@@ -1604,6 +1607,26 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
               </div>
             )}
 
+            {/* Field Listeners */}
+            <div className="border border-gray-700 rounded-lg overflow-hidden">
+              <button
+                onClick={() => setListenersExpanded(!listenersExpanded)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-gray-700/30 hover:bg-gray-700/50 transition-colors"
+              >
+                <span className="text-sm font-semibold text-gray-300">🎧 Field Listeners</span>
+                <span className="text-gray-500 text-xs">{listenersExpanded ? '▲ Collapse' : '▼ Expand'}</span>
+              </button>
+              {listenersExpanded && (
+                <div className="p-4 border-t border-gray-700">
+                  <ListenerAdminPanel
+                    ec2Base={EC2_BASE}
+                    eventTicker={selectedEvent?.event_ticker}
+                    defaultTrader="jimc"
+                  />
+                </div>
+              )}
+            </div>
+
             {/* Dry Run Toggle */}
             <div className="flex items-center gap-3">
               <input
@@ -1708,6 +1731,12 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
             error={error} 
             errorMessage={errorMessage} 
             onDismiss={() => { setError(null); setErrorMessage(''); }} 
+          />
+
+          {/* Listener Status Bar */}
+          <ListenerStatusBar
+            ec2Base={EC2_BASE}
+            traderFilter={sessionConfig?.user_name}
           />
 
           {/* Stats Panel */}

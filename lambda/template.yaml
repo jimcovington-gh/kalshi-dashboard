@@ -840,6 +840,7 @@ Resources:
           SECURITY_AUDIT_TABLE: production-kalshi-security-audit
           SNS_ALERT_TOPIC: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts'
           COPILOT_INSTANCE_ID: i-06444640be633ec45
+          S3_DOCS_BUCKET: production-kalshi-trading-config
       Policies:
         # DynamoDB access for device tokens
         - DynamoDBCrudPolicy:
@@ -880,6 +881,9 @@ Resources:
               Action:
                 - ssm:GetCommandInvocation
               Resource: '*'
+        # S3 read access for project context docs loaded into AI chat
+        - S3ReadPolicy:
+            BucketName: production-kalshi-trading-config
       Events:
         CopilotProxy:
           Type: Api

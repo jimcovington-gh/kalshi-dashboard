@@ -856,6 +856,7 @@ Resources:
           SNS_ALERT_TOPIC:
             Fn::Sub: arn:aws:sns:${AWS::Region}:${AWS::AccountId}:production-kalshi-security-alerts
           COPILOT_INSTANCE_ID: i-06444640be633ec45
+          S3_DOCS_BUCKET: production-kalshi-trading-config
       Policies:
       - DynamoDBCrudPolicy:
           TableName: production-kalshi-device-tokens
@@ -890,6 +891,8 @@ Resources:
           Action:
           - ssm:GetCommandInvocation
           Resource: '*'
+      - S3ReadPolicy:
+          BucketName: production-kalshi-trading-config
       Events:
         CopilotProxy:
           Type: Api

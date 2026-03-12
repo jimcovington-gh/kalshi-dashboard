@@ -33,6 +33,7 @@ dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 sns = boto3.client('sns', region_name='us-east-1')
 secrets = boto3.client('secretsmanager', region_name='us-east-1')
 ssm = boto3.client('ssm', region_name='us-east-1')
+s3 = boto3.client('s3', region_name='us-east-1')
 
 # Configuration from environment
 DEVICE_TOKENS_TABLE = os.environ.get('DEVICE_TOKENS_TABLE', 'production-kalshi-device-tokens')
@@ -42,9 +43,15 @@ VSCODE_WRAPPER_ENDPOINT = os.environ.get('VSCODE_WRAPPER_ENDPOINT', 'http://loca
 WRAPPER_CONTROL_ENDPOINT = os.environ.get('WRAPPER_CONTROL_ENDPOINT', 'http://localhost:8764')
 COPILOT_INSTANCE_ID = os.environ.get('COPILOT_INSTANCE_ID', 'i-06444640be633ec45')
 AUDIT_TTL_DAYS = 90
+S3_DOCS_BUCKET = os.environ.get('S3_DOCS_BUCKET', 'production-kalshi-trading-config')
 
 # Cache for GitHub PAT (loaded once per Lambda container)
 _github_pat_cache = None
+
+# Project context cache (loaded from S3, refreshed every hour per Lambda container)
+_context_cache: Optional[str] = None
+_context_cache_time: float = 0
+CONTEXT_CACHE_TTL = 3600  # 1 hour
 
 # DynamoDB tables
 device_tokens_table = dynamodb.Table(DEVICE_TOKENS_TABLE)
@@ -429,13 +436,67 @@ def get_github_pat() -> str:
         raise
 
 
-def call_vscode_wrapper(message: str, system_prompt: Optional[str] = None, admin: bool = False) -> Dict[str, Any]:
+def load_project_context() -> str:
+    """Load project documentation from S3 for AI context injection.
+    
+    Uses module-level caching so the S3 fetch happens at most once per hour
+    per Lambda container (Lambda containers are reused across invocations).
+    """
+    global _context_cache, _context_cache_time
+
+    now = time.time()
+    if _context_cache is not None and (now - _context_cache_time) < CONTEXT_CACHE_TTL:
+        return _context_cache
+
+    docs: Dict[str, str] = {}
+    files_to_load = [
+        ('docs/copilot-instructions.md', 'DB Schemas, CloudWatch Logs & Query Reference'),
+        ('docs/QUICK_REFERENCE.md', 'System Architecture & Quick Reference'),
+    ]
+
+    for s3_key, title in files_to_load:
+        try:
+            obj = s3.get_object(Bucket=S3_DOCS_BUCKET, Key=s3_key)
+            content = obj['Body'].read().decode('utf-8')
+            docs[title] = content
+            logger.info(f"Loaded context doc: {s3_key} ({len(content)} bytes)")
+        except Exception as e:
+            logger.warning(f"Failed to load context doc {s3_key}: {e}")
+
+    if not docs:
+        logger.warning("No context docs loaded from S3 — AI will answer without project context")
+        _context_cache = ''
+        _context_cache_time = now
+        return ''
+
+    parts = [
+        "<project_context>",
+        "You are assisting with the Kalshi prediction market trading system.",
+        "Use this documentation to answer questions about system state, data, and architecture.",
+        "",
+    ]
+    for title, content in docs.items():
+        parts.append(f"=== {title} ===")
+        parts.append(content)
+        parts.append("")
+    parts.append("</project_context>")
+
+    _context_cache = '\n'.join(parts)
+    _context_cache_time = now
+    logger.info(f"Project context loaded: {len(_context_cache)} chars")
+    return _context_cache
+
+
+def call_vscode_wrapper(message: str, system_prompt: Optional[str] = None, admin: bool = False, context: Optional[str] = None) -> Dict[str, Any]:
     """Call VS Code Copilot Chat Wrapper on EC2 via SSM.
     
     The wrapper runs on the EC2 instance at localhost:8765. Since the Lambda can't
     reach EC2's localhost directly, we use SSM Run Command to curl the wrapper.
     """
-    payload_str = json.dumps({'prompt': message, 'admin': admin})
+    payload: Dict[str, Any] = {'prompt': message, 'admin': admin}
+    if context:
+        payload['context'] = context
+    payload_str = json.dumps(payload)
     cmd = (
         f"curl -sf -X POST http://localhost:8765/chat "
         f"-H 'Content-Type: application/json' "
@@ -474,7 +535,13 @@ def call_vscode_wrapper(message: str, system_prompt: Optional[str] = None, admin
 
 def proxy_to_vscode(message: str, conversation_id: Optional[str], include_context: bool, system_prompt: Optional[str] = None, permissions: str = 'read_only') -> Dict[str, Any]:
     """Call VS Code Copilot Chat Wrapper extension via HTTP."""
-    return call_vscode_wrapper(message, system_prompt, admin=permissions == 'admin')
+    context: Optional[str] = None
+    if include_context:
+        try:
+            context = load_project_context() or None
+        except Exception as e:
+            logger.warning(f"Failed to load project context, proceeding without it: {e}")
+    return call_vscode_wrapper(message, system_prompt, admin=permissions == 'admin', context=context)
 
 
 def log_failed_attempt(reason: str, user_name: Optional[str], ip_address: str, 

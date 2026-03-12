@@ -91,12 +91,15 @@ export default function SatellitePage() {
   const [moving, setMoving] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [authToken, setAuthToken] = useState<string | null>(null);
+  // Token baked into the iframe URL — set once on first load to avoid
+  // disruptive iframe reloads when authToken refreshes.  After the initial
+  // load sets the sat_auth cookie, cookie-based auth handles the rest.
+  const [iframeToken, setIframeToken] = useState<string | null>(null);
 
-  // Fetch Cognito auth token
   // Fetch (and periodically refresh) Cognito auth token
   useEffect(() => {
     const refresh = () => {
-      fetchAuthSession({ forceRefresh: false }).then(session => {
+      fetchAuthSession({ forceRefresh: true }).then(session => {
         const token = session.tokens?.idToken?.toString() ?? null;
         setAuthToken(token);
       }).catch(err => console.error('fetchAuthSession failed:', err));
@@ -106,6 +109,11 @@ export default function SatellitePage() {
     const id = setInterval(refresh, 50 * 60 * 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Set iframeToken once when we first get a valid authToken
+  useEffect(() => {
+    if (authToken && !iframeToken) setIframeToken(authToken);
+  }, [authToken, iframeToken]);
 
   // Authenticated fetch — adds Authorization header, refreshes token on 401
   const fetchWithAuth = useCallback(async (url: string, opts: RequestInit = {}) => {
@@ -294,8 +302,8 @@ export default function SatellitePage() {
   };
 
   const currentPage = pages.find(p => p.id === activePage) || pages[0];
-  const iframeSrc = authToken
-    ? `${SATELLITE_PROXY}${currentPage.path}?embed=1&token=${encodeURIComponent(authToken)}`
+  const iframeSrc = iframeToken
+    ? `${SATELLITE_PROXY}${currentPage.path}?embed=1&token=${encodeURIComponent(iframeToken)}`
     : `${SATELLITE_PROXY}${currentPage.path}?embed=1`;
   const dishLabel = dish ? formatSatLabel(dish) : 'Connecting…';
 

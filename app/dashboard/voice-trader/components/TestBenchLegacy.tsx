@@ -50,6 +50,12 @@ interface Speaker {
   is_valid: boolean;
 }
 
+interface TriggerConfig {
+  partial_repeat_count: number;  // 0-10, 0=disabled
+  partial_words_after: number;   // 0-10, 0=disabled
+  require_final: boolean;
+}
+
 interface ContainerState {
   call_state: string;
   status_message: string;
@@ -67,6 +73,7 @@ interface ContainerState {
     details: Speaker[];
   };
   transcript_segments: number;
+  trigger_config?: TriggerConfig;
 }
 
 interface PnLSummary {
@@ -256,6 +263,15 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [cashBalance, setCashBalance] = useState<number>(0);
   const [availableCash, setAvailableCash] = useState<number>(0);
   const [minTrade, setMinTrade] = useState<number>(10);  // Minimum trade size
+  
+  // Trigger configuration state
+  const [triggerConfig, setTriggerConfig] = useState<TriggerConfig>({
+    partial_repeat_count: 1, partial_words_after: 0, require_final: false
+  });
+  const [triggerConfigDirty, setTriggerConfigDirty] = useState(false);
+  const [localTriggerConfig, setLocalTriggerConfig] = useState<TriggerConfig>({
+    partial_repeat_count: 1, partial_words_after: 0, require_final: false
+  });
   
   // WebSocket connection state
   const [wsConnected, setWsConnected] = useState(false);
@@ -712,6 +728,11 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             });
             setWords(data.words || []);
             setPnl(data.pnl);
+            // Sync trigger config from server (only if user isn't actively editing)
+            if (data.call?.trigger_config && !triggerConfigDirty) {
+              setTriggerConfig(data.call.trigger_config);
+              setLocalTriggerConfig(data.call.trigger_config);
+            }
             setTranscript(data.transcript || []);
             // Seed split states from full_state snapshot
             const transcriptSnap: TranscriptSegment[] = data.transcript || [];
@@ -3336,6 +3357,87 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                     ⚠️ Below min (${minTrade})
                   </div>
                 )}
+                {/* Trigger Config */}
+                <div className="border-t border-gray-700 pt-2 mt-2">
+                  <div className="text-gray-400 text-xs font-medium mb-1.5">Trigger Rules <span className="text-gray-500">(OR)</span></div>
+                  {/* Partial repeat count */}
+                  <div className="flex justify-between items-center gap-1 mb-1">
+                    <span className="text-gray-400 text-xs">Partial repeats:</span>
+                    <select
+                      value={localTriggerConfig.partial_repeat_count}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        setLocalTriggerConfig(prev => ({...prev, partial_repeat_count: val}));
+                        setTriggerConfigDirty(true);
+                      }}
+                      className="bg-gray-700 border border-gray-600 rounded text-xs px-1 py-0.5 w-14 text-right"
+                    >
+                      <option value={0}>Off</option>
+                      {[1,2,3,4,5,6,7,8,9,10].map(n => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {/* Words after keyword */}
+                  <div className="flex justify-between items-center gap-1 mb-1">
+                    <span className="text-gray-400 text-xs">Words after match:</span>
+                    <select
+                      value={localTriggerConfig.partial_words_after}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        setLocalTriggerConfig(prev => ({...prev, partial_words_after: val}));
+                        setTriggerConfigDirty(true);
+                      }}
+                      className="bg-gray-700 border border-gray-600 rounded text-xs px-1 py-0.5 w-14 text-right"
+                    >
+                      <option value={0}>Off</option>
+                      {[1,2,3,4,5,6,7,8,9,10].map(n => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {/* Require final */}
+                  <div className="flex justify-between items-center gap-1 mb-1.5">
+                    <span className="text-gray-400 text-xs">Match in final:</span>
+                    <button
+                      onClick={() => {
+                        setLocalTriggerConfig(prev => ({...prev, require_final: !prev.require_final}));
+                        setTriggerConfigDirty(true);
+                      }}
+                      className={`px-1.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        localTriggerConfig.require_final
+                          ? 'bg-green-600 hover:bg-green-500'
+                          : 'bg-gray-600 hover:bg-gray-500'
+                      }`}
+                    >
+                      {localTriggerConfig.require_final ? 'On' : 'Off'}
+                    </button>
+                  </div>
+                  {/* Apply button */}
+                  <button
+                    onClick={() => {
+                      if (wsRef.current?.readyState === WebSocket.OPEN) {
+                        wsRef.current.send(JSON.stringify({
+                          type: 'set_trigger_config',
+                          config: localTriggerConfig
+                        }));
+                        setTriggerConfig(localTriggerConfig);
+                        setTriggerConfigDirty(false);
+                      }
+                    }}
+                    disabled={!triggerConfigDirty}
+                    className={`w-full px-2 py-1 rounded text-xs font-bold transition-colors ${
+                      triggerConfigDirty
+                        ? 'bg-yellow-600 hover:bg-yellow-500 text-black cursor-pointer'
+                        : 'bg-green-800/60 text-green-300 cursor-default'
+                    }`}
+                  >
+                    {triggerConfigDirty ? 'Apply Trigger Rules' : '✓ Trigger Rules Applied'}
+                  </button>
+                  {!localTriggerConfig.partial_repeat_count && !localTriggerConfig.partial_words_after && !localTriggerConfig.require_final && (
+                    <div className="text-xs text-red-400 mt-1">⚠️ No triggers enabled — trades won&apos;t fire</div>
+                  )}
+                </div>
                 {/* Manual Call End Button */}
                 <div className="border-t border-gray-700 pt-2 mt-2">
                   <button

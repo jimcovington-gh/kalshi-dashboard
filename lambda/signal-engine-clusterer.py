@@ -28,8 +28,8 @@ CLASSIFICATION_TABLE = os.environ.get("CLASSIFICATION_TABLE", "production-signal
 MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
 
 EXCLUDED_CATEGORIES = {"crypto", "mentions", "climate and weather", "financials", "sports"}
-# Max markets to send per Bedrock call (context window management)
-BATCH_SIZE = 150
+# Max markets to send per Bedrock call (Haiku 3.0 output limit is 4096 tokens)
+BATCH_SIZE = 100
 CLUSTER_TTL_DAYS = 7
 # Max parallel Bedrock calls (Haiku supports high concurrency)
 MAX_BEDROCK_WORKERS = 10
@@ -93,8 +93,11 @@ RULES:
    - Person-level events that affect department, successor, and vacancy markets
    - Geographic events that affect state/district level races
 7. Be MAXIMALLY GRANULAR. Each person, each date, each meeting = separate occurrence.
-8. EVERY market should belong to at least one occurrence. If you can't find a cross-event
-   connection, create an occurrence for the most specific event the market directly bets on.
+8. COVERAGE IS CRITICAL: You MUST assign EVERY market to at least one occurrence.
+   If a market has no cross-event connections, create an occurrence for the specific event
+   that market directly bets on (even if only 1 market is in that occurrence).
+   NEVER skip or omit markets. The output tickers across all occurrences should cover
+   every input market ticker.
 
 Respond with ONLY a JSON array:
 [{"name": "Occurrence Name", "description": "Causal link", "tickers": ["T1", "T2", ...]}]"""
@@ -124,10 +127,17 @@ CONSOLIDATION_PROMPT = """Given these occurrence names from a prediction market 
 
 RULES:
 1. Only merge occurrences that are truly the SAME event phrased differently.
-   MERGE: "Fed cuts rates in June 2026" + "Federal Reserve June 2026 rate cut"
-   DO NOT MERGE: "Fed cuts rates in June" + "Fed cuts rates in July" (different events)
-   DO NOT MERGE: "Pete Hegseth leaves Defense" + "Cabinet departures" (related but different)
-2. Choose the clearest, most specific name as the canonical name.
+   MERGE: "Fed cuts rates in June 2026" + "Federal Reserve June 2026 rate cut" (same event, different wording)
+   MERGE: "Trump buys Greenland" + "U.S. acquisition of Greenland" (same event)
+   MERGE: "Eurovision 2026 winner" + "Eurovision winner 2026" (same event)
+2. DO NOT MERGE occurrences that are different events, even if they sound similar:
+   DO NOT MERGE: "Fed cuts rates in June" + "Fed cuts rates in July" (different months!)
+   DO NOT MERGE: "Democrat wins MO-03" + "Democrat wins FL-03" (different districts!)
+   DO NOT MERGE: "Democrat wins MO-03" + "Democrat wins MO-08" (different districts!)
+   DO NOT MERGE: "Pete Hegseth leaves Defense" + "Kristi Noem leaves DHS" (different people!)
+   DO NOT MERGE: "Republican wins NC-06" + "Republican wins NC-08" (different races!)
+3. Geographic/district identifiers (state codes, district numbers) make occurrences DIFFERENT.
+4. Choose the clearest, most specific name as the canonical name.
 
 Respond with ONLY a JSON array:
 [{"keep": "Best Name", "merge": ["Duplicate Name 1", "Duplicate Name 2"]}]
@@ -230,7 +240,7 @@ def _repair_truncated_json(text):
     return None
 
 
-def _call_bedrock(system_prompt, user_msg, max_tokens=8192):
+def _call_bedrock(system_prompt, user_msg, max_tokens=4096):
     """Call Bedrock Claude Haiku and return parsed JSON."""
     body = json.dumps({
         "anthropic_version": "bedrock-2023-05-31",
@@ -268,46 +278,115 @@ def _call_bedrock(system_prompt, user_msg, max_tokens=8192):
         raise
 
 
-def _consolidate_occurrences(all_clusters):
-    """Use Bedrock to find and merge duplicate occurrence names across batches.
+import re as _re
 
-    Two occurrences that describe the same real-world event but were named differently
-    in different batches (e.g., "Fed cuts rates June 2026" vs "Federal Reserve June rate cut")
-    get merged into one.
-    """
-    unique_names = list(set(c.get("name", "").strip() for c in all_clusters if c.get("name")))
+_US_STATES = {
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+    "maine", "maryland", "massachusetts", "michigan", "minnesota",
+    "mississippi", "missouri", "montana", "nebraska", "nevada",
+    "new hampshire", "new jersey", "new mexico", "new york",
+    "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+    "pennsylvania", "rhode island", "south carolina", "south dakota",
+    "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+    "west virginia", "wisconsin", "wyoming",
+}
+
+# Pattern to extract geographic/district identifiers from occurrence names
+_IDENTIFIER_RE = _re.compile(
+    r'\b([A-Z]{2}-\d{1,2})\b'   # State-district like KS-01, FL-12
+    r'|'
+    r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\b'
+    r'|'
+    r'\b(20\d{2})\b'            # Year like 2026, 2027, 2028
+, _re.IGNORECASE)
+
+
+def _extract_identifiers(name):
+    """Extract key identifiers (districts, months, years, states) from an occurrence name."""
+    matches = _IDENTIFIER_RE.findall(name)
+    ids = set(m.upper() for group in matches for m in group if m)
+    # Also extract US state names
+    name_lower = name.lower()
+    for state in _US_STATES:
+        if state in name_lower:
+            ids.add(state.upper())
+    return ids
+
+
+def _validate_merge(old_name, canonical_name):
+    """Check if merging old_name into canonical_name is valid.
+    Reject merges where names have different geographic/district/state identifiers."""
+    old_ids = _extract_identifiers(old_name)
+    new_ids = _extract_identifiers(canonical_name)
+    # If both have district-style identifiers and they differ, reject
+    old_districts = {i for i in old_ids if '-' in i}
+    new_districts = {i for i in new_ids if '-' in i}
+    if old_districts and new_districts and old_districts != new_districts:
+        return False
+    # If both have state names and they differ, reject
+    old_states = old_ids & {s.upper() for s in _US_STATES}
+    new_states = new_ids & {s.upper() for s in _US_STATES}
+    if old_states and new_states and old_states != new_states:
+        return False
+    return True
+
+
+def _consolidate_one_pass(clusters):
+    """Run one round of batched consolidation. Returns merged cluster list."""
+    unique_names = list(set(c.get("name", "").strip() for c in clusters if c.get("name")))
     if len(unique_names) <= 15:
-        # Not enough to warrant a consolidation call
-        return all_clusters
+        return clusters
 
-    user_msg = "OCCURRENCE NAMES:\n" + "\n".join(f"- {n}" for n in sorted(unique_names))
+    CONSOL_BATCH = 200
+    sorted_names = sorted(unique_names)
+    name_batches = [sorted_names[i:i + CONSOL_BATCH] for i in range(0, len(sorted_names), CONSOL_BATCH)]
 
-    try:
-        merges = _call_bedrock(CONSOLIDATION_PROMPT, user_msg, max_tokens=4096)
-    except Exception as e:
-        print(f"clusterer: consolidation call failed, skipping: {e}")
-        return all_clusters
+    def _consolidate_batch(names):
+        user_msg = "OCCURRENCE NAMES:\n" + "\n".join(f"- {n}" for n in names)
+        try:
+            merges = _call_bedrock(CONSOLIDATION_PROMPT, user_msg, max_tokens=4096)
+            if not isinstance(merges, list):
+                return {}
+            batch_map = {}
+            for group in merges:
+                canonical = group.get("keep", "")
+                if not canonical:
+                    continue
+                for old_name in group.get("merge", []):
+                    batch_map[old_name.lower().strip()] = canonical
+            return batch_map
+        except Exception as e:
+            print(f"clusterer: consolidation batch failed: {e}")
+            return {}
 
-    if not isinstance(merges, list) or not merges:
-        print("clusterer: consolidation found no duplicates")
-        return all_clusters
-
-    # Build merge map: old_name_lower → canonical_name
     merge_map = {}
-    for group in merges:
-        canonical = group.get("keep", "")
-        if not canonical:
-            continue
-        for old_name in group.get("merge", []):
-            merge_map[old_name.lower().strip()] = canonical
+    with ThreadPoolExecutor(max_workers=MAX_BEDROCK_WORKERS) as executor:
+        futures = [executor.submit(_consolidate_batch, batch) for batch in name_batches]
+        for future in as_completed(futures):
+            merge_map.update(future.result())
 
     if not merge_map:
-        print("clusterer: consolidation found no duplicates")
-        return all_clusters
+        return clusters
 
-    # Re-merge using canonical names
+    # Validate merges: reject merges where identifiers differ (e.g., different districts)
+    rejected = 0
+    validated_map = {}
+    for old_lower, canonical in merge_map.items():
+        if _validate_merge(old_lower, canonical):
+            validated_map[old_lower] = canonical
+        else:
+            rejected += 1
+    if rejected:
+        print(f"clusterer: rejected {rejected} invalid merges (different identifiers)")
+    merge_map = validated_map
+
+    if not merge_map:
+        return clusters
+
     merged = {}
-    for cluster in all_clusters:
+    for cluster in clusters:
         name = cluster.get("name", "").strip()
         canonical = merge_map.get(name.lower().strip(), name)
         key = canonical.lower().strip()
@@ -320,10 +399,34 @@ def _consolidate_occurrences(all_clusters):
             cluster_copy["name"] = canonical
             merged[key] = cluster_copy
 
-    before = len(all_clusters)
-    after = len(merged)
-    print(f"clusterer: consolidation merged {before} → {after} occurrences ({before - after} duplicates)")
     return list(merged.values())
+
+
+def _consolidate_occurrences(all_clusters):
+    """Multi-pass batched consolidation of duplicate occurrence names.
+
+    Pass 1: Split 1000+ names into batches of 200, find within-batch duplicates in parallel.
+    Pass 2: After merging, the reduced name set gets one more consolidation pass to catch
+    cross-batch duplicates that ended up in different batches.
+    """
+    unique_count = len(set(c.get("name", "").strip() for c in all_clusters if c.get("name")))
+    print(f"clusterer: consolidating {unique_count} unique occurrence names")
+
+    # Pass 1: batched parallel consolidation
+    result = _consolidate_one_pass(all_clusters)
+    after_p1 = len(result)
+    print(f"clusterer: pass 1 consolidation: {len(all_clusters)} → {after_p1}")
+
+    # Pass 2: cross-batch consolidation on the reduced set
+    if after_p1 > 15:
+        result = _consolidate_one_pass(result)
+        after_p2 = len(result)
+        if after_p2 < after_p1:
+            print(f"clusterer: pass 2 consolidation: {after_p1} → {after_p2}")
+
+    total_merged = len(all_clusters) - len(result)
+    print(f"clusterer: consolidation total: {len(all_clusters)} → {len(result)} ({total_merged} duplicates)")
+    return result
 
 
 def _get_active_markets():

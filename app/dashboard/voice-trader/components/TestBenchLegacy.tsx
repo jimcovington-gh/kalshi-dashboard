@@ -32,18 +32,19 @@ interface WordStatus {
   market_ticker: string;
   word: string;
   variants: string[];
-  triggered: boolean;
-  triggered_at?: number;
-  no_purchased: boolean;
-  trade_result?: {
-    contracts_filled?: number;
-    avg_buy_price?: number;
+  state: 'watching' | 'already_said' | 'skipped' | 'detected' | 'bought' | 'traded' | 'no_fill' | 'failed' | 'no_swept';
+  state_at?: number;
+  trade?: {
+    contracts?: number;
+    buy_price?: number;
     cost?: number;
-    sell_fill_price?: number;
+    sell_price?: number;
     sell_contracts?: number;
-    realized_profit?: number;
+    profit?: number;
+    side?: string;
+    price?: number;
+    llm_pending?: boolean;
   };
-  status?: 'pending' | 'success' | 'no_fill' | 'failed' | 'skipped';
 }
 
 interface Speaker {
@@ -702,8 +703,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
           
           if (data.type === 'full_state') {
             // DEBUG: Log words received
-            const triggeredWords = (data.words || []).filter((w: any) => w.triggered);
-            console.log('[FULL_STATE] words:', data.words?.length, 'triggered:', triggeredWords.length, triggeredWords.map((w: any) => w.market_ticker));
+            const nonWatching = (data.words || []).filter((w: any) => w.state !== 'watching');
+            console.log('[FULL_STATE] words:', data.words?.length, 'active:', nonWatching.length, nonWatching.map((w: any) => `${w.market_ticker}:${w.state}`));
             
             // Log status_message changes to System Log
             // NOTE: Must compare and log OUTSIDE setContainerState to avoid React Strict Mode
@@ -789,31 +790,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
             }
 
           } else if (data.type === 'word_triggered') {
-            // Update the words state based on status
-            // pending = yellow (trade in progress)
-            // success = green (got fills + profit)
-            // no_fill/failed = gray (no trade executed)
-            console.log('[WORD] Status:', data.word, data.market_ticker, data.status || 'triggered');
-            setWords(prev => prev.map(w => 
-              w.market_ticker === data.market_ticker 
-                ? { 
-                    ...w, 
-                    triggered: true,  // Always mark triggered once detected
-                    triggered_at: data.timestamp,
-                    status: data.status || 'pending',
-                    // Merge trade_result — pending has buy info, success adds sell info
-                    trade_result: {
-                      ...w.trade_result,
-                      ...(data.contracts_filled !== undefined ? { contracts_filled: data.contracts_filled } : {}),
-                      ...(data.avg_fill_price !== undefined ? { avg_buy_price: data.avg_fill_price } : {}),
-                      ...(data.cost !== undefined ? { cost: data.cost } : {}),
-                      ...(data.sell_fill_price !== undefined ? { sell_fill_price: data.sell_fill_price } : {}),
-                      ...(data.sell_contracts !== undefined ? { sell_contracts: data.sell_contracts } : {}),
-                      ...(data.realized_profit !== undefined ? { realized_profit: data.realized_profit } : {}),
-                    }
-                  }
-                : w
-            ));
+            // System log only — tile state comes from full_state broadcasts
+            console.log('[WORD] word_triggered:', data.word, data.market_ticker);
             
             // Log trigger phrase to system log (if context available)
             if (data.context_before || data.context_after) {
@@ -832,18 +810,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               }]);
             }
           } else if (data.type === 'word_status_update') {
-            // Orderbook scanner detected word was already said (no NO bids)
+            // System log only — tile state comes from full_state broadcasts
             console.log('[WORD] Orderbook update:', data.market_ticker, data.source, data.reason);
-            setWords(prev => prev.map(w => 
-              w.market_ticker === data.market_ticker 
-                ? { 
-                    ...w, 
-                    triggered: data.triggered,
-                    status: 'skipped'  // Gray out - word was already said
-                  }
-                : w
-            ));
-            // Log to system log - word was already said
             setSystemLog(prev => [...prev, {
               timestamp: Date.now() / 1000,
               message: `Word already said: ${data.market_ticker} (${data.reason})`,
@@ -3304,57 +3272,45 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             <h2 className="font-semibold mb-2 text-sm">Word Status</h2>
             <div className="grid grid-cols-5 gap-1">
               {words.map(w => {
-                // Color based on status:
-                // pending = yellow (trade in progress)
-                // success = green (got fills)
-                // skipped = purple strikethrough (word already said - orderbook detected)
-                // no_fill/failed = gray (no trade executed)
-                const bgClass = w.status === 'pending'
-                  ? 'bg-yellow-900 border border-yellow-500'
-                  : w.status === 'success'
-                  ? 'bg-green-900 border border-green-500'
-                  : w.status === 'skipped'
-                  ? 'bg-purple-900/50 border border-purple-500'
-                  : w.no_purchased
-                  ? 'bg-red-900 border border-red-500'
-                  : 'bg-gray-700';
+                // Tile config by state
+                const TILE_CONFIG: Record<string, { bg: string; icon: string }> = {
+                  watching:     { bg: 'bg-gray-700', icon: '...' },
+                  already_said: { bg: 'bg-purple-900/50 border border-purple-500', icon: '🚫' },
+                  skipped:      { bg: 'bg-purple-900/50 border border-purple-500', icon: '🚫' },
+                  detected:     { bg: 'bg-yellow-900 border border-yellow-500', icon: '⏳' },
+                  bought:       { bg: 'bg-yellow-900 border border-yellow-500', icon: '⏳' },
+                  traded:       { bg: 'bg-green-900 border border-green-500', icon: '✓' },
+                  no_fill:      { bg: 'bg-gray-700 border border-gray-500', icon: '⚡' },
+                  failed:       { bg: 'bg-gray-700 border border-red-500', icon: '✗' },
+                  no_swept:     { bg: 'bg-red-900 border border-red-500', icon: '✗ NO' },
+                };
+                const tile = TILE_CONFIG[w.state] || TILE_CONFIG.watching;
+                const isStrikethrough = w.state === 'already_said' || w.state === 'skipped';
                 
-                const statusIcon = w.status === 'pending'
-                  ? '⏳'
-                  : w.status === 'success'
-                  ? '✓'
-                  : w.status === 'no_fill'
-                  ? '⚡'
-                  : w.status === 'skipped'
-                  ? '🚫'
-                  : w.status === 'failed'
-                  ? '✗'
-                  : w.no_purchased
-                  ? '✗ NO'
-                  : '...';
+                // Detail line
+                let detail = tile.icon;
+                if (w.state === 'already_said' || w.state === 'skipped') {
+                  detail = '🚫 said';
+                } else if (w.state === 'traded' && w.trade) {
+                  detail = `✓ ${w.trade.contracts ?? '?'}@${w.trade.buy_price?.toFixed(2) ?? '?'}→${w.trade.sell_price?.toFixed(2) ?? '?'} +$${w.trade.profit?.toFixed(2) ?? '?'}`;
+                } else if (w.state === 'bought' && w.trade) {
+                  detail = `⏳ ${w.trade.contracts ?? '?'}@${w.trade.buy_price?.toFixed(2) ?? '?'} ($${w.trade.cost?.toFixed(2) ?? '?'})`;
+                } else if (w.state === 'no_swept' && w.trade) {
+                  detail = `✗ NO ${w.trade.contracts ?? '?'}@${w.trade.price?.toFixed(2) ?? '?'}`;
+                } else if (w.state_at) {
+                  detail = `${tile.icon} ${formatTime(w.state_at)}`;
+                }
                 
                 return (
                   <div
                     key={w.market_ticker}
-                    className={`p-1.5 rounded text-xs ${bgClass}`}
+                    className={`p-1.5 rounded text-xs ${tile.bg}`}
                   >
-                    <div className={`font-medium truncate ${w.status === 'skipped' ? 'line-through text-purple-300' : ''}`} title={w.word}>
+                    <div className={`font-medium truncate ${isStrikethrough ? 'line-through text-purple-300' : ''}`} title={w.word}>
                       {w.word}
                     </div>
                     <div className="text-[10px] text-gray-400 truncate">
-                      {w.status === 'skipped'
-                        ? '🚫 said'
-                        : w.status === 'success' && w.trade_result?.contracts_filled != null
-                        ? (w.trade_result.realized_profit !== undefined
-                          ? `✓ ${w.trade_result.contracts_filled}@${w.trade_result.avg_buy_price?.toFixed(2) ?? '?'}→${w.trade_result.sell_fill_price?.toFixed(2) ?? '?'} +$${w.trade_result.realized_profit?.toFixed(2) ?? '?'}`
-                          : `✓ ${w.trade_result.contracts_filled}@${w.trade_result.avg_buy_price?.toFixed(2) ?? '?'} (sell pending)`)
-                        : w.status === 'pending' && w.trade_result?.contracts_filled != null
-                        ? `⏳ ${w.trade_result.contracts_filled}@${w.trade_result.avg_buy_price?.toFixed(2) ?? '?'} ($${w.trade_result.cost?.toFixed(2) ?? '?'})`
-                        : w.status && w.triggered_at
-                        ? `${statusIcon} ${formatTime(w.triggered_at)}`
-                        : w.no_purchased
-                        ? '✗ NO'
-                        : '...'}
+                      {detail}
                     </div>
                   </div>
                 );
@@ -3520,7 +3476,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                       }
                     }}
                     className="w-full bg-red-700 hover:bg-red-600 px-2 py-1.5 rounded text-xs font-medium"
-                    title="Manually trigger NO sweep on all untriggered markets"
+                    title="Manually trigger NO sweep on all watching markets"
                   >
                     🛑 End Call (Sweep NO)
                   </button>

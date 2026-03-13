@@ -261,8 +261,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [dialpadOpen, setDialpadOpen] = useState(false);
   
   // Trading parameters state
-  const [betSize, setBetSize] = useState<number>(10);  // Last confirmed bet size on the server
-  const [betSizeInput, setBetSizeInput] = useState<string>('10');  // Text input value (may differ from betSize while editing)
+  const [betSize, setBetSize] = useState<number>(2000);  // Last confirmed bet size on the server
+  const [betSizeInput, setBetSizeInput] = useState<string>('2000');  // Text input value (may differ from betSize while editing)
   const [betSizeDirty, setBetSizeDirty] = useState<boolean>(false);  // True when input differs from confirmed value
   const [cashBalance, setCashBalance] = useState<number>(0);
   const [availableCash, setAvailableCash] = useState<number>(0);
@@ -270,11 +270,11 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   
   // Trigger configuration state
   const [triggerConfig, setTriggerConfig] = useState<TriggerConfig>({
-    partial_repeat_count: 1, partial_words_after: 0, require_final: false
+    partial_repeat_count: 1, partial_words_after: 0, require_final: true
   });
   const [triggerConfigDirty, setTriggerConfigDirty] = useState(false);
   const [localTriggerConfig, setLocalTriggerConfig] = useState<TriggerConfig>({
-    partial_repeat_count: 1, partial_words_after: 0, require_final: false
+    partial_repeat_count: 1, partial_words_after: 0, require_final: true
   });
   
   // WebSocket connection state

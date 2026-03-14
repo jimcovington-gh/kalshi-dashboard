@@ -1033,8 +1033,8 @@ Resources:
       FunctionName: dashboard-voiceprint-clips
       CodeUri: ./
       Handler: voiceprint-clips.lambda_handler
-      Description: Voiceprint clip curation - list clips, update status, presigned URLs
-      Timeout: 30
+      Description: Voiceprint clip curation - list clips, update status, presigned URLs, YouTube search + extract
+      Timeout: 120
       AutoPublishAlias: live
       ProvisionedConcurrencyConfig:
         ProvisionedConcurrentExecutions: 1
@@ -1042,6 +1042,7 @@ Resources:
         Variables:
           VOICEPRINT_CLIPS_TABLE: production-kalshi-voiceprint-clips
           VOICEPRINT_LIBRARY_BUCKET: production-kalshi-voiceprint-library
+          SATELLITE_URL: http://73.242.199.139
       Policies:
         - DynamoDBCrudPolicy:
             TableName: production-kalshi-voiceprint-clips
@@ -1079,6 +1080,18 @@ Resources:
             RestApiId: !Ref DashboardApi
             Path: /voiceprint/clips/{clip_id}/url
             Method: GET
+        SearchYouTube:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /voiceprint/search
+            Method: GET
+        ExtractClip:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DashboardApi
+            Path: /voiceprint/extract-clip
+            Method: POST
 
   # Lambda: Signal Engine Velocity API
   SignalEngineVelocityFunction:

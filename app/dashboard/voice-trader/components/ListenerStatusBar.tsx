@@ -3,6 +3,7 @@
  *
  * Shows connected field listeners as a compact bar on the monitoring page.
  * Polls /admin/listeners every 5s. Color-coded status dots.
+ * Per-listener audio mute/unmute toggles when audio bridges are active.
  */
 'use client';
 
@@ -17,13 +18,22 @@ interface ListenerStatus {
   last_audio_at?: number;
 }
 
+interface ListenerAudioInfo {
+  name: string;
+  muted: boolean;
+}
+
 interface Props {
   ec2Base: string;
   /** Only show listeners assigned to this trader */
   traderFilter?: string;
+  /** Listener audio sources from worker (listener_id → {name, muted}) */
+  listenerAudioSources?: Record<string, ListenerAudioInfo>;
+  /** Callback to toggle listener audio mute */
+  onToggleListenerAudio?: (listenerId: string, muted: boolean) => void;
 }
 
-export function ListenerStatusBar({ ec2Base, traderFilter }: Props) {
+export function ListenerStatusBar({ ec2Base, traderFilter, listenerAudioSources, onToggleListenerAudio }: Props) {
   const [listeners, setListeners] = useState<ListenerStatus[]>([]);
   const [expanded, setExpanded] = useState(false);
 
@@ -100,22 +110,41 @@ export function ListenerStatusBar({ ec2Base, traderFilter }: Props) {
 
       {expanded && (
         <div className="mt-2 pt-2 border-t border-gray-700 space-y-1.5">
-          {listeners.map(l => (
-            <div key={l.listener_id} className="flex items-center gap-3 text-xs">
-              <div
-                className={`w-2 h-2 rounded-full flex-shrink-0 ${getStatusColor(l)} ${l.connected ? 'animate-pulse' : ''}`}
-              />
-              <span className={`font-medium ${l.connected ? 'text-white' : 'text-gray-500'}`}>
-                {l.name}
-              </span>
-              <span className={`${l.connected ? 'text-green-400' : 'text-gray-600'}`}>
-                {getStatusLabel(l)}
-              </span>
-              {l.connected && l.connected_at && (
-                <span className="text-gray-500">{formatUptime(l.connected_at)}</span>
-              )}
-            </div>
-          ))}
+          {listeners.map(l => {
+            const audioInfo = listenerAudioSources?.[l.listener_id];
+            const hasAudioBridge = !!audioInfo;
+            const isMuted = audioInfo?.muted ?? true;
+            return (
+              <div key={l.listener_id} className="flex items-center gap-3 text-xs">
+                <div
+                  className={`w-2 h-2 rounded-full flex-shrink-0 ${getStatusColor(l)} ${l.connected ? 'animate-pulse' : ''}`}
+                />
+                <span className={`font-medium ${l.connected ? 'text-white' : 'text-gray-500'}`}>
+                  {l.name}
+                </span>
+                <span className={`${l.connected ? 'text-green-400' : 'text-gray-600'}`}>
+                  {getStatusLabel(l)}
+                </span>
+                {l.connected && l.connected_at && (
+                  <span className="text-gray-500">{formatUptime(l.connected_at)}</span>
+                )}
+                {/* Audio toggle — only shown when bridge is active */}
+                {hasAudioBridge && onToggleListenerAudio && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onToggleListenerAudio(l.listener_id, !isMuted); }}
+                    className={`ml-auto px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                      isMuted
+                        ? 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                        : 'bg-green-800 text-green-300 hover:bg-green-700'
+                    }`}
+                    title={isMuted ? 'Unmute listener audio' : 'Mute listener audio'}
+                  >
+                    {isMuted ? '🔇' : '🔊'}
+                  </button>
+                )}
+              </div>
+            );
+          })}
           {listeners.length === 0 && (
             <div className="text-xs text-gray-500 py-1">No listeners assigned to this trader.</div>
           )}

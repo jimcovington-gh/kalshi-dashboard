@@ -5,9 +5,19 @@ import {
   getVoiceprintSpeakers,
   getVoiceprintClips,
   updateVoiceprintClipStatus,
+  searchYouTube,
+  extractVoiceprintClip,
   VoiceprintSpeaker,
   VoiceprintClip,
+  YouTubeSearchResult,
 } from '@/lib/api';
+
+declare global {
+  interface Window {
+    YT: any;
+    onYouTubeIframeAPIReady: (() => void) | undefined;
+  }
+}
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -39,14 +49,14 @@ function ClipCard({
 }) {
   const rawScore = clip.similarity_score != null ? Number(clip.similarity_score) : null;
   const simScore = rawScore != null && !isNaN(rawScore) ? rawScore : null;
-  const sourceLabel = clip.source_video ? `Video: ${clip.source_video}` : '';
-  const timeLabel = clip.timestamp_s ? `@ ${clip.timestamp_s}s` : '';
+  const sourceLabel = clip.source_video ? clip.source_video : '';
+  const timeLabel = clip.timestamp_s ? `@ ${Math.floor(clip.timestamp_s / 60)}:${String(clip.timestamp_s % 60).padStart(2, '0')}` : '';
 
   return (
     <div
       className={`border rounded-lg p-3 transition-all ${
         isPlaying
-          ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-400 shadow-lg shadow-blue-200 animate-pulse'
+          ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-400 shadow-lg shadow-blue-200'
           : clip.status === 'approved'
           ? 'border-green-300 bg-green-50'
           : clip.status === 'rejected'
@@ -119,21 +129,45 @@ function ClipCard({
 }
 
 export default function VoiceprintsPage() {
+  // ── Speaker state ──
   const [speakers, setSpeakers] = useState<VoiceprintSpeaker[]>([]);
   const [selectedSpeaker, setSelectedSpeaker] = useState<string>('');
+  const [newSpeakerName, setNewSpeakerName] = useState('');
+
+  // ── Video search & player state ──
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<YouTubeSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selectedVideo, setSelectedVideo] = useState<YouTubeSearchResult | null>(null);
+  const playerRef = useRef<any>(null);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const timeUpdateRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ── Clip extraction state ──
+  const [extracting, setExtracting] = useState(false);
+  const [extractStatus, setExtractStatus] = useState('');
+
+  // ── Clips curation state ──
   const [clips, setClips] = useState<VoiceprintClip[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'candidate' | 'approved' | 'rejected'>('all');
-  const [showNewSpeaker, setShowNewSpeaker] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Load speakers on mount
+  // ── Load YouTube IFrame API ──
   useEffect(() => {
-    loadSpeakers();
-    return () => stopAudio();
+    if (window.YT && window.YT.Player) return;
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(tag);
+    return () => { stopAudio(); stopTimeUpdater(); };
   }, []);
+
+  // ── Load speakers on mount ──
+  useEffect(() => { loadSpeakers(); }, []);
 
   async function loadSpeakers() {
     try {
@@ -163,16 +197,141 @@ export default function VoiceprintsPage() {
     setPlayingClipId(null);
     stopAudio();
     loadClips(speaker);
+    // Pre-fill search with speaker name
+    setSearchQuery(`${speaker} interview`);
   }
 
+  function addNewSpeaker() {
+    const name = newSpeakerName.trim().toLowerCase();
+    if (!name) return;
+    setSelectedSpeaker(name);
+    setNewSpeakerName('');
+    setClips([]);
+    setSearchQuery(`${name} interview`);
+  }
+
+  // ── YouTube Search ──
+  async function handleSearch() {
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    setError('');
+    try {
+      const data = await searchYouTube(searchQuery.trim());
+      setSearchResults(data.results);
+    } catch (err: any) {
+      setError(err.message || 'Search failed');
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  // ── YouTube Player ──
+  function loadVideo(video: YouTubeSearchResult) {
+    setSelectedVideo(video);
+    setPlayerReady(false);
+    setCurrentTime(0);
+
+    // Destroy existing player
+    if (playerRef.current) {
+      try { playerRef.current.destroy(); } catch {}
+      playerRef.current = null;
+    }
+
+    // Wait for YT API
+    const initPlayer = () => {
+      if (!playerContainerRef.current) return;
+      // Clear the container and create a fresh div
+      playerContainerRef.current.innerHTML = '<div id="yt-player"></div>';
+
+      playerRef.current = new window.YT.Player('yt-player', {
+        height: '360',
+        width: '640',
+        videoId: video.video_id,
+        playerVars: {
+          autoplay: 1,
+          modestbranding: 1,
+          rel: 0,
+        },
+        events: {
+          onReady: () => {
+            setPlayerReady(true);
+            startTimeUpdater();
+          },
+        },
+      });
+    };
+
+    if (window.YT && window.YT.Player) {
+      initPlayer();
+    } else {
+      window.onYouTubeIframeAPIReady = initPlayer;
+    }
+  }
+
+  function startTimeUpdater() {
+    stopTimeUpdater();
+    timeUpdateRef.current = setInterval(() => {
+      if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
+        setCurrentTime(playerRef.current.getCurrentTime());
+      }
+    }, 250);
+  }
+
+  function stopTimeUpdater() {
+    if (timeUpdateRef.current) {
+      clearInterval(timeUpdateRef.current);
+      timeUpdateRef.current = null;
+    }
+  }
+
+  function formatTime(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  // ── Clip Extraction ──
+  async function handleMarkClip() {
+    if (!selectedSpeaker || !selectedVideo || !playerRef.current) return;
+
+    const endTime = playerRef.current.getCurrentTime();
+    const startS = Math.max(0, endTime - 10);
+
+    setExtracting(true);
+    setExtractStatus(`Extracting ${formatTime(startS)} → ${formatTime(startS + 10)}...`);
+
+    try {
+      const result = await extractVoiceprintClip({
+        video_url: `https://www.youtube.com/watch?v=${selectedVideo.video_id}`,
+        video_id: selectedVideo.video_id,
+        video_title: selectedVideo.title,
+        start_s: startS,
+        speaker: selectedSpeaker,
+      });
+
+      if (result.status === 'already_exists') {
+        setExtractStatus(`⚠️ Clip already exists (${result.existing_status})`);
+      } else {
+        setExtractStatus(`✓ Clip extracted: ${formatTime(startS)} → ${formatTime(startS + 10)}`);
+        // Reload clips to show the new one
+        loadClips(selectedSpeaker);
+        loadSpeakers();
+      }
+    } catch (err: any) {
+      setExtractStatus(`✗ Error: ${err.message || 'extraction failed'}`);
+    } finally {
+      setExtracting(false);
+      setTimeout(() => setExtractStatus(''), 5000);
+    }
+  }
+
+  // ── Clip Curation ──
   async function handleStatusChange(clipId: string, newStatus: 'approved' | 'rejected' | 'candidate') {
     try {
       await updateVoiceprintClipStatus(selectedSpeaker, clipId, newStatus);
-      // Update local state
       setClips((prev) =>
         prev.map((c) => (c.clip_id === clipId ? { ...c, status: newStatus } : c))
       );
-      // Update speaker counts
       loadSpeakers();
     } catch (err: any) {
       setError(err.message || 'Failed to update clip status');
@@ -192,18 +351,12 @@ export default function VoiceprintsPage() {
   function playClip(clipId: string) {
     const clip = clips.find((c) => c.clip_id === clipId);
     if (!clip?.audio_url) return;
-
     stopAudio();
-
     const audio = new Audio(clip.audio_url);
     audioRef.current = audio;
     setPlayingClipId(clipId);
-
     audio.onended = () => setPlayingClipId(null);
-    audio.onerror = () => {
-      setPlayingClipId(null);
-      setError('Failed to play audio');
-    };
+    audio.onerror = () => { setPlayingClipId(null); setError('Failed to play audio'); };
     audio.play();
   }
 
@@ -214,86 +367,54 @@ export default function VoiceprintsPage() {
 
   return (
     <div className="space-y-4">
-      {/* New Speaker Modal */}
-      {showNewSpeaker && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowNewSpeaker(false)}>
-          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-gray-900 mb-3">➕ Add a New Speaker</h3>
-            <div className="space-y-3 text-sm text-gray-700">
-              <p>
-                Adding a new speaker requires extracting audio clips from YouTube interviews.
-                The Copilot AI can do this automatically.
-              </p>
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <p className="font-semibold text-blue-900 mb-1">Tell Copilot:</p>
-                <p className="font-mono text-xs text-blue-800 bg-blue-100 rounded p-2">
-                  &quot;Add a new speaker [NAME] to the voiceprint library. Find YouTube interviews with clean studio audio and extract clips.&quot;
-                </p>
-              </div>
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                <p className="font-semibold text-gray-800 mb-1">Reference:</p>
-                <p className="text-xs text-gray-600">
-                  The full extraction workflow is documented in<br />
-                  <code className="bg-gray-200 px-1 rounded">/memories/repo/voiceprint-clip-extraction.md</code>
-                </p>
-              </div>
-              <p className="text-xs text-gray-500">
-                The AI will search YouTube for studio interviews (avoiding rallies/crowds),
-                download via the satellite server, extract 10-second clips at 16kHz, and upload them here for your review.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowNewSpeaker(false)}
-              className="mt-4 w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 transition-colors"
-            >
-              Got it
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Header */}
       <div className="bg-white rounded-lg shadow p-4">
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-2xl font-bold text-gray-900">🎤 Voiceprint Library</h2>
-          <button
-            onClick={() => setShowNewSpeaker(true)}
-            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-sm font-medium transition-colors border border-indigo-200"
-          >
-            + New Speaker
-          </button>
-        </div>
+        <h2 className="text-2xl font-bold text-gray-900 mb-1">🎤 Voiceprint Builder</h2>
         <p className="text-sm text-gray-500">
-          Curate speaker clips for voiceprint building. Listen, approve (👍) or reject (👎) each clip.
-          Goal: 10 approved clips per speaker.
+          Search YouTube for speaker clips, scrub to find clean speech, extract 10-second samples.
+          Approve 10+ clips then build a voiceprint.
         </p>
       </div>
 
       {/* Speaker selector */}
       <div className="bg-white rounded-lg shadow p-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">Speakers</h3>
-        {speakers.length === 0 && !error ? (
-          <p className="text-gray-400 text-sm">No speakers yet. Ask the agent to add candidate clips.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {speakers.map((s) => (
-              <button
-                key={s.speaker}
-                onClick={() => selectSpeaker(s.speaker)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  selectedSpeaker === s.speaker
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                {s.speaker}
-                <span className="ml-1.5 text-xs opacity-75">
-                  {s.approved}✓ / {s.total}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
+        <h3 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">Speaker</h3>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {speakers.map((s) => (
+            <button
+              key={s.speaker}
+              onClick={() => selectSpeaker(s.speaker)}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                selectedSpeaker === s.speaker
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {s.speaker}
+              <span className="ml-1.5 text-xs opacity-75">
+                {s.approved}✓ / {s.total}
+              </span>
+            </button>
+          ))}
+        </div>
+        {/* New speaker input */}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newSpeakerName}
+            onChange={(e) => setNewSpeakerName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addNewSpeaker()}
+            placeholder="New speaker name..."
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+          />
+          <button
+            onClick={addNewSpeaker}
+            disabled={!newSpeakerName.trim()}
+            className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-sm font-medium border border-indigo-200 disabled:opacity-50"
+          >
+            + Add
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -303,12 +424,129 @@ export default function VoiceprintsPage() {
         </div>
       )}
 
-      {/* Clips grid */}
+      {/* YouTube Search + Player */}
       {selectedSpeaker && (
+        <div className="bg-white rounded-lg shadow p-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">
+            Find Clips for <span className="capitalize text-blue-600">{selectedSpeaker}</span>
+          </h3>
+
+          {/* Search bar */}
+          <div className="flex gap-2 mb-4">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              placeholder={`Search YouTube for ${selectedSpeaker}...`}
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+            />
+            <button
+              onClick={handleSearch}
+              disabled={searching || !searchQuery.trim()}
+              className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg text-sm font-medium border border-red-200 disabled:opacity-50"
+            >
+              {searching ? 'Searching...' : '🔍 Search YouTube'}
+            </button>
+          </div>
+
+          {/* Search results */}
+          {searchResults.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs text-gray-500 mb-2">{searchResults.length} results — click to load</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-64 overflow-y-auto">
+                {searchResults.map((r) => (
+                  <button
+                    key={r.video_id}
+                    onClick={() => loadVideo(r)}
+                    className={`flex gap-2 p-2 rounded-lg text-left transition-colors border ${
+                      selectedVideo?.video_id === r.video_id
+                        ? 'border-blue-400 bg-blue-50'
+                        : 'border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    {r.thumbnail && (
+                      <img src={r.thumbnail} alt="" className="w-24 h-16 rounded object-cover flex-shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-gray-900 line-clamp-2">{r.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {r.channel} · {r.duration}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* YouTube Player + Extract Controls */}
+          {selectedVideo && (
+            <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+              <div className="flex gap-4">
+                {/* Player */}
+                <div ref={playerContainerRef} className="flex-shrink-0">
+                  <div id="yt-player" />
+                </div>
+
+                {/* Extract controls */}
+                <div className="flex-1 flex flex-col justify-center">
+                  <p className="text-sm font-medium text-gray-900 mb-1 line-clamp-2">{selectedVideo.title}</p>
+                  <p className="text-xs text-gray-500 mb-4">{selectedVideo.channel} · {selectedVideo.duration}</p>
+
+                  {/* Current position */}
+                  <div className="bg-white rounded-lg p-3 border border-gray-200 mb-3">
+                    <p className="text-xs text-gray-500 mb-1">Current position</p>
+                    <p className="text-2xl font-mono font-bold text-gray-900">{formatTime(currentTime)}</p>
+                    {currentTime >= 10 ? (
+                      <p className="text-xs text-green-600 mt-1">
+                        Will extract: {formatTime(currentTime - 10)} → {formatTime(currentTime)}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-orange-600 mt-1">
+                        Scrub past 0:10 to mark a full 10s clip
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Mark clip button */}
+                  <button
+                    onClick={handleMarkClip}
+                    disabled={extracting || !playerReady || currentTime < 10}
+                    className={`w-full py-3 rounded-lg text-base font-bold transition-colors ${
+                      extracting
+                        ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+                        : currentTime >= 10
+                        ? 'bg-green-600 text-white hover:bg-green-700 shadow-lg shadow-green-200'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    {extracting ? '⏳ Extracting...' : '✂️ Mark Clip (last 10 seconds)'}
+                  </button>
+
+                  {extractStatus && (
+                    <p className={`text-sm mt-2 ${
+                      extractStatus.startsWith('✓') ? 'text-green-600' :
+                      extractStatus.startsWith('⚠') ? 'text-yellow-600' :
+                      extractStatus.startsWith('✗') ? 'text-red-600' :
+                      'text-blue-600'
+                    }`}>
+                      {extractStatus}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Clips grid */}
+      {selectedSpeaker && clips.length > 0 && (
         <div className="bg-white rounded-lg shadow p-4">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h3 className="text-lg font-bold text-gray-900 capitalize">{selectedSpeaker}</h3>
+              <h3 className="text-lg font-bold text-gray-900 capitalize">{selectedSpeaker} — Clips</h3>
               <p className="text-xs text-gray-500">
                 {approvedCount} approved · {candidateCount} to review · {clips.length} total
               </p>
@@ -355,13 +593,10 @@ export default function VoiceprintsPage() {
                     }`}
                     title={`${clip.source_video || ''} ${clip.timestamp_s ? `@ ${clip.timestamp_s}s` : ''}`}
                   >
-                    {playingClipId === clip.clip_id ? '⏹' : '▶'} {clip.clip_id}
+                    {playingClipId === clip.clip_id ? '⏹' : '▶'} {clip.clip_id.slice(0, 8)}
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-green-600 mt-2">
-                Play these to remind yourself what {selectedSpeaker} sounds like before reviewing candidates below.
-              </p>
             </div>
           )}
 

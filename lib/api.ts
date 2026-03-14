@@ -1555,6 +1555,65 @@ export async function updateVoiceprintClipStatus(
 }
 
 // ============================================================
+// Voiceprint YouTube Search + Extract API
+// ============================================================
+
+export interface YouTubeSearchResult {
+  video_id: string;
+  title: string;
+  duration: string | null;
+  thumbnail: string | null;
+  channel: string | null;
+  upload_date: string | null;
+}
+
+export async function searchYouTube(query: string, maxResults = 10): Promise<{ results: YouTubeSearchResult[] }> {
+  const session = await fetchAuthSession();
+  const token = session.tokens?.idToken?.toString();
+  const restOperation = get({
+    apiName: 'DashboardAPI',
+    path: `/voiceprint/search?q=${encodeURIComponent(query)}&max_results=${maxResults}`,
+    options: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  const resp = await restOperation.response;
+  return await resp.body.json() as unknown as { results: YouTubeSearchResult[] };
+}
+
+export interface ExtractClipRequest {
+  video_url: string;
+  video_id: string;
+  video_title: string;
+  start_s: number;
+  speaker: string;
+}
+
+export interface ExtractClipResponse {
+  clip_id: string;
+  speaker: string;
+  status: string;
+  s3_key?: string;
+  timestamp_s?: number;
+  duration_s?: number;
+  size_bytes?: number;
+  existing_status?: string;
+}
+
+export async function extractVoiceprintClip(req: ExtractClipRequest): Promise<ExtractClipResponse> {
+  const session = await fetchAuthSession();
+  const token = session.tokens?.idToken?.toString();
+  const restOperation = post({
+    apiName: 'DashboardAPI',
+    path: '/voiceprint/extract-clip',
+    options: {
+      headers: { Authorization: `Bearer ${token}` },
+      body: { ...req },
+    },
+  });
+  const resp = await restOperation.response;
+  return await resp.body.json() as unknown as ExtractClipResponse;
+}
+
+// ============================================================
 // Signal Engine Velocity API
 // ============================================================
 

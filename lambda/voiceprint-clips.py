@@ -2,18 +2,24 @@
 Voiceprint Clips API - Curation interface for speaker voiceprint clips.
 
 Endpoints:
-- GET /voiceprint/speakers          - List all speakers with clip counts
-- GET /voiceprint/clips?speaker=X   - List clips for a speaker (with presigned URLs)
+- GET /voiceprint/speakers              - List all speakers with clip counts
+- GET /voiceprint/clips?speaker=X       - List clips for a speaker (with presigned URLs)
 - POST /voiceprint/clips/{clip_id}/status - Update clip status (approve/reject)
-- GET /voiceprint/clips/{clip_id}/url     - Get presigned URL for a clip
+- GET /voiceprint/clips/{clip_id}/url   - Get presigned URL for a clip
+- GET /voiceprint/search?q=...          - Search YouTube (proxied to satellite)
+- POST /voiceprint/extract-clip         - Extract clip from YouTube (proxied to satellite)
 """
 
 import json
 import os
 import re
 import boto3
+import urllib3
 from decimal import Decimal
 from boto3.dynamodb.conditions import Key
+
+SATELLITE_URL = os.environ.get('SATELLITE_URL', 'http://73.242.199.139')
+http = urllib3.PoolManager(timeout=urllib3.Timeout(connect=5, read=90))
 
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 s3_client = boto3.client('s3', region_name='us-east-1')
@@ -176,4 +182,46 @@ def lambda_handler(event, context):
             return response(400, {'error': 'speaker parameter required'})
         return get_clip_url(speaker, clip_id)
 
+    # GET /voiceprint/search?q=... — proxy to satellite
+    if method == 'GET' and path == '/voiceprint/search':
+        q = params.get('q', '')
+        max_results = params.get('max_results', '10')
+        return proxy_satellite_get(f'/api/voiceprint/search?q={q}&max_results={max_results}')
+
+    # POST /voiceprint/extract-clip — proxy to satellite
+    if method == 'POST' and path == '/voiceprint/extract-clip':
+        raw_body = event.get('body', '{}')
+        return proxy_satellite_post('/api/voiceprint/extract-clip', raw_body)
+
     return response(404, {'error': f'Not found: {method} {path}'})
+
+
+def proxy_satellite_get(path):
+    """Proxy a GET request to the satellite server."""
+    url = f'{SATELLITE_URL}{path}'
+    try:
+        resp = http.request('GET', url)
+        body = json.loads(resp.data.decode('utf-8'))
+        return response(resp.status, body)
+    except urllib3.exceptions.MaxRetryError:
+        return response(502, {'error': 'Satellite server unreachable'})
+    except Exception as e:
+        return response(502, {'error': f'Satellite proxy error: {str(e)}'})
+
+
+def proxy_satellite_post(path, body):
+    """Proxy a POST request to the satellite server."""
+    url = f'{SATELLITE_URL}{path}'
+    try:
+        resp = http.request(
+            'POST', url,
+            body=body if isinstance(body, str) else json.dumps(body),
+            headers={'Content-Type': 'application/json'},
+        )
+        resp_body = json.loads(resp.data.decode('utf-8'))
+        return response(resp.status, resp_body)
+    except urllib3.exceptions.MaxRetryError:
+        return response(502, {'error': 'Satellite server unreachable'})
+    except Exception as e:
+        return response(502, {'error': f'Satellite proxy error: {str(e)}'})
+

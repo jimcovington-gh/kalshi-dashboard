@@ -222,6 +222,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [words, setWords] = useState<WordStatus[]>([]);
   const [pnl, setPnl] = useState<PnLSummary | null>(null);
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
+  // Listener audio sources (from worker audio bridges)
+  const [listenerAudioSources, setListenerAudioSources] = useState<Record<string, { name: string; muted: boolean }>>({});
   // Split finals/partial for stable rendering (no DOM thrashing on every partial)
   const [finalSegments, setFinalSegments] = useState<TranscriptSegment[]>([]);
   // Ratcheted partial: only ever grows within an utterance, never shrinks.
@@ -738,6 +740,10 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               setLocalTriggerConfig(data.call.trigger_config);
             }
             setTranscript(data.transcript || []);
+            // Update listener audio sources from worker bridges
+            if (data.listener_audio_sources) {
+              setListenerAudioSources(data.listener_audio_sources);
+            }
             // Seed split states from full_state snapshot
             const transcriptSnap: TranscriptSegment[] = data.transcript || [];
             setFinalSegments(transcriptSnap.filter((s: TranscriptSegment) => s.is_final).slice(-200));
@@ -3264,7 +3270,20 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
         </div>
 
         {/* Listener Status Bar */}
-        <ListenerStatusBar ec2Base={EC2_BASE} traderFilter="jimc" />
+        <ListenerStatusBar
+          ec2Base={EC2_BASE}
+          traderFilter="jimc"
+          listenerAudioSources={listenerAudioSources}
+          onToggleListenerAudio={(listenerId, muted) => {
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({
+                type: 'set_listener_audio_muted',
+                listener_id: listenerId,
+                muted,
+              }));
+            }
+          }}
+        />
         
         <div className="grid grid-cols-3 gap-4">
           {/* Left column: Word Grid - 5 columns for density */}

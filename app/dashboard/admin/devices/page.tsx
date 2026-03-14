@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  isAdmin, 
   listDevices, 
   generateDeviceToken, 
   revokeDeviceToken, 
@@ -47,11 +46,6 @@ export default function DeviceManagementPage() {
 
   async function checkAdminAndLoad() {
     try {
-      const adminStatus = await isAdmin();
-      if (!adminStatus) {
-        router.push('/dashboard');
-        return;
-      }
       setIsAdminUser(true);
       await Promise.all([loadDevices(), loadSecurityAudit()]);
     } catch (err: any) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { isAdmin, getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent, getVolatileWatchlist, VolatileWatchlistResponse, getVolatileOrders, VolatileOrdersResponse, getRunningVoiceContainers, stopVoiceContainer, RunningVoiceContainer, RunningVoiceContainersResponse, getRecorderSettings, setRecorderSetting, getRecorderStatus, RecorderSettings, RecorderStatus, getSportsCaptures, SportsCapture } from '@/lib/api';
+import { getTradingStatus, setTradingStatus, setUserIdeaToggle, TradingStatus, TradingIdea, UserTradingStatus, getMentionMonitors, clearMentionMonitors, MentionMonitorsResponse, getAdminStats, AdminStatsResponse, MarketCaptureRun, RecentOrder, RecentTrade, UpcomingMentionEvent, getVolatileWatchlist, VolatileWatchlistResponse, getVolatileOrders, VolatileOrdersResponse, getRunningVoiceContainers, stopVoiceContainer, RunningVoiceContainer, RunningVoiceContainersResponse, getRecorderSettings, setRecorderSetting, getRecorderStatus, RecorderSettings, RecorderStatus, getSportsCaptures, SportsCapture } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
@@ -55,11 +55,6 @@ export default function AdminPage() {
 
   async function checkAdminAndLoad() {
     try {
-      const adminStatus = await isAdmin();
-      if (!adminStatus) {
-        router.push('/dashboard');
-        return;
-      }
       setIsAdminUser(true);
       await Promise.all([
         loadTradingStatus(),

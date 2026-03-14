@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { fetchAuthSession, signOut } from 'aws-amplify/auth';
-import { isAdmin } from '@/lib/api';
 import Link from 'next/link';
 
 // Tab configuration - using full class names for Tailwind JIT compatibility
@@ -36,7 +35,6 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const [user, setUser] = useState<string>('');
-  const [isAdminUser, setIsAdminUser] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
@@ -53,8 +51,6 @@ export default function DashboardLayout({
       const email = session.tokens?.idToken?.payload['email'] as string;
       const displayName = preferredUsername || (email ? email.split('@')[0] : 'User');
       setUser(displayName);
-      const adminStatus = await isAdmin();
-      setIsAdminUser(adminStatus);
       setIsLoading(false);
     } catch {
       router.push('/');
@@ -116,18 +112,16 @@ export default function DashboardLayout({
                 >
                   🧪 Test
                 </a>
-                {isAdminUser && (
-                  <Link
-                    href="/dashboard/admin"
-                    className={`px-3 py-2 text-xs md:text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
-                      pathname === '/dashboard/admin'
-                        ? 'text-blue-700 border-blue-500'
-                        : 'text-blue-600 border-transparent hover:text-blue-800 hover:border-blue-300'
-                    }`}
-                  >
-                    Control
-                  </Link>
-                )}
+                <Link
+                  href="/dashboard/admin"
+                  className={`px-3 py-2 text-xs md:text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+                    pathname === '/dashboard/admin'
+                      ? 'text-blue-700 border-blue-500'
+                      : 'text-blue-600 border-transparent hover:text-blue-800 hover:border-blue-300'
+                  }`}
+                >
+                  Control
+                </Link>
               </div>
             </div>
 

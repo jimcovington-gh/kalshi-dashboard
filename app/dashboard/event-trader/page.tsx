@@ -88,6 +88,9 @@ export default function EventTraderPage() {
   const [matchLine, setMatchLine] = useState<string | null>(null);
   const [lastScore, setLastScore] = useState<ScoreUpdate | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  const [autoTriggered, setAutoTriggered] = useState(false);
+  const [manualTriggered, setManualTriggered] = useState(false);
+  const [triggerAlertPhrase, setTriggerAlertPhrase] = useState<string | null>(null);
 
   // WebSocket send helper
   const wsSend = useCallback((msg: Record<string, unknown>) => {
@@ -115,7 +118,16 @@ export default function EventTraderPage() {
         switch (msg.type) {
           case 'state':
             setSessionState(msg.data as SessionState);
+            // Sync trigger gate flags from server state
+            if ('auto_triggered' in msg.data) setAutoTriggered(msg.data.auto_triggered);
+            if ('manual_triggered' in msg.data) setManualTriggered(msg.data.manual_triggered);
             break;
+
+          case 'trigger_alert': {
+            setAutoTriggered(true);
+            setTriggerAlertPhrase(msg.data?.phrase ?? null);
+            break;
+          }
 
           case 'transcript': {
             const entry: TranscriptEntry = {
@@ -194,6 +206,12 @@ export default function EventTraderPage() {
     [wsSend]
   );
   const handleDisarm = useCallback(() => wsSend({ type: 'disarm' }), [wsSend]);
+  const handleTrigger = useCallback(() => wsSend({ type: 'trigger' }), [wsSend]);
+  const handleResetTrigger = useCallback(() => {
+    setAutoTriggered(false);
+    setTriggerAlertPhrase(null);
+    wsSend({ type: 'reset_trigger' });
+  }, [wsSend]);
   const handleFire = useCallback(
     (nomineeId: string) => wsSend({ type: 'fire', nominee: nomineeId }),
     [wsSend]
@@ -216,6 +234,9 @@ export default function EventTraderPage() {
     setLastScore(null);
     setErrors([]);
     setSessionState(null);
+    setAutoTriggered(false);
+    setManualTriggered(false);
+    setTriggerAlertPhrase(null);
     setSessionId(id);
   }
 
@@ -346,8 +367,14 @@ export default function EventTraderPage() {
             categories={categories}
             currentCategory={currentCategory}
             connected={connected}
+            isIdentifying={sessionState?.state === 'identifying'}
+            autoTriggered={autoTriggered}
+            manualTriggered={manualTriggered}
+            triggerAlertPhrase={triggerAlertPhrase}
             onArm={handleArm}
             onDisarm={handleDisarm}
+            onTrigger={handleTrigger}
+            onResetTrigger={handleResetTrigger}
             onFire={handleFire}
             onConfigUpdate={handleConfigUpdate}
           />

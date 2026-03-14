@@ -1,9 +1,14 @@
 /**
- * TestBenchV2.tsx - V2 Pipeline Voice Trader Test Bench
+ * TestBenchV2.tsx - FROZEN — Do Not Modify
  * 
- * This version is designed to work with the NEW v2 worker pipeline (worker_new.py).
+ * ⛔ THIS FILE IS FROZEN. Do NOT add features here.
+ * All Voice Trader UI changes go in TestBenchLegacy.tsx (the production component).
  * 
- * v2 Features:
+ * This V2 component has experimental features planned for future integration
+ * but is NOT currently in active use. It will be merged into the production
+ * component at a later date.
+ * 
+ * V2 Features (for future reference):
  * - Native v2 message format support
  * - Real-time stats dashboard
  * - Pipeline stage indicator
@@ -533,10 +538,14 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
   const [selectedEvent, setSelectedEvent] = useState<MentionEvent | null>(null);
   
   // Setup form
-  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop' | 'paramount' | 'netflix'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop' | 'paramount' | 'netflix' | 'srt'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
+  const [srtRemoteUrl, setSrtRemoteUrl] = useState('');
+  const [srtLatencyMs, setSrtLatencyMs] = useState(200);
+  const [srtLatencyLive, setSrtLatencyLive] = useState(200);
+  const [srtLatencyUpdating, setSrtLatencyUpdating] = useState(false);
   const [primeUrl, setPrimeUrl] = useState('https://www.amazon.com/gp/video/livetv');
   const [primeVncOpen, setPrimeVncOpen] = useState(false);
   const [paramountUrl, setParamountUrl] = useState('https://www.paramountplus.com/live-tv/');
@@ -1080,10 +1089,13 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
         audio_source: audioSource === 'satellite' ? 'satellite_transcript'
                     : audioSource === 'paramount' ? 'desktop'
                     : audioSource === 'netflix' ? 'desktop'
+                    : audioSource === 'srt' ? 'srt_listener'
                     : audioSource,
         phone_number: audioSource === 'phone' ? phoneNumber : undefined,
         passcode: audioSource === 'phone' ? passcode : undefined,
         stream_url: audioSource === 'web' ? webUrl : undefined,
+        srt_remote_url: audioSource === 'srt' ? srtRemoteUrl : undefined,
+        srt_latency_ms: audioSource === 'srt' ? srtLatencyMs : undefined,
         satellite_stream_id: audioSource === 'satellite' ? selectedSatStreamId : undefined,
         desktop_port: audioSource === 'desktop' ? 4400
                     : audioSource === 'paramount' ? 4401
@@ -1419,6 +1431,16 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
                 >
                   🎬 Netflix
                 </button>
+                <button
+                  onClick={() => setAudioSource('srt')}
+                  className={`flex-1 py-3 rounded-lg border-2 transition-colors ${
+                    audioSource === 'srt'
+                      ? 'border-green-500 bg-green-900/50'
+                      : 'border-gray-600 hover:border-gray-500'
+                  }`}
+                >
+                  📡 SRT Feed
+                </button>
               </div>
             </div>
 
@@ -1481,6 +1503,39 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
                 <p className="text-xs text-yellow-400 mt-1">
                   ⚠️ Web streams have 5-15s delay. Phone is recommended.
                 </p>
+              </div>
+            )}
+
+            {/* SRT Remote Feed */}
+            {audioSource === 'srt' && (
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">SRT URL (host:port)</label>
+                <input
+                  type="text"
+                  value={srtRemoteUrl}
+                  onChange={e => setSrtRemoteUrl(e.target.value)}
+                  placeholder="123.123.123.123:9003"
+                  className="w-full bg-gray-700 rounded px-3 py-2"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Connects to a 3rd-party SRT server. Accepts MPEG-TS (audio + video), extracts audio.
+                </p>
+                <div className="mt-3">
+                  <label className="block text-sm text-gray-400 mb-1">Buffer Latency: {srtLatencyMs}ms</label>
+                  <input
+                    type="range"
+                    min="20"
+                    max="1000"
+                    step="10"
+                    value={srtLatencyMs}
+                    onChange={e => setSrtLatencyMs(parseInt(e.target.value))}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>20ms (fast)</span>
+                    <span>1000ms (safe)</span>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1645,7 +1700,7 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
             {/* Launch Button */}
             <button
               onClick={handleLaunch}
-              disabled={launching || (audioSource === 'phone' && !phoneNumber) || (audioSource === 'web' && !webUrl) || (audioSource === 'satellite' && selectedSatStreamId === null)}
+              disabled={launching || (audioSource === 'phone' && !phoneNumber) || (audioSource === 'web' && !webUrl) || (audioSource === 'satellite' && selectedSatStreamId === null) || (audioSource === 'srt' && !srtRemoteUrl)}
               className="w-full py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-semibold text-lg transition-colors"
             >
               {launching ? '🔄 Launching...' : '🚀 Start Session'}
@@ -1714,6 +1769,43 @@ export function TestBenchV2({ autoEventTicker }: { autoEventTicker?: string } = 
               </div>
               <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} 
                    title={wsConnected ? 'Connected' : 'Disconnected'} />
+              {/* SRT Latency Live Adjust */}
+              {sessionConfig?.audio_source === 'srt_listener' && sessionId && (
+                <div className="flex items-center gap-2 bg-gray-700/50 rounded px-2 py-1">
+                  <span className="text-xs text-gray-400">Buffer:</span>
+                  <input
+                    type="range"
+                    min="20"
+                    max="1000"
+                    step="10"
+                    value={srtLatencyLive}
+                    onChange={e => setSrtLatencyLive(parseInt(e.target.value))}
+                    className="w-24"
+                  />
+                  <span className="text-xs text-gray-300 w-12">{srtLatencyLive}ms</span>
+                  <button
+                    onClick={async () => {
+                      setSrtLatencyUpdating(true);
+                      try {
+                        const res = await fetch(`${EC2_BASE}/session/${encodeURIComponent(sessionId)}/srt-latency`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ latency_ms: srtLatencyLive }),
+                        });
+                        if (!res.ok) throw new Error(await res.text());
+                      } catch (err: unknown) {
+                        setError(err instanceof Error ? err.message : String(err));
+                      } finally {
+                        setSrtLatencyUpdating(false);
+                      }
+                    }}
+                    disabled={srtLatencyUpdating}
+                    className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded text-xs"
+                  >
+                    {srtLatencyUpdating ? '...' : 'Apply'}
+                  </button>
+                </div>
+              )}
               <button
                 onClick={handleStop}
                 className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-sm font-medium"

@@ -20,8 +20,8 @@ type TestBenchVersion = 'legacy' | 'v2';
 const STORAGE_KEY = 'voice-trader-test-bench-version';
 
 function VoiceTraderPageInner() {
-  // Initialize from localStorage or default to 'v2'
-  const [version, setVersion] = useState<TestBenchVersion>('v2');
+  // Initialize from localStorage or default to 'legacy' (production)
+  const [version, setVersion] = useState<TestBenchVersion>('legacy');
   const [loaded, setLoaded] = useState(false);
   const searchParams = useSearchParams();
   const autoEventTicker = searchParams.get('event') || undefined;

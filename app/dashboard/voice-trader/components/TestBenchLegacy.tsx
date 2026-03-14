@@ -1,11 +1,13 @@
 /**
- * TestBenchLegacy.tsx - Legacy Voice Trader Test Bench
+ * TestBenchLegacy.tsx - PRODUCTION Voice Trader Dashboard
  * 
- * This is the ORIGINAL test bench that works with the legacy worker.py.
- * DO NOT MODIFY THIS FILE during v2 migration - it serves as:
- * 1. A working backup for production testing
- * 2. A reference implementation for the v2 test bench
- * 3. A fallback if v2 has issues
+ * ⚠️  THIS IS THE ACTIVE PRODUCTION COMPONENT. All new features go HERE.
+ * 
+ * Despite the "Legacy" name, this is the component users interact with.
+ * When adding Voice Trader features (UI controls, audio sources, etc.),
+ * modify THIS file — NOT TestBenchV2.tsx.
+ * 
+ * TestBenchV2.tsx is FROZEN for future integration — see its header.
  * 
  * See TEST_BENCH_DOCUMENTATION.md for full documentation.
  */
@@ -191,10 +193,14 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [sessionId, setSessionId] = useState<string | null>(null);
   
   // Setup form state
-  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'nbc_multi' | 'desktop' | 'paramount' | 'netflix' | 'listener'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'nbc_multi' | 'desktop' | 'paramount' | 'netflix' | 'listener' | 'srt'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
+  const [srtRemoteUrl, setSrtRemoteUrl] = useState('');
+  const [srtLatencyMs, setSrtLatencyMs] = useState(200);
+  const [srtLatencyLive, setSrtLatencyLive] = useState(200);
+  const [srtLatencyUpdating, setSrtLatencyUpdating] = useState(false);
   const [primeUrl, setPrimeUrl] = useState('https://www.amazon.com/gp/video/storefront');
   const [paramountUrl, setParamountUrl] = useState('https://www.paramountplus.com/live-tv/');
   const [netflixUrl, setNetflixUrl] = useState('https://www.netflix.com/browse');
@@ -1610,8 +1616,15 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                     : audioSource === 'listener' ? 'satellite_transcript'
                     : audioSource === 'paramount' ? 'desktop'
                     : audioSource === 'netflix' ? 'desktop'
+                    : audioSource === 'srt' ? 'srt_listener'
                     : audioSource,
       };
+
+      // SRT caller mode
+      if (audioSource === 'srt') {
+        body.srt_remote_url = srtRemoteUrl;
+        body.srt_latency_ms = srtLatencyMs;
+      }
 
       // NBC Multi: tell voice trader to auto-start the NBC supervisor
       if (audioSource === 'nbc_multi') {
@@ -2482,6 +2495,12 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             >
               🎧 Field Listener
             </button>
+            <button
+              className={`px-4 py-2 rounded ${audioSource === 'srt' ? 'bg-green-600' : 'bg-gray-700'}`}
+              onClick={() => setAudioSource('srt')}
+            >
+              📡 SRT Feed
+            </button>
 
           </div>
           
@@ -2526,6 +2545,40 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                   className="w-full bg-gray-700 rounded px-3 py-2 text-white"
                 />
                 <p className="text-xs text-gray-500 mt-1">Leave blank if no passcode needed. Include # or * if required</p>
+              </div>
+            </div>
+          )}
+
+          {audioSource === 'srt' && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">SRT URL (host:port)</label>
+                <input
+                  type="text"
+                  value={srtRemoteUrl}
+                  onChange={e => setSrtRemoteUrl(e.target.value)}
+                  placeholder="123.123.123.123:9003"
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-white"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Connects to a 3rd-party SRT server. Accepts MPEG-TS (audio + video), extracts audio.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Buffer Latency: {srtLatencyMs}ms</label>
+                <input
+                  type="range"
+                  min="20"
+                  max="1000"
+                  step="10"
+                  value={srtLatencyMs}
+                  onChange={e => setSrtLatencyMs(parseInt(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>20ms (fast)</span>
+                  <span>1000ms (safe)</span>
+                </div>
               </div>
             </div>
           )}
@@ -2781,7 +2834,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
           <div className="mt-8">
             <button
               onClick={handleLaunch}
-              disabled={launching || (audioSource === 'phone' && !phoneNumber) || (audioSource === 'web' && !webUrl) || (audioSource === 'satellite' && selectedSatStreamId === null)}
+              disabled={launching || (audioSource === 'phone' && !phoneNumber) || (audioSource === 'web' && !webUrl) || (audioSource === 'satellite' && selectedSatStreamId === null) || (audioSource === 'srt' && !srtRemoteUrl)}
               className={`w-full font-bold py-3 px-4 rounded ${
                 launching 
                   ? 'bg-gray-600 cursor-not-allowed' 
@@ -3126,6 +3179,44 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                 >
                   {llmPrediction ? '🔮 LLM: ON' : '🔮 LLM: OFF'}
                 </button>
+
+                {/* SRT Latency Live Adjust */}
+                {audioSource === 'srt' && sessionId && (
+                  <div className="flex items-center gap-2 bg-gray-700/50 rounded px-2 py-1">
+                    <span className="text-xs text-gray-400">Buffer:</span>
+                    <input
+                      type="range"
+                      min="20"
+                      max="1000"
+                      step="10"
+                      value={srtLatencyLive}
+                      onChange={e => setSrtLatencyLive(parseInt(e.target.value))}
+                      className="w-24"
+                    />
+                    <span className="text-xs text-gray-300 w-12">{srtLatencyLive}ms</span>
+                    <button
+                      onClick={async () => {
+                        setSrtLatencyUpdating(true);
+                        try {
+                          const res = await fetchWithAuth(`${EC2_BASE}/session/${encodeURIComponent(sessionId)}/srt-latency`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ latency_ms: srtLatencyLive }),
+                          });
+                          if (!res.ok) throw new Error(await res.text());
+                        } catch (err: unknown) {
+                          setError(err instanceof Error ? err.message : String(err));
+                        } finally {
+                          setSrtLatencyUpdating(false);
+                        }
+                      }}
+                      disabled={srtLatencyUpdating}
+                      className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded text-xs"
+                    >
+                      {srtLatencyUpdating ? '...' : 'Apply'}
+                    </button>
+                  </div>
+                )}
                 
                 {/* Q&A Triggered Status - show if Q&A has been triggered */}
                 {containerState?.qa_started && (

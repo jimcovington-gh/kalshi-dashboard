@@ -84,8 +84,15 @@ export default function EventTraderPage() {
   const [sessionIdInput, setSessionIdInput] = useState('');
   const [connected, setConnected] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [startingSession, setStartingSession] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Audio source configuration
+  const [audioSourceType, setAudioSourceType] = useState<'srt_url' | 'test_clip' | 'none'>('none');
+  const [srtUrl, setSrtUrl] = useState('');
+  const [dryRun, setDryRun] = useState(true);
 
   // Available sessions from API
   const [availableSessions, setAvailableSessions] = useState<AvailableSession[]>([]);
@@ -255,10 +262,21 @@ export default function EventTraderPage() {
     [wsSend]
   );
 
-  // Start session
-  function handleConnect() {
+  // Start session — calls POST /session/start to spawn worker, then connects WebSocket
+  async function handleConnect() {
     const id = sessionIdInput.trim();
     if (!id) return;
+
+    // Determine SRT URL
+    let srt = '';
+    if (audioSourceType === 'srt_url') {
+      srt = srtUrl.trim();
+      if (!srt) {
+        setStartError('Enter an SRT URL');
+        return;
+      }
+    }
+
     // Reset state for new session
     setTranscriptEntries([]);
     setTrades([]);
@@ -271,13 +289,62 @@ export default function EventTraderPage() {
     setAutoTriggered(false);
     setManualTriggered(false);
     setTriggerAlertPhrase(null);
-    setSessionId(id);
+    setStartError(null);
+    setStartingSession(true);
+
+    try {
+      // First check if a session is already running
+      const statusResp = await fetch(`${API_BASE}/status`);
+      if (statusResp.ok) {
+        const statusData = await statusResp.json();
+        if (statusData.active_session?.session_id === id) {
+          // Worker already running for this session — skip start, just connect WS
+          setSessionId(id);
+          return;
+        }
+        if (statusData.active_session) {
+          // Different session running — stop it first
+          await fetch(`${API_BASE}/session/${statusData.active_session.session_id}/stop`, { method: 'POST' });
+        }
+      }
+
+      // Start the worker with audio source config
+      const body: Record<string, unknown> = {
+        session_id: id,
+        srt_url: srt,
+        dry_run: dryRun,
+      };
+
+      const resp = await fetch(`${API_BASE}/session/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err.detail ?? `HTTP ${resp.status}`);
+      }
+
+      // Worker started — now connect WebSocket
+      setSessionId(id);
+    } catch (e) {
+      setStartError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStartingSession(false);
+    }
   }
 
-  function handleDisconnect() {
+  async function handleDisconnect() {
     ws.current?.close();
     ws.current = null;
     if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+    // Stop the worker on the server
+    if (sessionId) {
+      try {
+        await fetch(`${API_BASE}/session/${sessionId}/stop`, { method: 'POST' });
+      } catch { /* ignore — server might already be stopped */ }
+    }
     setSessionId('');
     setConnected(false);
     setReconnecting(false);
@@ -299,6 +366,7 @@ export default function EventTraderPage() {
             Select an event session to connect and start trading.
           </p>
 
+          {/* Session selector */}
           <label className="block text-sm text-gray-400 mb-1">Event Session</label>
           {loadingSessions ? (
             <div className="w-full bg-gray-700 text-gray-500 rounded-lg px-4 py-2.5 border border-gray-600 mb-4 animate-pulse">
@@ -330,12 +398,74 @@ export default function EventTraderPage() {
             </div>
           )}
 
+          {/* Audio source */}
+          <label className="block text-sm text-gray-400 mb-1 mt-2">Audio Source</label>
+          <div className="flex gap-2 mb-3">
+            {[
+              { value: 'none' as const, label: 'None (dry run)' },
+              { value: 'srt_url' as const, label: 'SRT URL' },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setAudioSourceType(opt.value)}
+                className={`flex-1 text-sm py-2 px-3 rounded-lg border transition-colors ${
+                  audioSourceType === opt.value
+                    ? 'bg-emerald-900/50 border-emerald-600 text-emerald-300'
+                    : 'bg-gray-700 border-gray-600 text-gray-400 hover:border-gray-500'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {audioSourceType === 'srt_url' && (
+            <div className="mb-3">
+              <input
+                type="text"
+                value={srtUrl}
+                onChange={(e) => setSrtUrl(e.target.value)}
+                placeholder="srt://host:port or host:port"
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2.5 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-mono"
+              />
+              <p className="text-gray-500 text-xs mt-1">
+                SRT caller mode — connects outbound to the given URL.
+                Use for satellite feeds or YouTube via ffmpeg bridge.
+              </p>
+            </div>
+          )}
+
+          {/* Dry run toggle */}
+          <label className="flex items-center gap-2 text-sm text-gray-400 mb-4 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={dryRun}
+              onChange={(e) => setDryRun(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-emerald-500 focus:ring-emerald-500"
+            />
+            Dry run (no real trades)
+          </label>
+
+          {/* Error message */}
+          {startError && (
+            <div className="bg-red-900/30 border border-red-700 rounded-lg px-3 py-2 mb-3 text-sm text-red-300">
+              {startError}
+            </div>
+          )}
+
           <button
             onClick={handleConnect}
-            disabled={!sessionIdInput.trim()}
+            disabled={!sessionIdInput.trim() || startingSession}
             className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:opacity-50 text-white font-medium rounded-lg px-4 py-2.5 transition-colors"
           >
-            Connect
+            {startingSession ? (
+              <span className="flex items-center justify-center gap-2">
+                <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Starting worker...
+              </span>
+            ) : (
+              'Connect'
+            )}
           </button>
         </div>
       </div>

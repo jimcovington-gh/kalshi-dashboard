@@ -90,9 +90,18 @@ export default function EventTraderPage() {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Audio source configuration
-  const [audioSourceType, setAudioSourceType] = useState<'srt_url' | 'test_clip' | 'none'>('none');
+  const [audioSourceType, setAudioSourceType] = useState<'srt_url' | 'youtube' | 'none'>('none');
   const [srtUrl, setSrtUrl] = useState('');
+  const [youtubeUrl, setYoutubeUrl] = useState('');
   const [dryRun, setDryRun] = useState(true);
+
+  // Audio playback
+  const [audioMuted, setAudioMuted] = useState(false);
+  const [audioVolume, setAudioVolume] = useState(0.8);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const nextPlayTimeRef = useRef<number>(0);
+  const audioChunkCount = useRef<number>(0);
 
   // Available sessions from API
   const [availableSessions, setAvailableSessions] = useState<AvailableSession[]>([]);
@@ -140,6 +149,60 @@ export default function EventTraderPage() {
     }
   }, []);
 
+  // Audio playback — PCM s16le 16kHz mono
+  const JITTER_BUFFER_MS = 50;
+
+  const initAudioContext = useCallback(() => {
+    if (!audioContextRef.current) {
+      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({
+        sampleRate: 16000,
+      });
+      audioContextRef.current = ctx;
+      const gainNode = ctx.createGain();
+      gainNode.connect(ctx.destination);
+      gainNode.gain.value = audioMuted ? 0 : audioVolume;
+      gainNodeRef.current = gainNode;
+    }
+    return audioContextRef.current;
+  }, [audioMuted, audioVolume]);
+
+  const playAudioChunk = useCallback((arrayBuffer: ArrayBuffer) => {
+    audioChunkCount.current++;
+    if (audioMuted) return;
+    if (arrayBuffer.byteLength < 100) return; // skip tiny/corrupt chunks
+    try {
+      const ctx = initAudioContext();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const int16 = new Int16Array(arrayBuffer);
+      const floats = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) floats[i] = int16[i] / 32768.0;
+
+      const buf = ctx.createBuffer(1, floats.length, 16000);
+      buf.copyToChannel(floats, 0);
+
+      const now = ctx.currentTime;
+      if (nextPlayTimeRef.current <= now) {
+        nextPlayTimeRef.current = now + JITTER_BUFFER_MS / 1000;
+      }
+
+      const source = ctx.createBufferSource();
+      source.buffer = buf;
+      source.connect(gainNodeRef.current || ctx.destination);
+      source.start(nextPlayTimeRef.current);
+      nextPlayTimeRef.current += floats.length / 16000;
+    } catch (err) {
+      console.error('Audio playback error:', err);
+    }
+  }, [audioMuted, initAudioContext]);
+
+  // Update volume when slider changes
+  useEffect(() => {
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.value = audioMuted ? 0 : audioVolume;
+    }
+  }, [audioVolume, audioMuted]);
+
   // WebSocket connection
   useEffect(() => {
     if (!sessionId) return;
@@ -147,14 +210,23 @@ export default function EventTraderPage() {
     function connect() {
       setReconnecting(false);
       const socket = new WebSocket(`${WS_URL}/${sessionId}`);
+      socket.binaryType = 'arraybuffer';
       ws.current = socket;
 
       socket.onopen = () => {
         setConnected(true);
         setReconnecting(false);
+        // Request audio streaming from worker
+        socket.send(JSON.stringify({ type: 'enable_audio_stream' }));
       };
 
       socket.onmessage = (evt) => {
+        // Binary frame = audio PCM data
+        if (evt.data instanceof ArrayBuffer) {
+          playAudioChunk(evt.data);
+          return;
+        }
+
         const msg = JSON.parse(evt.data);
         switch (msg.type) {
           case 'state':
@@ -269,10 +341,17 @@ export default function EventTraderPage() {
 
     // Determine SRT URL
     let srt = '';
+    let yt = '';
     if (audioSourceType === 'srt_url') {
       srt = srtUrl.trim();
       if (!srt) {
         setStartError('Enter an SRT URL');
+        return;
+      }
+    } else if (audioSourceType === 'youtube') {
+      yt = youtubeUrl.trim();
+      if (!yt) {
+        setStartError('Enter a YouTube URL');
         return;
       }
     }
@@ -312,6 +391,7 @@ export default function EventTraderPage() {
       const body: Record<string, unknown> = {
         session_id: id,
         srt_url: srt,
+        youtube_url: yt,
         dry_run: dryRun,
       };
 
@@ -339,6 +419,13 @@ export default function EventTraderPage() {
     ws.current?.close();
     ws.current = null;
     if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+    // Clean up audio context
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    nextPlayTimeRef.current = 0;
+    audioChunkCount.current = 0;
     // Stop the worker on the server
     if (sessionId) {
       try {
@@ -404,6 +491,7 @@ export default function EventTraderPage() {
             {[
               { value: 'none' as const, label: 'None (dry run)' },
               { value: 'srt_url' as const, label: 'SRT URL' },
+              { value: 'youtube' as const, label: 'YouTube' },
             ].map((opt) => (
               <button
                 key={opt.value}
@@ -431,6 +519,22 @@ export default function EventTraderPage() {
               <p className="text-gray-500 text-xs mt-1">
                 SRT caller mode — connects outbound to the given URL.
                 Use for satellite feeds or YouTube via ffmpeg bridge.
+              </p>
+            </div>
+          )}
+
+          {audioSourceType === 'youtube' && (
+            <div className="mb-3">
+              <input
+                type="text"
+                value={youtubeUrl}
+                onChange={(e) => setYoutubeUrl(e.target.value)}
+                placeholder="https://www.youtube.com/watch?v=..."
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2.5 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-mono"
+              />
+              <p className="text-gray-500 text-xs mt-1">
+                YouTube live stream — auto-launches satellite ffmpeg bridge.
+                ~3s latency from HLS extraction.
               </p>
             </div>
           )}
@@ -503,6 +607,38 @@ export default function EventTraderPage() {
           </button>
         </div>
       </div>
+
+      {/* Audio player controls */}
+      {(audioSourceType === 'srt_url' || audioSourceType === 'youtube') && (
+        <div className="flex items-center gap-3 mb-4 bg-gray-800 rounded-lg px-4 py-2 border border-gray-700">
+          <span className="text-gray-400 text-sm">🔊 Audio</span>
+          <button
+            onClick={() => setAudioMuted(!audioMuted)}
+            className={`text-sm px-2 py-1 rounded border transition-colors ${
+              audioMuted
+                ? 'bg-red-900/40 border-red-700 text-red-400'
+                : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-500'
+            }`}
+          >
+            {audioMuted ? '🔇 Muted' : '🔊 Live'}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={audioVolume}
+            onChange={(e) => setAudioVolume(parseFloat(e.target.value))}
+            className="w-24 accent-emerald-500"
+          />
+          <span className="text-gray-500 text-xs">{Math.round(audioVolume * 100)}%</span>
+          {audioChunkCount.current > 0 && (
+            <span className="text-gray-600 text-xs ml-auto">
+              {audioChunkCount.current} chunks
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Errors banner */}
       {errors.length > 0 && (

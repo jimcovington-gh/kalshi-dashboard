@@ -65,8 +65,16 @@ interface ScoreUpdate {
 // --- Constants ---
 
 const VOICE_TRADER_HOST = process.env.NEXT_PUBLIC_VOICE_TRADER_HOST || 'voice.apexmarkets.us';
+const API_BASE = `https://${VOICE_TRADER_HOST}:9080`;
 const WS_URL = `wss://${VOICE_TRADER_HOST}:9080/ws`;
 const MAX_TRANSCRIPT_ENTRIES = 500;
+
+interface AvailableSession {
+  session_id: string;
+  event_name: string;
+  event_date: string;
+  status: string;
+}
 
 // --- Page ---
 
@@ -78,6 +86,10 @@ export default function EventTraderPage() {
   const [reconnecting, setReconnecting] = useState(false);
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Available sessions from API
+  const [availableSessions, setAvailableSessions] = useState<AvailableSession[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(true);
 
   // Session data
   const [sessionState, setSessionState] = useState<SessionState | null>(null);
@@ -91,6 +103,28 @@ export default function EventTraderPage() {
   const [autoTriggered, setAutoTriggered] = useState(false);
   const [manualTriggered, setManualTriggered] = useState(false);
   const [triggerAlertPhrase, setTriggerAlertPhrase] = useState<string | null>(null);
+
+  // Fetch available sessions on mount
+  useEffect(() => {
+    async function fetchSessions() {
+      try {
+        const resp = await fetch(`${API_BASE}/sessions`);
+        if (resp.ok) {
+          const data = await resp.json();
+          setAvailableSessions(data.sessions ?? []);
+          // Auto-select first session if none selected
+          if (data.sessions?.length > 0 && !sessionIdInput) {
+            setSessionIdInput(data.sessions[0].session_id);
+          }
+        }
+      } catch {
+        // API might not be reachable yet — that's OK
+      } finally {
+        setLoadingSessions(false);
+      }
+    }
+    fetchSessions();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // WebSocket send helper
   const wsSend = useCallback((msg: Record<string, unknown>) => {
@@ -262,18 +296,39 @@ export default function EventTraderPage() {
         <div className="max-w-md w-full bg-gray-800 rounded-xl border border-gray-700 p-8">
           <h1 className="text-2xl font-bold mb-2">🎬 Event Trader</h1>
           <p className="text-gray-400 text-sm mb-6">
-            Connect to a live event trading session to monitor and control trades in real time.
+            Select an event session to connect and start trading.
           </p>
 
-          <label className="block text-sm text-gray-400 mb-1">Session ID</label>
-          <input
-            type="text"
-            value={sessionIdInput}
-            onChange={(e) => setSessionIdInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
-            placeholder="e.g. oscars-2026"
-            className="w-full bg-gray-700 text-white rounded-lg px-4 py-2.5 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 mb-4"
-          />
+          <label className="block text-sm text-gray-400 mb-1">Event Session</label>
+          {loadingSessions ? (
+            <div className="w-full bg-gray-700 text-gray-500 rounded-lg px-4 py-2.5 border border-gray-600 mb-4 animate-pulse">
+              Loading sessions...
+            </div>
+          ) : availableSessions.length > 0 ? (
+            <select
+              value={sessionIdInput}
+              onChange={(e) => setSessionIdInput(e.target.value)}
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2.5 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 mb-4 appearance-none cursor-pointer"
+            >
+              {availableSessions.map((s) => (
+                <option key={s.session_id} value={s.session_id}>
+                  {s.event_name} — {s.event_date} ({s.status})
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="mb-4">
+              <input
+                type="text"
+                value={sessionIdInput}
+                onChange={(e) => setSessionIdInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
+                placeholder="e.g. OSCARS-2026"
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2.5 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              <p className="text-yellow-500 text-xs mt-1">No sessions found — enter ID manually</p>
+            </div>
+          )}
 
           <button
             onClick={handleConnect}

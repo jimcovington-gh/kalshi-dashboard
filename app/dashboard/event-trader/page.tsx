@@ -100,7 +100,7 @@ export default function EventTraderPage() {
 
   // Audio source configuration
   const [audioSourceType, setAudioSourceType] = useState<'srt_url' | 'youtube' | 'none'>('none');
-  const [srtUrl, setSrtUrl] = useState('');
+  const [srtUrl, setSrtUrl] = useState('srt://99.233.20.117:8600');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [dryRun, setDryRun] = useState(true);
 

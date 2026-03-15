@@ -180,7 +180,7 @@ export default function EventTraderPage() {
   const initAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
       const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({
-        sampleRate: 16000,
+        sampleRate: 8000,
       });
       audioContextRef.current = ctx;
       const gainNode = ctx.createGain();
@@ -203,7 +203,7 @@ export default function EventTraderPage() {
       const floats = new Float32Array(int16.length);
       for (let i = 0; i < int16.length; i++) floats[i] = int16[i] / 32768.0;
 
-      const buf = ctx.createBuffer(1, floats.length, 16000);
+      const buf = ctx.createBuffer(1, floats.length, 8000);
       buf.copyToChannel(floats, 0);
 
       const now = ctx.currentTime;
@@ -216,7 +216,7 @@ export default function EventTraderPage() {
       source.connect(gainNodeRef.current || ctx.destination);
       source.onended = () => { source.disconnect(); };
       source.start(nextPlayTimeRef.current);
-      nextPlayTimeRef.current += floats.length / 16000;
+      nextPlayTimeRef.current += floats.length / 8000;
     } catch (err) {
       const now = Date.now();
       if (now - lastAudioErrorRef.current > 1000) {

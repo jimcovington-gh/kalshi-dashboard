@@ -76,6 +76,14 @@ interface AvailableSession {
   status: string;
 }
 
+// --- Helpers ---
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 // --- Page ---
 
 export default function EventTraderPage() {
@@ -119,6 +127,15 @@ export default function EventTraderPage() {
   const [autoTriggered, setAutoTriggered] = useState(false);
   const [manualTriggered, setManualTriggered] = useState(false);
   const [triggerAlertPhrase, setTriggerAlertPhrase] = useState<string | null>(null);
+
+  // Clip player state (YouTube test mode)
+  const [clipStatus, setClipStatus] = useState<{
+    loaded: boolean;
+    playing: boolean;
+    position_s: number;
+    duration_s: number;
+    file: string;
+  } | null>(null);
 
   // Fetch available sessions on mount
   useEffect(() => {
@@ -234,6 +251,8 @@ export default function EventTraderPage() {
             // Sync trigger gate flags from server state
             if ('auto_triggered' in msg.data) setAutoTriggered(msg.data.auto_triggered);
             if ('manual_triggered' in msg.data) setManualTriggered(msg.data.manual_triggered);
+            // Sync initial clip status from state
+            if (msg.data.clip_status) setClipStatus(msg.data.clip_status);
             break;
 
           case 'trigger_alert': {
@@ -278,6 +297,10 @@ export default function EventTraderPage() {
             break;
 
           case 'pong':
+            break;
+
+          case 'clip_status':
+            setClipStatus(msg.data);
             break;
 
           default:
@@ -368,6 +391,7 @@ export default function EventTraderPage() {
     setAutoTriggered(false);
     setManualTriggered(false);
     setTriggerAlertPhrase(null);
+    setClipStatus(null);
     setStartError(null);
     setStartingSession(true);
 
@@ -533,8 +557,7 @@ export default function EventTraderPage() {
                 className="w-full bg-gray-700 text-white rounded-lg px-4 py-2.5 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-mono"
               />
               <p className="text-gray-500 text-xs mt-1">
-                YouTube live stream — auto-launches satellite ffmpeg bridge.
-                ~3s latency from HLS extraction.
+                Downloads audio locally for testing with playback controls (play, pause, seek, rewind).
               </p>
             </div>
           )}
@@ -565,7 +588,7 @@ export default function EventTraderPage() {
             {startingSession ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Starting worker...
+                {audioSourceType === 'youtube' ? 'Downloading clip...' : 'Starting worker...'}
               </span>
             ) : (
               'Connect'
@@ -637,6 +660,55 @@ export default function EventTraderPage() {
               {audioChunkCount.current} chunks
             </span>
           )}
+        </div>
+      )}
+
+      {/* Clip player controls (YouTube test mode) */}
+      {clipStatus && (
+        <div className="flex items-center gap-3 mb-4 bg-gray-800 rounded-lg px-4 py-2 border border-gray-700">
+          <span className="text-gray-400 text-sm">🎬 Clip</span>
+          <button
+            onClick={() => wsSend({ type: clipStatus.playing ? 'clip_pause' : 'clip_play' })}
+            className="text-sm px-3 py-1 rounded border bg-gray-700 border-gray-600 text-gray-200 hover:border-emerald-500 hover:text-emerald-400 transition-colors font-medium"
+          >
+            {clipStatus.playing ? '⏸ Pause' : '▶ Play'}
+          </button>
+          <button
+            onClick={() => wsSend({ type: 'clip_reset' })}
+            className="text-sm px-2 py-1 rounded border bg-gray-700 border-gray-600 text-gray-400 hover:border-gray-500 transition-colors"
+            title="Reset to beginning"
+          >
+            ⏮
+          </button>
+          {/* Seek slider */}
+          <input
+            type="range"
+            min={0}
+            max={clipStatus.duration_s}
+            step={0.5}
+            value={clipStatus.position_s}
+            onChange={(e) => wsSend({ type: 'clip_seek', position: parseFloat(e.target.value) })}
+            className="flex-1 accent-emerald-500"
+          />
+          {/* Time display */}
+          <span className="text-gray-300 text-sm font-mono tabular-nums whitespace-nowrap">
+            {formatTime(clipStatus.position_s)} / {formatTime(clipStatus.duration_s)}
+          </span>
+          {/* Quick seek buttons */}
+          <button
+            onClick={() => wsSend({ type: 'clip_seek', position: Math.max(0, clipStatus.position_s - 10) })}
+            className="text-xs px-1.5 py-0.5 rounded border border-gray-600 text-gray-400 hover:text-gray-200 transition-colors"
+            title="Back 10s"
+          >
+            -10s
+          </button>
+          <button
+            onClick={() => wsSend({ type: 'clip_seek', position: Math.min(clipStatus.duration_s, clipStatus.position_s + 10) })}
+            className="text-xs px-1.5 py-0.5 rounded border border-gray-600 text-gray-400 hover:text-gray-200 transition-colors"
+            title="Forward 10s"
+          >
+            +10s
+          </button>
         </div>
       )}
 

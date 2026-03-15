@@ -174,14 +174,17 @@ export default function EventTraderPage() {
     }
   }, []);
 
-  // Audio playback — PCM s16le 16kHz mono
+  // Audio playback — PCM s16le 8kHz mono
+  // NOTE: Do NOT set sampleRate on AudioContext — let it use the system default
+  // (typically 48kHz). Forcing 8kHz causes the OS audio subsystem to do a crude
+  // upsample to hardware rate, producing warble/distortion. Instead, declare 8kHz
+  // only in createBuffer() so Web Audio's high-quality internal resampler handles it.
+  const AUDIO_SAMPLE_RATE = 16000;
   const JITTER_BUFFER_MS = 50;
 
   const initAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
-      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({
-        sampleRate: 8000,
-      });
+      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       audioContextRef.current = ctx;
       const gainNode = ctx.createGain();
       gainNode.connect(ctx.destination);
@@ -203,7 +206,7 @@ export default function EventTraderPage() {
       const floats = new Float32Array(int16.length);
       for (let i = 0; i < int16.length; i++) floats[i] = int16[i] / 32768.0;
 
-      const buf = ctx.createBuffer(1, floats.length, 8000);
+      const buf = ctx.createBuffer(1, floats.length, AUDIO_SAMPLE_RATE);
       buf.copyToChannel(floats, 0);
 
       const now = ctx.currentTime;
@@ -216,7 +219,7 @@ export default function EventTraderPage() {
       source.connect(gainNodeRef.current || ctx.destination);
       source.onended = () => { source.disconnect(); };
       source.start(nextPlayTimeRef.current);
-      nextPlayTimeRef.current += floats.length / 8000;
+      nextPlayTimeRef.current += floats.length / AUDIO_SAMPLE_RATE;
     } catch (err) {
       const now = Date.now();
       if (now - lastAudioErrorRef.current > 1000) {

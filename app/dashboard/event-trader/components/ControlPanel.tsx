@@ -51,6 +51,8 @@ export const ControlPanel = React.memo(function ControlPanel({
   onConfigUpdate,
 }: ControlPanelProps) {
   const [betSize, setBetSize] = useState(2000);
+  const [betSizePending, setBetSizePending] = useState(false);
+  const [betSizeConfirmed, setBetSizeConfirmed] = useState(false);
 
   const idleCategories = categories.filter((c) => c.state === 'idle');
   const armedCategory = categories.find((c) => c.category_id === currentCategory);
@@ -60,11 +62,16 @@ export const ControlPanel = React.memo(function ControlPanel({
     const num = parseInt(value, 10);
     if (!isNaN(num) && num > 0) {
       setBetSize(num);
+      setBetSizePending(true);
+      setBetSizeConfirmed(false);
     }
   }
 
   function handleBetSizeCommit() {
     onConfigUpdate({ position_size_dollars: betSize });
+    setBetSizePending(false);
+    setBetSizeConfirmed(true);
+    setTimeout(() => setBetSizeConfirmed(false), 2000);
   }
 
   const isArmed = !!currentCategory && !isIdentifying;
@@ -221,18 +228,30 @@ export const ControlPanel = React.memo(function ControlPanel({
 
         {/* Bet Size */}
         <div className="flex items-center gap-1.5">
-          <label className="text-xs text-gray-400">Bet size:</label>
-          <div className="flex items-center">
+          <label className="text-xs text-gray-400">Trade size:</label>
+          <div className="flex items-center gap-1">
             <span className="text-gray-400 text-sm mr-0.5">$</span>
             <input
               type="number"
               value={betSize}
               onChange={(e) => handleBetSizeChange(e.target.value)}
-              onBlur={handleBetSizeCommit}
               onKeyDown={(e) => e.key === 'Enter' && handleBetSizeCommit()}
               min={1}
               className="w-20 bg-gray-700 text-white text-sm rounded px-2 py-1.5 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            <button
+              onClick={handleBetSizeCommit}
+              disabled={!connected || !betSizePending}
+              className={`text-xs font-medium rounded px-2 py-1.5 transition-colors ${
+                betSizeConfirmed
+                  ? 'bg-green-700 text-green-200 border border-green-600'
+                  : betSizePending
+                  ? 'bg-blue-700 hover:bg-blue-600 text-white border border-blue-500'
+                  : 'bg-gray-700 text-gray-400 border border-gray-600'
+              } disabled:opacity-40`}
+            >
+              {betSizeConfirmed ? '✓ Set' : 'Set Trade Size'}
+            </button>
           </div>
         </div>
       </div>

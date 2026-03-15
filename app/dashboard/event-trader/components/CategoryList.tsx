@@ -39,7 +39,7 @@ interface CategoryListProps {
   onArm: (categoryId: string) => void;
 }
 
-export function CategoryList({ categories, currentCategory, onArm }: CategoryListProps) {
+export const CategoryList = React.memo(function CategoryList({ categories, currentCategory, onArm }: CategoryListProps) {
   return (
     <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
       <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
@@ -85,4 +85,4 @@ export function CategoryList({ categories, currentCategory, onArm }: CategoryLis
       </div>
     </div>
   );
-}
+});

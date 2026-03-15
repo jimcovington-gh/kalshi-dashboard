@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import type MpegtsModule from 'mpegts.js';
 import { CategoryList } from './components/CategoryList';
 import { NomineeList } from './components/NomineeList';
 import { TranscriptLog } from './components/TranscriptLog';
@@ -110,6 +111,7 @@ export default function EventTraderPage() {
   const gainNodeRef = useRef<GainNode | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
   const audioChunkCount = useRef<number>(0);
+  const lastAudioErrorRef = useRef<number>(0);
 
   // Available sessions from API
   const [availableSessions, setAvailableSessions] = useState<AvailableSession[]>([]);
@@ -136,6 +138,12 @@ export default function EventTraderPage() {
     duration_s: number;
     file: string;
   } | null>(null);
+
+  // Video monitor (MPEG-TS from SRT)
+  const [videoAvailable, setVideoAvailable] = useState(false);
+  const [videoExpanded, setVideoExpanded] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mpPlayerRef = useRef<MpegtsModule.Player | null>(null);
 
   // Fetch available sessions on mount
   useEffect(() => {
@@ -206,10 +214,15 @@ export default function EventTraderPage() {
       const source = ctx.createBufferSource();
       source.buffer = buf;
       source.connect(gainNodeRef.current || ctx.destination);
+      source.onended = () => { source.disconnect(); };
       source.start(nextPlayTimeRef.current);
       nextPlayTimeRef.current += floats.length / 16000;
     } catch (err) {
-      console.error('Audio playback error:', err);
+      const now = Date.now();
+      if (now - lastAudioErrorRef.current > 1000) {
+        console.error('Audio playback error:', err);
+        lastAudioErrorRef.current = now;
+      }
     }
   }, [audioMuted, initAudioContext]);
 
@@ -287,8 +300,14 @@ export default function EventTraderPage() {
 
           case 'trade': {
             const trade = msg.data as TradeInfo;
-            setTrades((prev) => [...prev, trade]);
-            setLatencies((prev) => [...prev, trade.total_latency_ms]);
+            setTrades((prev) => {
+              const next = [...prev, trade];
+              return next.length > MAX_TRANSCRIPT_ENTRIES ? next.slice(-MAX_TRANSCRIPT_ENTRIES) : next;
+            });
+            setLatencies((prev) => {
+              const next = [...prev, trade.total_latency_ms];
+              return next.length > MAX_TRANSCRIPT_ENTRIES ? next.slice(-MAX_TRANSCRIPT_ENTRIES) : next;
+            });
             break;
           }
 
@@ -335,6 +354,80 @@ export default function EventTraderPage() {
       setReconnecting(false);
     };
   }, [sessionId, wsSend]);
+
+  // Video player — MPEG-TS from SRT source
+  useEffect(() => {
+    if (!sessionId || !connected || !videoAvailable || !videoRef.current) return;
+
+    let destroyed = false;
+    let player: MpegtsModule.Player | null = null;
+    let errorRetries = 0;
+    const MAX_VIDEO_RETRIES = 3;
+
+    (async () => {
+      const mpegts = (await import('mpegts.js')).default;
+      if (destroyed) return;
+      if (!mpegts.getFeatureList().mseLivePlayback) return;
+
+      const videoUrl = `${API_BASE}/session/${sessionId}/video`;
+      player = mpegts.createPlayer(
+        { type: 'mpegts', isLive: true, url: videoUrl },
+        {
+          enableWorker: true,
+          liveBufferLatencyChasing: true,
+          liveBufferLatencyMaxLatency: 1.5,
+          liveBufferLatencyMinRemain: 0.3,
+          enableStashBuffer: false,
+          stashInitialSize: 128 * 1024,
+        }
+      );
+      if (destroyed || !videoRef.current) { player.destroy(); return; }
+
+      mpPlayerRef.current = player;
+      player.attachMediaElement(videoRef.current);
+      player.load();
+      const playResult = player.play();
+      if (playResult && typeof playResult.catch === 'function') {
+        playResult.catch(() => {
+          if (videoRef.current) { videoRef.current.muted = true; player?.play(); }
+        });
+      }
+      player.on(mpegts.Events.ERROR, () => {
+        if (errorRetries >= MAX_VIDEO_RETRIES || destroyed) return;
+        errorRetries++;
+        setTimeout(() => {
+          if (!destroyed && player) {
+            try { player.unload(); player.load(); videoRef.current?.play().catch(() => {}); } catch { /* ignore */ }
+          }
+        }, 2000);
+      });
+    })();
+
+    return () => {
+      destroyed = true;
+      if (player) {
+        try { player.pause(); player.unload(); player.detachMediaElement(); player.destroy(); } catch { /* ignore */ }
+      }
+      mpPlayerRef.current = null;
+    };
+  }, [sessionId, connected, videoAvailable]);
+
+  // Cleanup on unmount (e.g. browser back button without clicking Stop)
+  useEffect(() => {
+    return () => {
+      if (mpPlayerRef.current) {
+        try { mpPlayerRef.current.pause(); mpPlayerRef.current.unload(); mpPlayerRef.current.detachMediaElement(); mpPlayerRef.current.destroy(); } catch { /* ignore */ }
+        mpPlayerRef.current = null;
+      }
+      if (audioContextRef.current?.state !== 'closed') {
+        audioContextRef.current?.close();
+      }
+      audioContextRef.current = null;
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      ws.current?.close();
+      ws.current = null;
+    };
+  }, []);
 
   // Commands
   const handleArm = useCallback(
@@ -393,6 +486,7 @@ export default function EventTraderPage() {
     setTriggerAlertPhrase(null);
     setClipStatus(null);
     setStartError(null);
+    audioChunkCount.current = 0;
     setStartingSession(true);
 
     try {
@@ -400,14 +494,26 @@ export default function EventTraderPage() {
       const statusResp = await fetch(`${API_BASE}/status`);
       if (statusResp.ok) {
         const statusData = await statusResp.json();
-        if (statusData.active_session?.session_id === id) {
-          // Worker already running for this session — skip start, just connect WS
-          setSessionId(id);
-          return;
-        }
-        if (statusData.active_session) {
+        const activeId = statusData.active_session?.session_id;
+        if (activeId === id) {
+          // Same session ID — check if audio source changed
+          const wasClip = statusData.active_session?.clip_file;
+          const wasSrt = statusData.active_session?.srt_url;
+          const wantsYouTube = yt !== '';
+          const wantsSrt = srt !== '';
+          const audioChanged = (wantsYouTube && !wasClip) || (wantsSrt && wasSrt !== srt) || (!wantsYouTube && !wantsSrt && (wasClip || wasSrt));
+          if (!audioChanged) {
+            // Same config — just reconnect WS
+            setSessionId(id);
+            return;
+          }
+          // Audio config changed — stop old worker, start fresh
+          await fetch(`${API_BASE}/session/${activeId}/stop`, { method: 'POST' });
+          // Brief pause for process cleanup
+          await new Promise(r => setTimeout(r, 500));
+        } else if (activeId) {
           // Different session running — stop it first
-          await fetch(`${API_BASE}/session/${statusData.active_session.session_id}/stop`, { method: 'POST' });
+          await fetch(`${API_BASE}/session/${activeId}/stop`, { method: 'POST' });
         }
       }
 
@@ -430,6 +536,9 @@ export default function EventTraderPage() {
         throw new Error(err.detail ?? `HTTP ${resp.status}`);
       }
 
+      const respData = await resp.json();
+      setVideoAvailable(!!respData.video_available);
+
       // Worker started — now connect WebSocket
       setSessionId(id);
     } catch (e) {
@@ -443,6 +552,12 @@ export default function EventTraderPage() {
     ws.current?.close();
     ws.current = null;
     if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+    // Clean up video player
+    if (mpPlayerRef.current) {
+      try { mpPlayerRef.current.pause(); mpPlayerRef.current.unload(); mpPlayerRef.current.detachMediaElement(); mpPlayerRef.current.destroy(); } catch { /* ignore */ }
+      mpPlayerRef.current = null;
+    }
+    setVideoAvailable(false);
     // Clean up audio context
     if (audioContextRef.current) {
       audioContextRef.current.close();
@@ -624,12 +739,36 @@ export default function EventTraderPage() {
           </span>
           <button
             onClick={handleDisconnect}
-            className="text-xs text-gray-500 hover:text-red-400 border border-gray-700 rounded px-2 py-1 transition-colors"
+            className="text-sm text-red-400 hover:text-red-300 hover:bg-red-900/30 border border-red-800 rounded-lg px-3 py-1.5 transition-colors font-medium"
           >
-            Disconnect
+            ⏹ Stop & Disconnect
           </button>
         </div>
       </div>
+
+      {/* Video monitor (SRT sessions only) */}
+      {videoAvailable && (
+        <div className="mb-4 bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+          <button
+            onClick={() => setVideoExpanded(!videoExpanded)}
+            className="w-full flex items-center justify-between px-4 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+          >
+            <span>📺 Video Monitor</span>
+            <span>{videoExpanded ? '▼' : '▶'}</span>
+          </button>
+          {videoExpanded && (
+            <div className="px-4 pb-3">
+              <video
+                ref={videoRef}
+                autoPlay
+                muted
+                playsInline
+                className="w-full max-h-[360px] rounded bg-black object-contain"
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Audio player controls */}
       {(audioSourceType === 'srt_url' || audioSourceType === 'youtube') && (

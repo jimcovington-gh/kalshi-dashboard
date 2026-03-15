@@ -21,7 +21,7 @@ function formatTime(ts: number): string {
   return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-export function TranscriptLog({ entries, matchLine }: TranscriptLogProps) {
+export const TranscriptLog = React.memo(function TranscriptLog({ entries, matchLine }: TranscriptLogProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
 
@@ -68,7 +68,7 @@ export function TranscriptLog({ entries, matchLine }: TranscriptLogProps) {
           }
 
           return (
-            <div key={i} className={`${textColor} leading-relaxed`}>
+            <div key={`${entry.timestamp}-${i}`} className={`${textColor} leading-relaxed`}>
               <span className="text-gray-600">[{formatTime(entry.timestamp)}]</span>{' '}
               <span className={entry.is_final ? '' : 'italic opacity-70'}>
                 &quot;{entry.text}&quot;
@@ -83,4 +83,4 @@ export function TranscriptLog({ entries, matchLine }: TranscriptLogProps) {
       </div>
     </div>
   );
-}
+});

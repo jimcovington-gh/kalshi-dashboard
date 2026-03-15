@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 
 interface TradeInfo {
   nominee: string;
@@ -29,14 +29,18 @@ interface SessionStatsProps {
   latencies: number[];
 }
 
-export function SessionStats({ categories, trades, latencies }: SessionStatsProps) {
-  const totalCategories = categories.length;
-  const tradedCategories = categories.filter((c) => c.state === 'traded').length;
-  const totalPnl = categories.reduce((sum, c) => sum + (c.pnl ?? 0), 0);
-  const avgLatency =
-    latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : 0;
-  const totalCost = trades.reduce((sum, t) => sum + Math.abs(t.cost_dollars), 0);
-  const filledTrades = trades.filter((t) => t.contracts_filled > 0).length;
+export const SessionStats = React.memo(function SessionStats({ categories, trades, latencies }: SessionStatsProps) {
+  const { totalCategories, tradedCategories, totalPnl } = useMemo(() => ({
+    totalCategories: categories.length,
+    tradedCategories: categories.filter((c) => c.state === 'traded').length,
+    totalPnl: categories.reduce((sum, c) => sum + (c.pnl ?? 0), 0),
+  }), [categories]);
+
+  const { avgLatency, totalCost, filledTrades } = useMemo(() => ({
+    avgLatency: latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : 0,
+    totalCost: trades.reduce((sum, t) => sum + Math.abs(t.cost_dollars), 0),
+    filledTrades: trades.filter((t) => t.contracts_filled > 0).length,
+  }), [trades, latencies]);
 
   return (
     <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
@@ -59,7 +63,7 @@ export function SessionStats({ categories, trades, latencies }: SessionStatsProp
       </div>
     </div>
   );
-}
+});
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (

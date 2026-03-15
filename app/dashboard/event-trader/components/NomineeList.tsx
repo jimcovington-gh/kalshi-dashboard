@@ -16,7 +16,7 @@ interface NomineeListProps {
   matchedNominee: string | null;
 }
 
-export function NomineeList({ nominees, categoryName, matchedNominee }: NomineeListProps) {
+export const NomineeList = React.memo(function NomineeList({ nominees, categoryName, matchedNominee }: NomineeListProps) {
   if (!categoryName) {
     return (
       <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
@@ -75,4 +75,4 @@ export function NomineeList({ nominees, categoryName, matchedNominee }: NomineeL
       </div>
     </div>
   );
-}
+});

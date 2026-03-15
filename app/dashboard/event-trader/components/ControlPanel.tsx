@@ -35,7 +35,7 @@ interface ControlPanelProps {
   onConfigUpdate: (config: { position_size_dollars: number }) => void;
 }
 
-export function ControlPanel({
+export const ControlPanel = React.memo(function ControlPanel({
   categories,
   currentCategory,
   connected,
@@ -238,4 +238,4 @@ export function ControlPanel({
       </div>
     </div>
   );
-}
+});

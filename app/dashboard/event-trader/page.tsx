@@ -103,6 +103,7 @@ export default function EventTraderPage() {
   const [srtUrl, setSrtUrl] = useState('srt://99.233.20.117:8600');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [dryRun, setDryRun] = useState(true);
+  const [skipRiva, setSkipRiva] = useState(false);
 
   // Audio playback
   const [audioMuted, setAudioMuted] = useState(false);
@@ -174,17 +175,15 @@ export default function EventTraderPage() {
     }
   }, []);
 
-  // Audio playback — PCM s16le 8kHz mono
-  // NOTE: Do NOT set sampleRate on AudioContext — let it use the system default
-  // (typically 48kHz). Forcing 8kHz causes the OS audio subsystem to do a crude
-  // upsample to hardware rate, producing warble/distortion. Instead, declare 8kHz
-  // only in createBuffer() so Web Audio's high-quality internal resampler handles it.
+  // Audio playback — PCM s16le 16kHz mono
   const AUDIO_SAMPLE_RATE = 16000;
   const JITTER_BUFFER_MS = 50;
 
   const initAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
-      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({
+        sampleRate: AUDIO_SAMPLE_RATE,
+      });
       audioContextRef.current = ctx;
       const gainNode = ctx.createGain();
       gainNode.connect(ctx.destination);
@@ -526,6 +525,7 @@ export default function EventTraderPage() {
         srt_url: srt,
         youtube_url: yt,
         dry_run: dryRun,
+        skip_riva: skipRiva,
       };
 
       const resp = await fetch(`${API_BASE}/session/start`, {
@@ -681,7 +681,7 @@ export default function EventTraderPage() {
           )}
 
           {/* Dry run toggle */}
-          <label className="flex items-center gap-2 text-sm text-gray-400 mb-4 cursor-pointer select-none">
+          <label className="flex items-center gap-2 text-sm text-gray-400 mb-3 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={dryRun}
@@ -689,6 +689,17 @@ export default function EventTraderPage() {
               className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-emerald-500 focus:ring-emerald-500"
             />
             Dry run (no real trades)
+          </label>
+
+          {/* Skip Riva toggle — audio diagnosis */}
+          <label className="flex items-center gap-2 text-sm text-gray-400 mb-4 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={skipRiva}
+              onChange={(e) => setSkipRiva(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-yellow-500 focus:ring-yellow-500"
+            />
+            Skip Riva STT (audio-only, no transcription)
           </label>
 
           {/* Error message */}

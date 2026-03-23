@@ -286,7 +286,7 @@ def stop_session(session_id: str):
     else:
         domain = VOICE_TRADER_EC2_DOMAIN
     
-    api_url = f'https://{domain}:8080'
+    api_url = f'https://{domain}'
     ssl_ctx = ssl.create_default_context()
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
@@ -423,7 +423,7 @@ def launch_ec2_session(event):
     """Launch a voice trader session via HTTP API on EC2.
     
     Uses the new two-process architecture:
-    - API server (always running) on :8080
+    - API server (always running) on :8080 (nginx terminates TLS on :443)
     - Worker process spawned on demand via POST /connect
     """
     instance_id, domain, env_name = get_ec2_config(event)
@@ -451,7 +451,7 @@ def launch_ec2_session(event):
     import urllib.request
     import ssl
     
-    api_url = f'https://{domain}:8080'
+    api_url = f'https://{domain}'
     ssl_ctx = ssl.create_default_context()
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
@@ -728,7 +728,7 @@ def get_active_workers(event):
     import urllib.request
     import ssl
     
-    api_url = f'https://{domain}:8080'
+    api_url = f'https://{domain}'
     ssl_ctx = ssl.create_default_context()
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE

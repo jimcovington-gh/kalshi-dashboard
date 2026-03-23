@@ -197,6 +197,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
+  const [youtubeSrtMode, setYoutubeSrtMode] = useState(false); // false = local transcription (default), true = SRT stream
   const [srtRemoteUrl, setSrtRemoteUrl] = useState('');
   const [srtLatencyMs, setSrtLatencyMs] = useState(200);
   const [srtLatencyLive, setSrtLatencyLive] = useState(200);
@@ -1639,6 +1640,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
         }
       } else if (audioSource === 'web') {
         body.stream_url = webUrl;
+        body.youtube_srt_mode = youtubeSrtMode;
       } else if (audioSource === 'satellite') {
         body.satellite_stream_id = selectedSatStreamId;
       } else if (audioSource === 'desktop') {
@@ -2590,11 +2592,29 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                 type="text"
                 value={webUrl}
                 onChange={e => setWebUrl(e.target.value)}
-                placeholder="https://event.choruscall.com/..."
+                placeholder="https://youtube.com/watch?v=... or https://event.choruscall.com/..."
                 className="w-full bg-gray-700 rounded px-3 py-2 text-white"
               />
+              {webUrl && /youtube\.com|youtu\.be/i.test(webUrl) && (
+                <div className="flex items-center gap-2 mt-2">
+                  <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={youtubeSrtMode}
+                      onChange={e => setYoutubeSrtMode(e.target.checked)}
+                      className="rounded bg-gray-700 border-gray-600"
+                    />
+                    SRT stream mode (legacy)
+                  </label>
+                  <span className="text-xs text-gray-500">
+                    {youtubeSrtMode ? '— raw audio streamed to VT' : '— transcribed on satellite GPU (default)'}
+                  </span>
+                </div>
+              )}
               <p className="text-xs text-gray-500 mt-1">
-                ⚠️ Web streams may have 5-15 second delay. Phone is recommended.
+                {webUrl && /youtube\.com|youtu\.be/i.test(webUrl)
+                  ? '📡 YouTube audio is captured on the satellite server via residential IP'
+                  : '⚠️ Web streams may have 5-15 second delay. Phone is recommended.'}
               </p>
             </div>
           )}

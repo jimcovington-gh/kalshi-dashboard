@@ -186,8 +186,8 @@ type PageState = 'loading' | 'events' | 'setup' | 'monitoring';
 
 const API_BASE = 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod';
 const VOICE_TRADER_HOST = process.env.NEXT_PUBLIC_VOICE_TRADER_HOST || 'voice.apexmarkets.us';
-const EC2_BASE = `https://${VOICE_TRADER_HOST}:8080`;
-const WS_BASE = `wss://${VOICE_TRADER_HOST}:8765`;
+const EC2_BASE = `https://${VOICE_TRADER_HOST}`;
+const WS_BASE = `wss://${VOICE_TRADER_HOST}`;
 
 // =============================================================================
 // Utility Functions

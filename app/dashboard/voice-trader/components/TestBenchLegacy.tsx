@@ -161,8 +161,8 @@ const API_BASE = 'https://cmpdhpkk5d.execute-api.us-east-1.amazonaws.com/prod';
 // Voice Trader backend URLs - use env vars for dev/prod switching
 // For local dev: create .env.local with NEXT_PUBLIC_VOICE_TRADER_HOST=dev-voice.apexmarkets.us
 const VOICE_TRADER_HOST = process.env.NEXT_PUBLIC_VOICE_TRADER_HOST || 'voice.apexmarkets.us';
-const EC2_BASE = `https://${VOICE_TRADER_HOST}:8080`;  // Direct EC2 endpoint
-const WS_BASE = `wss://${VOICE_TRADER_HOST}:8765`;  // WebSocket endpoint
+const EC2_BASE = `https://${VOICE_TRADER_HOST}`;  // nginx TLS on :443
+const WS_BASE = `wss://${VOICE_TRADER_HOST}`;  // WebSocket via nginx :443
 
 // Satellite channel picker thumbnail — auto-refreshes JPEG snapshot every 5s
 function SatSnapshotImg({ streamId, ec2Base, authToken }: { streamId: number; ec2Base: string; authToken?: string | null }) {

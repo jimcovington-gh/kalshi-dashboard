@@ -105,7 +105,7 @@ export default function DashboardLayout({
                   );
                 })}
                 <a
-                  href="https://voice.apexmarkets.us:8080/test"
+                  href="https://voice.apexmarkets.us/test"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-3 py-2 text-xs md:text-sm font-medium text-yellow-600 border-b-2 border-transparent hover:text-yellow-800 hover:border-yellow-300 whitespace-nowrap"

@@ -48,6 +48,13 @@ VOICE_TRADER_EC2_INSTANCE_ID_DEV = os.environ.get('VOICE_TRADER_EC2_INSTANCE_ID_
 VOICE_TRADER_EC2_DOMAIN_DEV = os.environ.get('VOICE_TRADER_EC2_DOMAIN_DEV', 'dev-voice.apexmarkets.us')
 
 
+def _get_auth_header(event):
+    """Extract Authorization header from API Gateway event for forwarding to EC2."""
+    headers = event.get('headers') or {}
+    # API Gateway normalizes header names to lowercase
+    return headers.get('Authorization') or headers.get('authorization') or ''
+
+
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
@@ -96,7 +103,7 @@ def lambda_handler(event, context):
             return launch_ec2_session(event)
         elif '/ec2/stop-session/' in path and http_method == 'POST':
             session_id = path_parts[-1]
-            return stop_session(session_id)
+            return stop_session(session_id, event)
         # Queue management endpoints
         elif '/ec2/queue/list' in path and http_method == 'GET':
             return get_queue_list(event)
@@ -236,7 +243,7 @@ def get_running_sessions():
                 'status': status,
                 'started_at': started_at,
                 'public_ip': item.get('public_ip'),
-                'websocket_url': f'wss://{VOICE_TRADER_EC2_DOMAIN}:8765'
+                'websocket_url': f'wss://{VOICE_TRADER_EC2_DOMAIN}'
             })
         
         # Sort by started_at descending
@@ -261,13 +268,13 @@ def get_status(session_id: str):
         return response(404, {'error': 'Session not found'})
     
     # Add WebSocket URL
-    item['websocket_url'] = f'wss://{VOICE_TRADER_EC2_DOMAIN}:8765'
+    item['websocket_url'] = f'wss://{VOICE_TRADER_EC2_DOMAIN}'
     item['domain'] = VOICE_TRADER_EC2_DOMAIN
     
     return response(200, item)
 
 
-def stop_session(session_id: str):
+def stop_session(session_id: str, event=None):
     """Stop a voice trader session via HTTP API."""
     import urllib.request
     import ssl
@@ -297,6 +304,10 @@ def stop_session(session_id: str):
             f'{api_url}/stop',
             method='POST'
         )
+        if event:
+            auth = _get_auth_header(event)
+            if auth:
+                stop_req.add_header('Authorization', auth)
         with urllib.request.urlopen(stop_req, timeout=10, context=ssl_ctx) as resp:
             result = json.loads(resp.read().decode())
         
@@ -349,7 +360,7 @@ def get_ec2_status(event):
             'env': env_name,
             'launch_time': launch_time.isoformat() if launch_time else None,
             'uptime_hours': uptime_hours,
-            'websocket_url': f'wss://{domain}:8765' if state == 'running' else None
+            'websocket_url': f'wss://{domain}' if state == 'running' else None
         })
         
     except Exception as e:
@@ -458,6 +469,7 @@ def launch_ec2_session(event):
     
     try:
         health_req = urllib.request.Request(f'{api_url}/health')
+        # /health is public (no auth needed)
         with urllib.request.urlopen(health_req, timeout=5, context=ssl_ctx) as resp:
             health_data = json.loads(resp.read().decode())
             if health_data.get('status') != 'healthy':
@@ -494,10 +506,14 @@ def launch_ec2_session(event):
     # Call the API server's /connect endpoint
     try:
         connect_data = json.dumps(connect_body).encode('utf-8')
+        connect_headers = {'Content-Type': 'application/json'}
+        auth = _get_auth_header(event)
+        if auth:
+            connect_headers['Authorization'] = auth
         connect_req = urllib.request.Request(
             f'{api_url}/connect',
             data=connect_data,
-            headers={'Content-Type': 'application/json'},
+            headers=connect_headers,
             method='POST'
         )
         with urllib.request.urlopen(connect_req, timeout=30, context=ssl_ctx) as resp:
@@ -526,7 +542,7 @@ def launch_ec2_session(event):
             'event_ticker': event_ticker,
             'env': env_name,
             'domain': domain,
-            'websocket_url': f'wss://{domain}:8765',
+            'websocket_url': f'wss://{domain}',
             'message': result.get('message', 'Session started')
         })
         
@@ -735,6 +751,9 @@ def get_active_workers(event):
     
     try:
         status_req = urllib.request.Request(f'{api_url}/status')
+        auth = _get_auth_header(event)
+        if auth:
+            status_req.add_header('Authorization', auth)
         with urllib.request.urlopen(status_req, timeout=10, context=ssl_ctx) as resp:
             status_data = json.loads(resp.read().decode())
         
@@ -750,12 +769,14 @@ def get_active_workers(event):
                 'started_at': status_data.get('started_at'),
                 'transcript_segments': status_data.get('transcript_segments', 0),
                 'domain': domain,
-                'websocket_url': f'wss://{domain}:8765'
+                'websocket_url': f'wss://{domain}'
             })
         
         # Also check /pool for multi-session info
         try:
             pool_req = urllib.request.Request(f'{api_url}/pool')
+            if auth:
+                pool_req.add_header('Authorization', auth)
             with urllib.request.urlopen(pool_req, timeout=5, context=ssl_ctx) as resp:
                 pool_data = json.loads(resp.read().decode())
                 
@@ -771,7 +792,7 @@ def get_active_workers(event):
                             'call_state': info.get('status'),
                             'started_at': info.get('started_at'),
                             'domain': domain,
-                            'websocket_url': f'wss://{domain}:8765'
+                            'websocket_url': f'wss://{domain}'
                         })
         except:
             pass  # Pool endpoint might not exist

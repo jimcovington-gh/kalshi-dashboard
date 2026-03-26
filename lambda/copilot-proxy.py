@@ -183,27 +183,26 @@ def handle_wrapper_status() -> Dict[str, Any]:
 
 
 def handle_wrapper_control(action: str) -> Dict[str, Any]:
-    """Control wrapper (start/stop/restart) via SSM."""
+    """Control wrapper (start/stop/restart) via the control API on port 8764."""
     if action not in ['start', 'stop', 'restart']:
         return error_response(400, 'INVALID_ACTION', f'Invalid action: {action}')
 
     timeout = 90 if action == 'restart' else 60
-    script = f'/home/ubuntu/kalshi/scripts/copilot-server/{action}.sh'
-    result = _run_ssm([f'/bin/bash {script} 2>&1'], timeout_seconds=timeout)
+    result = _run_ssm([f'curl -sf -X POST http://localhost:8764/{action} 2>&1'], timeout_seconds=timeout)
 
     if not result:
         return error_response(500, 'CONTROL_ERROR', f'Timed out waiting for wrapper to {action}')
 
-    if result.get('Status') == 'Success':
-        logger.info(f"Wrapper {action} succeeded via SSM")
-        return success_response({'control': {
-            'action': action,
-            'status': 'success',
-            'message': f'Wrapper {action} completed',
-            'output': result.get('StandardOutputContent', ''),
-        }})
+    stdout = result.get('StandardOutputContent', '').strip()
+    if result.get('Status') == 'Success' and stdout:
+        try:
+            control_data = json.loads(stdout)
+        except (json.JSONDecodeError, ValueError):
+            control_data = {'action': action, 'status': 'success', 'raw': stdout}
+        logger.info(f"Wrapper {action} succeeded via control API")
+        return success_response({'control': control_data})
     else:
-        output = result.get('StandardErrorContent') or result.get('StandardOutputContent') or f"SSM status: {result.get('Status')}"
+        output = result.get('StandardErrorContent') or stdout or f"SSM status: {result.get('Status')}"
         logger.error(f"Wrapper {action} failed: {output}")
         return error_response(500, 'CONTROL_ERROR', f'Failed to {action} wrapper: {output}')
 
@@ -230,19 +229,22 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Handle incoming requests from the dashboard."""
     logger.info(f"Received event: {json.dumps(event, default=str)[:500]}")
     
-    # Route control endpoints (no auth required for status/health)
-    path = event.get('path', '')
-    method = event.get('httpMethod', 'GET')
+    # Normalize Function URL event format (uses rawPath/requestContext.http)
+    # vs API Gateway format (uses path/httpMethod)
+    path = event.get('path') or event.get('rawPath', '')
+    method = event.get('httpMethod') or event.get('requestContext', {}).get('http', {}).get('method', 'GET')
     
-    if path == '/wrapper/health' and method == 'GET':
+    # Route control endpoints (no auth required for status/health)
+    # Short paths (/status, /reset) for Function URL convenience
+    if path in ('/wrapper/health', '/health') and method == 'GET':
         return handle_wrapper_health()
-    elif path == '/wrapper/status' and method == 'GET':
+    elif path in ('/wrapper/status', '/status') and method == 'GET':
         return handle_wrapper_status()
-    elif path == '/wrapper/start' and method == 'POST':
+    elif path in ('/wrapper/start',) and method == 'POST':
         return handle_wrapper_control('start')
-    elif path == '/wrapper/stop' and method == 'POST':
+    elif path in ('/wrapper/stop',) and method == 'POST':
         return handle_wrapper_control('stop')
-    elif path == '/wrapper/restart' and method == 'POST':
+    elif path in ('/wrapper/restart', '/reset') and method in ('POST', 'GET'):
         return handle_wrapper_control('restart')
     
     # All other endpoints require auth

@@ -3672,6 +3672,21 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             <div className="bg-gray-800 rounded-lg p-3">
               <div className="flex items-center justify-between mb-2">
                 <h2 className="font-semibold text-sm">🎙 Speakers</h2>
+                <div className="flex items-center gap-1.5">
+                {/* Clear unchecked speakers from the list */}
+                {containerState?.speakers?.details && containerState.speakers.details.some(s => !s.is_valid) && (
+                  <button
+                    onClick={() => {
+                      if (wsRef.current?.readyState === WebSocket.OPEN) {
+                        wsRef.current.send(JSON.stringify({ type: 'clear_unchecked_speakers' }));
+                      }
+                    }}
+                    className="text-xs px-2 py-0.5 rounded font-medium bg-red-900/60 hover:bg-red-700 text-red-300 transition-colors"
+                    title="Remove all unchecked (unapproved) speakers from the list"
+                  >
+                    ✕ Clear
+                  </button>
+                )}
                 {/* Speaker filter toggle - OFF by default, safe to enable once you trust the IDs */}
                 <button
                   onClick={() => {
@@ -3693,10 +3708,11 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                 >
                   {containerState?.speakers?.filter_enabled ? '🔒 Filter ON' : '🔓 Filter OFF'}
                 </button>
+                </div>
               </div>
-              <div className="text-xs space-y-1">
+              <div className="text-xs space-y-1 max-h-48 overflow-y-auto">
                 {containerState?.speakers?.details && containerState.speakers.details.length > 0 ? (
-                  containerState.speakers.details.slice(0, 8).map(s => {
+                  containerState.speakers.details.map(s => {
                     const isCurrent = containerState.speakers.current === s.id;
                     return (
                       <div

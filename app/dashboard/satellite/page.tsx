@@ -210,7 +210,7 @@ export default function SatellitePage() {
     setLogLines(prev => [...prev, line]);
   }, []);
 
-  // Full move flow: stop streams → move dish → lineup scan → reload channels
+  // Move flow: stop streams → move dish → reload iframe
   const doMoveDish = async (sat: Satellite) => {
     setMoving(true);
     setConfirmTarget(null);
@@ -260,35 +260,13 @@ export default function SatellitePage() {
       }
       addLog('\n✅ Dish move complete');
 
-      // Phase 3: Lineup scan
-      setLogPhase(`Scanning lineup on ${sat.display_name}…`);
-      addLog(`\n🔍 Starting lineup scan on ${sat.display_name}…`);
-      const scanRes = await fetchWithAuth(`${SATELLITE_PROXY}/api/ops/scan-lineup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ satellite: sat.slug, auto_reload: true }),
-      });
-      if (!scanRes.ok) {
-        const d = await scanRes.json().catch(() => ({}));
-        addLog(`\n⚠ Lineup scan failed to start: ${d.detail || scanRes.statusText}`);
-        setLogPhase('Scan failed to start');
-      } else {
-        const scanJob = await scanRes.json();
-        const scanResult = await streamJobLog(scanJob.job_id, addLog, setLogPhase, authToken);
-        if (scanResult === 'completed') {
-          addLog('\n✅ Lineup scan complete');
-        } else {
-          addLog(`\n⚠ Lineup scan ${scanResult}`);
-        }
-      }
-
-      // Phase 4: Reload the iframe to pick up new channels
+      // Reload the iframe to pick up the new satellite
       setLogPhase('Done');
-      addLog('\n🔄 Reloading channels…');
+      addLog('\n🔄 Reloading view…');
       if (iframeRef.current) {
         iframeRef.current.src = iframeRef.current.src;
       }
-      addLog('✅ All done — new channels loaded');
+      addLog('✅ Done — use Scan Lineup on the Ground Station page if needed');
 
       // Auto-close log popup after success
       setTimeout(() => setLogOpen(false), 3000);

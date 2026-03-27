@@ -293,20 +293,35 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   // Default to false so Start Call button shows until server confirms auto-dial
   const [autoDial, setAutoDial] = useState(false);
   
-  // Auth token
+  // Auth token — kept for initial load gating & sync uses (e.g. <img src>)
   const [authToken, setAuthToken] = useState<string | null>(null);
 
-  // Authenticated fetch helper — adds Authorization header to all EC2 requests
-  const fetchWithAuth = useCallback((url: string, opts: RequestInit = {}) => {
+  // Always-fresh token helper — Amplify returns cached token if valid,
+  // silently refreshes via refresh token (30-day TTL) if expired.
+  const getAuthToken = useCallback(async (): Promise<string | null> => {
+    try {
+      const session = await fetchAuthSession();
+      const token = session.tokens?.idToken?.toString() ?? null;
+      // Keep state in sync so sync consumers (SatSnapshotImg) stay current
+      if (token && token !== authToken) setAuthToken(token);
+      return token;
+    } catch {
+      return authToken;  // fall back to cached token on error
+    }
+  }, [authToken]);
+
+  // Authenticated fetch helper — always gets a fresh token before each request
+  const fetchWithAuth = useCallback(async (url: string, opts: RequestInit = {}): Promise<Response> => {
+    const token = await getAuthToken();
     const existingHeaders = (opts.headers as Record<string, string>) ?? {};
     return fetch(url, {
       ...opts,
       headers: {
         ...existingHeaders,
-        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     });
-  }, [authToken]);
+  }, [getAuthToken]);
   
   // Wake lock to prevent screen sleep during monitoring
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -428,8 +443,9 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
     async function fetchEvents() {
       // Primary: Use Lambda API (works even when EC2 is down)
       try {
+        const token = await getAuthToken();
         const response = await fetch(`${API_BASE}/voice-trader/events`, {
-          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
         
         if (response.ok) {
@@ -566,8 +582,9 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
     async function fetchQueuedEvents() {
       // First try Lambda API (has stale detection)
       try {
+        const token = await getAuthToken();
         const response = await fetch(`${API_BASE}/voice-trader/ec2/queue/list`, {
-          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
         if (response.ok) {
           const data = await response.json();
@@ -627,7 +644,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
       clearInterval(rivaInterval);
       clearInterval(queueInterval);
     };
-  }, [pageState, authToken]);
+  }, [pageState, authToken, getAuthToken, fetchWithAuth]);
 
   // WebSocket connection for monitoring with retry logic
   useEffect(() => {
@@ -1067,7 +1084,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
     const interval = setInterval(pollState, 2000);
     
     return () => clearInterval(interval);
-  }, [pageState, sessionId, authToken]);
+  }, [pageState, sessionId, fetchWithAuth]);
 
   // Stop microphone capture
   const stopMicrophone = useCallback(() => {
@@ -1363,13 +1380,14 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
 
   // EC2 Control handlers
   const handleEC2Start = async () => {
-    if (!authToken) return;
+    const token = await getAuthToken();
+    if (!token) return;
     setEc2Loading(true);
     setEc2Error(null);
     try {
       const response = await fetch(`${API_BASE}/voice-trader/ec2/start`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` }
+        headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();
       if (!response.ok) {
@@ -1386,7 +1404,8 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
   };
 
   const handleEC2Stop = async () => {
-    if (!authToken) return;
+    const token = await getAuthToken();
+    if (!token) return;
     if (!confirm('Are you sure you want to stop the voice server? This will disconnect any active sessions.')) {
       return;
     }
@@ -1395,7 +1414,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
     try {
       const response = await fetch(`${API_BASE}/voice-trader/ec2/stop`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` }
+        headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();
       if (!response.ok) {
@@ -1412,7 +1431,8 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
   };
 
   const handleEC2Reboot = async () => {
-    if (!authToken) return;
+    const token = await getAuthToken();
+    if (!token) return;
     if (!confirm('Are you sure you want to reboot the voice server? Active sessions will be disconnected.')) {
       return;
     }
@@ -1421,7 +1441,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
     try {
       const response = await fetch(`${API_BASE}/voice-trader/ec2/reboot`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` }
+        headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();
       if (!response.ok) {
@@ -1439,17 +1459,19 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
 
   // Queue management handlers
   const handleAddToQueue = async () => {
-    if (!authToken || !newQueueEvent.event_ticker || !newQueueEvent.scheduled_time) {
+    if (!newQueueEvent.event_ticker || !newQueueEvent.scheduled_time) {
       setQueueError('Event ticker and scheduled time are required');
       return;
     }
+    const token = await getAuthToken();
+    if (!token) return;
     setQueueLoading(true);
     setQueueError(null);
     try {
       const response = await fetch(`${API_BASE}/voice-trader/ec2/queue/add`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${authToken}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -1480,8 +1502,9 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
   };
 
   const handleRemoveFromQueue = async (eventTicker: string) => {
-    if (!authToken) return;
     if (!confirm(`Remove ${eventTicker} from the queue?`)) return;
+    const token = await getAuthToken();
+    if (!token) return;
     
     setQueueLoading(true);
     setQueueError(null);
@@ -1489,7 +1512,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
       const response = await fetch(`${API_BASE}/voice-trader/ec2/queue/remove`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${authToken}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ event_ticker: eventTicker })
@@ -1518,7 +1541,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
   };
 
   const handleLaunch = async () => {
-    if (!selectedEvent || !authToken) return;
+    if (!selectedEvent) return;
     
     // Validation
     if (audioSource === 'phone' && !phoneNumber) {
@@ -1677,8 +1700,9 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
       // EC2 launch returns websocket_url immediately
       if (data.websocket_url) {
         // Append token so auth middleware can validate the WS upgrade request
-        const wsUrlWithToken = authToken
-          ? `${data.websocket_url}?token=${encodeURIComponent(authToken)}`
+        const token = await getAuthToken();
+        const wsUrlWithToken = token
+          ? `${data.websocket_url}?token=${encodeURIComponent(token)}`
           : data.websocket_url;
         setWsUrl(wsUrlWithToken);
         
@@ -1739,7 +1763,8 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
 
   // Reconnect to an existing running container
   const handleReconnectToContainer = async (container: RunningVoiceContainer) => {
-    if (!authToken) return;
+    const token = await getAuthToken();
+    if (!token) return;
     
     setError(null);
     setSessionId(container.session_id);
@@ -1762,8 +1787,8 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
     }
     
     if (container.websocket_url) {
-      const wsUrlWithToken = authToken
-        ? `${container.websocket_url}?token=${encodeURIComponent(authToken)}`
+      const wsUrlWithToken = token
+        ? `${container.websocket_url}?token=${encodeURIComponent(token)}`
         : container.websocket_url;
       setWsUrl(wsUrlWithToken);
       
@@ -2219,14 +2244,15 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                     onClick={async () => {
                       setQueueLoading(true);
                       try {
+                        const token = await getAuthToken();
                         const response = await fetch(`${API_BASE}/voice-trader/ec2/queue/clean-stale`, {
                           method: 'POST',
-                          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}
+                          headers: token ? { Authorization: `Bearer ${token}` } : {}
                         });
                         if (response.ok) {
                           // Refresh queue list
                           const queueResponse = await fetch(`${API_BASE}/voice-trader/ec2/queue/list`, {
-                            headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}
+                            headers: token ? { Authorization: `Bearer ${token}` } : {}
                           });
                           if (queueResponse.ok) {
                             const data = await queueResponse.json();

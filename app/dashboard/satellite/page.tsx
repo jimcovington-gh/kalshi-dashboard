@@ -260,11 +260,25 @@ export default function SatellitePage() {
       }
       addLog('\n✅ Dish move complete');
 
-      // Reload the iframe to pick up the new satellite
+      // Reload the iframe to pick up the new satellite — use a fresh token
+      // (the original iframeToken may have expired since page load)
       setLogPhase('Done');
       addLog('\n🔄 Reloading view…');
       if (iframeRef.current) {
-        iframeRef.current.src = iframeRef.current.src;
+        let freshToken = authToken;
+        try {
+          const session = await fetchAuthSession({ forceRefresh: true });
+          freshToken = session.tokens?.idToken?.toString() ?? authToken;
+          if (freshToken) {
+            setAuthToken(freshToken);
+            setIframeToken(freshToken);
+          }
+        } catch (_) {}
+        const page = pages.find(p => p.id === activePage) || pages[0];
+        const freshSrc = freshToken
+          ? `${SATELLITE_PROXY}${page.path}?embed=1&token=${encodeURIComponent(freshToken)}`
+          : `${SATELLITE_PROXY}${page.path}?embed=1`;
+        iframeRef.current.src = freshSrc;
       }
       addLog('✅ Done — use Scan Lineup on the Ground Station page if needed');
 

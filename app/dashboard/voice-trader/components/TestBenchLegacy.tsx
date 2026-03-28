@@ -3457,9 +3457,10 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                 } else if (w.state_at) {
                   detail = `${tile.icon} ${formatTime(w.state_at)}`;
                 }
+                const showProfit = w.state === 'watching' && w.potential_profit != null;
                 // For watching words, show potential profit from orderbook
-                if (w.state === 'watching' && w.potential_profit != null) {
-                  detail = `+$${w.potential_profit.toFixed(2)}`;
+                if (showProfit) {
+                  detail = `+$${w.potential_profit!.toFixed(2)}`;
                 }
                 
                 return (
@@ -3470,7 +3471,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                     <div className={`font-medium truncate ${isStrikethrough ? 'line-through text-purple-300' : ''}`} title={w.word}>
                       {w.word}
                     </div>
-                    <div className="text-[10px] text-gray-400 truncate">
+                    <div className={`text-[10px] truncate ${showProfit ? 'font-medium text-green-300' : 'text-gray-400'}`}>
                       {detail}
                     </div>
                   </div>

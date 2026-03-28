@@ -203,6 +203,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [srtLatencyMs, setSrtLatencyMs] = useState(200);
   const [srtLatencyLive, setSrtLatencyLive] = useState(200);
   const [srtLatencyUpdating, setSrtLatencyUpdating] = useState(false);
+  const [rivaFlushing, setRivaFlushing] = useState(false);
   const [primeUrl, setPrimeUrl] = useState('https://www.amazon.com/gp/video/storefront');
   const [paramountUrl, setParamountUrl] = useState('https://www.paramountplus.com/live-tv/');
   const [netflixUrl, setNetflixUrl] = useState('https://www.netflix.com/browse');
@@ -3095,12 +3096,42 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
               <div className="mt-2 flex items-center gap-2 flex-wrap">
                 {/* Trading Toggle - system-wide on/off; starts OFF so user can identify speakers first */}
                 <button
-                  onClick={() => {
+                  onClick={async () => {
+                    const newPaused = !containerState?.detection_paused;
                     if (wsRef.current?.readyState === WebSocket.OPEN) {
                       wsRef.current.send(JSON.stringify({ 
                         type: 'set_detection_paused',
-                        paused: !containerState?.detection_paused 
+                        paused: newPaused 
                       }));
+                    }
+                    // Flush Riva when turning trading OFF — natural break, safe to recycle gRPC
+                    // Only for modes using satellite Riva: satellite, nbc_multi, YouTube local transcription
+                    const usesSatelliteRiva = audioSource === 'satellite' || audioSource === 'nbc_multi' || (audioSource === 'web' && !youtubeSrtMode);
+                    if (newPaused && usesSatelliteRiva) {
+                      try {
+                        const params = selectedSatStreamId !== null ? `?stream_id=${selectedSatStreamId}` : '';
+                        const r = await fetchWithAuth(`${EC2_BASE}/satellite/flush_riva${params}`, { method: 'POST' });
+                        if (r.ok) {
+                          const result = await r.json();
+                          setSystemLog(prev => [...prev, {
+                            timestamp: Date.now() / 1000,
+                            message: `🔄 Riva flushed (trading paused) — restarted ${result.restarted}/${result.total} stream(s)`,
+                            level: 'info' as const
+                          }]);
+                        } else {
+                          setSystemLog(prev => [...prev, {
+                            timestamp: Date.now() / 1000,
+                            message: `⚠️ Riva flush failed (trading paused): HTTP ${r.status}`,
+                            level: 'warning' as const
+                          }]);
+                        }
+                      } catch (err) {
+                        setSystemLog(prev => [...prev, {
+                          timestamp: Date.now() / 1000,
+                          message: `⚠️ Riva flush error (trading paused): ${err instanceof Error ? err.message : String(err)}`,
+                          level: 'warning' as const
+                        }]);
+                      }
                     }
                   }}
                   className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
@@ -3265,6 +3296,38 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                   </div>
                 )}
                 
+                {/* Riva Flush Button — satellite/NBC/listener sources only */}
+                {(audioSource === 'satellite' || audioSource === 'nbc_multi' || (audioSource === 'web' && !youtubeSrtMode)) && (
+                  <button
+                    onClick={async () => {
+                      setRivaFlushing(true);
+                      try {
+                        const params = selectedSatStreamId !== null ? `?stream_id=${selectedSatStreamId}` : '';
+                        const r = await fetchWithAuth(`${EC2_BASE}/satellite/flush_riva${params}`, { method: 'POST' });
+                        if (r.ok) {
+                          const result = await r.json();
+                          setSystemLog(prev => [...prev, {
+                            timestamp: Date.now() / 1000,
+                            message: `🔄 Riva flushed (manual) — restarted ${result.restarted}/${result.total} stream(s)`,
+                            level: 'info' as const
+                          }]);
+                        } else {
+                          setError(`Flush failed: ${r.status}`);
+                        }
+                      } catch (err: unknown) {
+                        setError(err instanceof Error ? err.message : String(err));
+                      } finally {
+                        setRivaFlushing(false);
+                      }
+                    }}
+                    disabled={rivaFlushing}
+                    className="px-2 py-1 bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 text-white rounded text-xs font-medium transition-colors"
+                    title="Force-restart Riva gRPC stream to clear accumulated ASR latency. ~1-2s gap in transcription."
+                  >
+                    {rivaFlushing ? '⏳ Flushing...' : '🔄 Flush Riva'}
+                  </button>
+                )}
+
                 {/* Q&A Triggered Status - show if Q&A has been triggered */}
                 {containerState?.qa_started && (
                   <span className="bg-orange-600 px-2 py-1 rounded text-xs font-medium ring-2 ring-orange-400">

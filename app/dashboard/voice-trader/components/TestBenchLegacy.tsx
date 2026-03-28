@@ -36,6 +36,7 @@ interface WordStatus {
   variants: string[];
   state: 'watching' | 'already_said' | 'skipped' | 'detected' | 'bought' | 'traded' | 'no_fill' | 'failed' | 'no_swept';
   state_at?: number;
+  potential_profit?: number;
   trade?: {
     contracts?: number;
     buy_price?: number;
@@ -3455,6 +3456,10 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                   detail = `✗ NO ${w.trade.contracts ?? '?'}@${w.trade.price?.toFixed(2) ?? '?'}`;
                 } else if (w.state_at) {
                   detail = `${tile.icon} ${formatTime(w.state_at)}`;
+                }
+                // For watching words, show potential profit from orderbook
+                if (w.state === 'watching' && w.potential_profit != null) {
+                  detail = `+$${w.potential_profit.toFixed(2)}`;
                 }
                 
                 return (

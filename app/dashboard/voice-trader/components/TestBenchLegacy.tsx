@@ -194,7 +194,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [sessionId, setSessionId] = useState<string | null>(null);
   
   // Setup form state
-  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'nbc_multi' | 'desktop' | 'paramount' | 'netflix' | 'appletv' | 'listener' | 'srt'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop' | 'paramount' | 'netflix' | 'appletv' | 'listener' | 'srt'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
@@ -1560,6 +1560,32 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
       return;
     }
 
+    // Re-validate satellite stream_id is still active before connecting.
+    // The user may have selected a stream that no longer exists (e.g. after
+    // satellite service restart).  Re-fetch and auto-correct.
+    let effectiveSatStreamId = selectedSatStreamId;
+    if (audioSource === 'satellite' && effectiveSatStreamId !== null) {
+      try {
+        const streamsRes = await fetchWithAuth(`${EC2_BASE}/satellite/streams`);
+        const streamsData = await streamsRes.json();
+        const activeStreams = streamsData.streams || [];
+        setSatStreams(activeStreams);
+        const stillExists = activeStreams.some((s: any) => s.stream_id === effectiveSatStreamId);
+        if (!stillExists) {
+          if (activeStreams.length === 1) {
+            effectiveSatStreamId = activeStreams[0].stream_id;
+            setSelectedSatStreamId(effectiveSatStreamId);
+          } else {
+            setSelectedSatStreamId(null);
+            setError(`Stream ${effectiveSatStreamId} no longer exists. Please select a channel.`);
+            return;
+          }
+        }
+      } catch {
+        // Can't reach satellite — proceed and let bridge configure fail downstream
+      }
+    }
+
     // For desktop pipelines (Prime/Paramount/Netflix): start capture pipeline first
     // Open the VNC window synchronously NOW (while in user-gesture context) so browsers
     // don't block it as a popup from an async callback.
@@ -1641,7 +1667,6 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
         event_ticker: selectedEvent.event_ticker,
         user_name: 'jimc',  // TODO: Get from auth
         audio_source: audioSource === 'satellite' ? 'satellite_transcript'
-                    : audioSource === 'nbc_multi' ? 'satellite_transcript'
                     : audioSource === 'listener' ? 'satellite_transcript'
                     : audioSource === 'paramount' ? 'desktop'
                     : audioSource === 'netflix' ? 'desktop'
@@ -1656,11 +1681,6 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
         body.srt_latency_ms = srtLatencyMs;
       }
 
-      // NBC Multi: tell voice trader to auto-start the NBC supervisor
-      if (audioSource === 'nbc_multi') {
-        body.nbc_transcription_mode = 'parallel';
-      }
-      
       // Add audio source specific fields
       if (audioSource === 'phone') {
         body.phone_number = phoneNumber;
@@ -1671,7 +1691,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
         body.stream_url = webUrl;
         body.youtube_srt_mode = youtubeSrtMode;
       } else if (audioSource === 'satellite') {
-        body.satellite_stream_id = selectedSatStreamId;
+        body.satellite_stream_id = effectiveSatStreamId;
       } else if (audioSource === 'desktop') {
         body.desktop_port = 4400;
       } else if (audioSource === 'paramount') {
@@ -2502,12 +2522,6 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
               📡 Satellite TV
             </button>
             <button
-              className={`px-4 py-2 rounded ${audioSource === 'nbc_multi' ? 'bg-green-600' : 'bg-gray-700'}`}
-              onClick={() => setAudioSource('nbc_multi')}
-            >
-              📡 NBC Multi (4ch)
-            </button>
-            <button
               className={`px-4 py-2 rounded ${audioSource === 'desktop' ? 'bg-purple-600' : 'bg-gray-700'}`}
               onClick={() => setAudioSource('desktop')}
             >
@@ -3157,7 +3171,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                     }
                     // Flush Riva when turning trading OFF — natural break, guaranteed back to real-time
                     // Only for modes using satellite Riva: satellite, nbc_multi, YouTube local transcription
-                    const usesSatelliteRiva = audioSource === 'satellite' || audioSource === 'nbc_multi' || (audioSource === 'web' && !youtubeSrtMode);
+                    const usesSatelliteRiva = audioSource === 'satellite' || (audioSource === 'web' && !youtubeSrtMode);
                     if (newPaused && usesSatelliteRiva) {
                       try {
                         const params = selectedSatStreamId !== null ? `?stream_id=${selectedSatStreamId}` : '';
@@ -3348,7 +3362,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                 )}
                 
                 {/* Riva Flush Button — satellite/NBC/listener sources only */}
-                {(audioSource === 'satellite' || audioSource === 'nbc_multi' || (audioSource === 'web' && !youtubeSrtMode)) && (
+                {(audioSource === 'satellite' || (audioSource === 'web' && !youtubeSrtMode)) && (
                   <button
                     onClick={async () => {
                       setRivaFlushing(true);

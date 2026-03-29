@@ -3104,7 +3104,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                         paused: newPaused 
                       }));
                     }
-                    // Flush Riva when turning trading OFF — natural break, safe to recycle gRPC
+                    // Flush Riva when turning trading OFF — natural break, guaranteed back to real-time
                     // Only for modes using satellite Riva: satellite, nbc_multi, YouTube local transcription
                     const usesSatelliteRiva = audioSource === 'satellite' || audioSource === 'nbc_multi' || (audioSource === 'web' && !youtubeSrtMode);
                     if (newPaused && usesSatelliteRiva) {
@@ -3308,7 +3308,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                           const result = await r.json();
                           setSystemLog(prev => [...prev, {
                             timestamp: Date.now() / 1000,
-                            message: `🔄 Riva flushed (manual) — restarted ${result.restarted}/${result.total} stream(s)`,
+                            message: `🔄 Riva flushed — restarted ${result.restarted}/${result.total} stream(s), back to real-time`,
                             level: 'info' as const
                           }]);
                         } else {

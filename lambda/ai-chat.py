@@ -36,6 +36,9 @@ from cryptography.hazmat.backends import default_backend
 import base64
 import urllib.request
 import urllib.parse
+import subprocess
+import tempfile
+import re as re_module
 
 # Configure logging
 logger = logging.getLogger()
@@ -627,6 +630,99 @@ IMPORTANT: Returns max 50 log entries. Use specific time ranges and filter patte
             },
             "required": ["log_group", "filter_pattern"]
         }
+    },
+    {
+        "name": "write_temp_file",
+        "description": """Write a file to the AI workspace temp directory. Use this to create data files or Python scripts that can be executed later.
+
+Files are stored in /tmp/ai_workspace/ and persist for the duration of the Lambda execution (across tool calls within a single conversation turn).
+
+GUIDELINES:
+- Use for creating Python analysis scripts, data files (CSV, JSON, text), or intermediate results
+- Filenames must be simple (alphanumeric, hyphens, underscores, dots) — no paths or directory traversal
+- Max file size: 2MB
+- Overwrites existing files with the same name""",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Filename to write (e.g., 'analyze.py', 'data.csv', 'results.json'). No directory paths."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "File content to write"
+                }
+            },
+            "required": ["filename", "content"]
+        }
+    },
+    {
+        "name": "read_temp_file",
+        "description": """Read a file from the AI workspace temp directory. Use this to check script output files or review previously written files.
+
+Returns the file content as a string (max 1MB). For binary files, returns a hex summary.""",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Filename to read from the temp workspace"
+                }
+            },
+            "required": ["filename"]
+        }
+    },
+    {
+        "name": "list_temp_files",
+        "description": "List all files in the AI workspace temp directory with their sizes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "execute_python_script",
+        "description": """Execute a Python script from the AI workspace temp directory and return its stdout/stderr.
+
+USE THIS for complex data analysis that benefits from computation:
+- Statistical analysis on trading data (averages, correlations, distributions)
+- Parsing and transforming large datasets
+- Generating summarized reports from raw data
+- Any calculation that would be error-prone to do manually
+
+WORKFLOW:
+1. Use query_dynamodb_table or read_s3_file to fetch data
+2. Use write_temp_file to save data as JSON/CSV AND write a Python analysis script
+3. Use execute_python_script to run the script
+4. Read results from stdout or use read_temp_file for output files
+
+The script runs with Python 3.12 in the Lambda environment. Available modules include:
+json, csv, math, statistics, collections, itertools, datetime, decimal, re, os, sys.
+External packages: boto3 (but prefer using the dedicated tools for AWS access).
+
+LIMITATIONS:
+- 60 second timeout
+- Max 2MB stdout + stderr combined
+- Scripts run in /tmp/ai_workspace/ as working directory
+- No network access to external services (AWS SDK available but prefer dedicated tools)
+- No pip install — use only standard library and pre-installed packages""",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Python script filename to execute (must end in .py)"
+                },
+                "args": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional command-line arguments to pass to the script"
+                }
+            },
+            "required": ["filename"]
+        }
     }
 ]
 
@@ -658,6 +754,14 @@ def execute_tool(tool_name: str, tool_input: Dict, user_name: str, is_admin: boo
             return tool_estimate_cost(tool_input)
         elif tool_name == "search_execution_logs":
             return tool_search_execution_logs(tool_input, user_name, is_admin)
+        elif tool_name == "write_temp_file":
+            return tool_write_temp_file(tool_input)
+        elif tool_name == "read_temp_file":
+            return tool_read_temp_file(tool_input)
+        elif tool_name == "list_temp_files":
+            return tool_list_temp_files(tool_input)
+        elif tool_name == "execute_python_script":
+            return tool_execute_python_script(tool_input)
         else:
             return {"error": f"Unknown tool: {tool_name}"}
     except Exception as e:
@@ -1067,6 +1171,164 @@ def tool_search_execution_logs(params: Dict, user_name: str, is_admin: bool) -> 
 
 
 # ============================================================================
+# Temp File & Script Execution Tools
+# ============================================================================
+
+TEMP_WORKSPACE = '/tmp/ai_workspace'
+SAFE_FILENAME_RE = re_module.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$')
+MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB
+MAX_OUTPUT_SIZE = 1 * 1024 * 1024  # 1MB
+SCRIPT_TIMEOUT = 60  # seconds
+
+
+def _validate_filename(filename: str) -> Optional[str]:
+    """Validate filename is safe. Returns error string or None if ok."""
+    if not filename:
+        return "Filename is required"
+    if '..' in filename or '/' in filename or '\\' in filename:
+        return "Filename must not contain path separators or '..'"
+    if not SAFE_FILENAME_RE.match(filename):
+        return f"Invalid filename '{filename}'. Use only alphanumeric, hyphens, underscores, dots. Max 100 chars."
+    return None
+
+
+def _ensure_workspace():
+    """Create the temp workspace directory if it doesn't exist."""
+    os.makedirs(TEMP_WORKSPACE, exist_ok=True)
+
+
+def tool_write_temp_file(params: Dict) -> Dict:
+    """Write a file to the temp workspace."""
+    filename = params.get('filename', '')
+    content = params.get('content', '')
+
+    err = _validate_filename(filename)
+    if err:
+        return {"error": err}
+
+    if len(content) > MAX_FILE_SIZE:
+        return {"error": f"Content too large ({len(content)} bytes). Max is {MAX_FILE_SIZE} bytes."}
+
+    _ensure_workspace()
+    filepath = os.path.join(TEMP_WORKSPACE, filename)
+
+    try:
+        with open(filepath, 'w') as f:
+            f.write(content)
+        return {
+            "status": "ok",
+            "filename": filename,
+            "size_bytes": len(content),
+            "path": filepath
+        }
+    except Exception as e:
+        return {"error": f"Failed to write file: {e}"}
+
+
+def tool_read_temp_file(params: Dict) -> Dict:
+    """Read a file from the temp workspace."""
+    filename = params.get('filename', '')
+
+    err = _validate_filename(filename)
+    if err:
+        return {"error": err}
+
+    filepath = os.path.join(TEMP_WORKSPACE, filename)
+
+    if not os.path.exists(filepath):
+        return {"error": f"File not found: {filename}"}
+
+    try:
+        size = os.path.getsize(filepath)
+        if size > MAX_OUTPUT_SIZE:
+            return {"error": f"File too large to read ({size} bytes). Max is {MAX_OUTPUT_SIZE} bytes."}
+
+        with open(filepath, 'r', errors='replace') as f:
+            content = f.read()
+        return {
+            "filename": filename,
+            "size_bytes": size,
+            "content": content
+        }
+    except Exception as e:
+        return {"error": f"Failed to read file: {e}"}
+
+
+def tool_list_temp_files(params: Dict) -> Dict:
+    """List files in the temp workspace."""
+    _ensure_workspace()
+
+    try:
+        files = []
+        for entry in os.listdir(TEMP_WORKSPACE):
+            filepath = os.path.join(TEMP_WORKSPACE, entry)
+            if os.path.isfile(filepath):
+                files.append({
+                    "filename": entry,
+                    "size_bytes": os.path.getsize(filepath)
+                })
+        files.sort(key=lambda f: f['filename'])
+        return {"files": files, "count": len(files)}
+    except Exception as e:
+        return {"error": f"Failed to list files: {e}"}
+
+
+def tool_execute_python_script(params: Dict) -> Dict:
+    """Execute a Python script in the temp workspace."""
+    filename = params.get('filename', '')
+    args = params.get('args', [])
+
+    err = _validate_filename(filename)
+    if err:
+        return {"error": err}
+
+    if not filename.endswith('.py'):
+        return {"error": "Only .py files can be executed"}
+
+    filepath = os.path.join(TEMP_WORKSPACE, filename)
+
+    if not os.path.exists(filepath):
+        return {"error": f"Script not found: {filename}. Write it first with write_temp_file."}
+
+    # Validate args are all strings
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        return {"error": "args must be a list of strings"}
+
+    _ensure_workspace()
+
+    try:
+        cmd = ['python3', filepath] + args
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=SCRIPT_TIMEOUT,
+            cwd=TEMP_WORKSPACE,
+            env={
+                'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+                'HOME': '/tmp',
+                'PYTHONPATH': os.environ.get('PYTHONPATH', ''),
+                'TMPDIR': TEMP_WORKSPACE,
+            }
+        )
+
+        stdout = result.stdout[:MAX_OUTPUT_SIZE] if result.stdout else ''
+        stderr = result.stderr[:MAX_OUTPUT_SIZE] if result.stderr else ''
+        truncated = len(result.stdout or '') > MAX_OUTPUT_SIZE or len(result.stderr or '') > MAX_OUTPUT_SIZE
+
+        return {
+            "exit_code": result.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "truncated": truncated,
+        }
+    except subprocess.TimeoutExpired:
+        return {"error": f"Script timed out after {SCRIPT_TIMEOUT} seconds"}
+    except Exception as e:
+        return {"error": f"Failed to execute script: {e}"}
+
+
+# ============================================================================
 # System Prompt
 # ============================================================================
 
@@ -1085,6 +1347,19 @@ def build_system_prompt(user_name: str, is_admin: bool) -> str:
 2. **Read S3 files** - Trading configurations, captured game data
 3. **Call Kalshi API** - Live portfolio, market data, orderbooks (rate-limited to 10/sec)
 4. **Read documentation** - System architecture and deployment docs
+5. **Write & execute Python scripts** - For complex data analysis, statistics, transformations
+
+## Script Execution Workflow
+
+For complex analysis questions (correlations, distributions, time-series, aggregations over many records):
+1. Fetch data using query_dynamodb_table or read_s3_file
+2. Write data to a JSON file with write_temp_file (e.g., 'data.json')
+3. Write a Python analysis script with write_temp_file (e.g., 'analyze.py')
+4. Run it with execute_python_script
+5. Return the results (from stdout or read an output file with read_temp_file)
+
+Available Python stdlib: json, csv, math, statistics, collections, itertools, datetime, decimal, re, os, sys.
+Scripts run in /tmp/ai_workspace/ with a 60-second timeout.
 
 ## DynamoDB Table Schemas (USE CORRECT KEYS!)
 
@@ -1764,6 +2039,14 @@ def call_bedrock_with_tools(system_prompt: str, messages: List[Dict], user_name:
                     tool_call_info['detail'] = f"Reading {tool_input.get('file_path', 'docs')}"
                 elif tool_name == 'estimate_query_cost':
                     tool_call_info['detail'] = f"Estimating cost for {tool_input.get('table_name', 'query')}"
+                elif tool_name == 'write_temp_file':
+                    tool_call_info['detail'] = f"Writing {tool_input.get('filename', 'file')}"
+                elif tool_name == 'read_temp_file':
+                    tool_call_info['detail'] = f"Reading {tool_input.get('filename', 'file')}"
+                elif tool_name == 'list_temp_files':
+                    tool_call_info['detail'] = "Listing workspace files"
+                elif tool_name == 'execute_python_script':
+                    tool_call_info['detail'] = f"Running {tool_input.get('filename', 'script.py')}"
                 else:
                     tool_call_info['detail'] = tool_name
                 tool_calls_made.append(tool_call_info)

@@ -145,6 +145,7 @@ export default function SatellitePage() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wsClosingRef = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   // Fetch satellite list once (after auth token is available)
@@ -164,6 +165,7 @@ export default function SatellitePage() {
   // WebSocket for real-time adapter/dish status
   const connectWs = useCallback(async () => {
     if (!authToken) return; // Don't connect until we have a valid token
+    wsClosingRef.current = false;
     if (wsRef.current) {
       try { wsRef.current.close(); } catch (_) {}
     }
@@ -172,10 +174,7 @@ export default function SatellitePage() {
     try {
       const session = await fetchAuthSession({ forceRefresh: false });
       const fresh = session.tokens?.idToken?.toString() ?? null;
-      if (fresh) {
-        token = fresh;
-        if (fresh !== authToken) setAuthToken(fresh);
-      }
+      if (fresh) token = fresh;
     } catch (_) {}
     const wsUrl = `${WS_PROXY}/api/ws/status?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(wsUrl);
@@ -184,7 +183,9 @@ export default function SatellitePage() {
     ws.onopen = () => setWsConnected(true);
     ws.onclose = () => {
       setWsConnected(false);
-      reconnectRef.current = setTimeout(connectWs, 3000);
+      if (!wsClosingRef.current) {
+        reconnectRef.current = setTimeout(connectWs, 3000);
+      }
     };
     ws.onerror = () => ws.close();
     ws.onmessage = (evt) => {
@@ -201,10 +202,11 @@ export default function SatellitePage() {
   useEffect(() => {
     connectWs();
     return () => {
+      wsClosingRef.current = true;
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
       if (wsRef.current) wsRef.current.close();
     };
-  }, [connectWs, authToken]);
+  }, [connectWs]);
 
   const addLog = useCallback((line: string) => {
     setLogLines(prev => [...prev, line]);

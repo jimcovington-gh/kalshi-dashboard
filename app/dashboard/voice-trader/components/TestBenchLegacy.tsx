@@ -392,7 +392,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [sessionId, setSessionId] = useState<string | null>(null);
   
   // Setup form state
-  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop' | 'paramount' | 'netflix' | 'appletv' | 'listener' | 'srt'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop' | 'paramount' | 'netflix' | 'appletv' | 'peacock' | 'listener' | 'srt'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
@@ -406,6 +406,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [paramountUrl, setParamountUrl] = useState('https://www.paramountplus.com/live-tv/');
   const [netflixUrl, setNetflixUrl] = useState('https://www.netflix.com/browse');
   const [appletvUrl, setAppletvUrl] = useState('https://tv.apple.com/sports');
+  const [peacockUrl, setPeacockUrl] = useState('https://www.peacocktv.com/sports');
 
   // Satellite TV channel picker
   interface SatStream { stream_id: number; channel_name: string; status: string; thumb_url: string; }
@@ -1800,8 +1801,8 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
     // Open the VNC window synchronously NOW (while in user-gesture context) so browsers
     // don't block it as a popup from an async callback.
     let vncWindow: Window | null = null;
-    if (audioSource === 'desktop' || audioSource === 'paramount' || audioSource === 'netflix' || audioSource === 'appletv') {
-      const vncName = audioSource === 'paramount' ? 'paramount-vnc' : audioSource === 'netflix' ? 'netflix-vnc' : audioSource === 'appletv' ? 'appletv-vnc' : 'prime-vnc';
+    if (audioSource === 'desktop' || audioSource === 'paramount' || audioSource === 'netflix' || audioSource === 'appletv' || audioSource === 'peacock') {
+      const vncName = audioSource === 'paramount' ? 'paramount-vnc' : audioSource === 'netflix' ? 'netflix-vnc' : audioSource === 'appletv' ? 'appletv-vnc' : audioSource === 'peacock' ? 'peacock-vnc' : 'prime-vnc';
       vncWindow = window.open('about:blank', vncName,
         'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes');
       if (!vncWindow) {
@@ -1818,6 +1819,8 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
         ? { endpoint: '/netflix/start', url: netflixUrl, port: 4403, novnc: '/netflix/novnc', label: 'Netflix' }
         : audioSource === 'appletv'
         ? { endpoint: '/appletv/start', url: appletvUrl, port: 4404, novnc: '/appletv/novnc', label: 'Apple TV+' }
+        : audioSource === 'peacock'
+        ? { endpoint: '/peacock/start', url: peacockUrl, port: 4405, novnc: '/peacock/novnc', label: 'Peacock' }
         : { endpoint: '/prime/start', url: primeUrl, port: 4400, novnc: '/prime/novnc', label: 'Prime' };
 
       try {
@@ -1881,6 +1884,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                     : audioSource === 'paramount' ? 'desktop'
                     : audioSource === 'netflix' ? 'desktop'
                     : audioSource === 'appletv' ? 'desktop'
+                    : audioSource === 'peacock' ? 'desktop'
                     : audioSource === 'srt' ? 'srt_listener'
                     : audioSource,
       };
@@ -1910,6 +1914,8 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
         body.desktop_port = 4403;
       } else if (audioSource === 'appletv') {
         body.desktop_port = 4404;
+      } else if (audioSource === 'peacock') {
+        body.desktop_port = 4405;
       }
       
       // Speaker diarization — only enable when user wants speaker labels
@@ -2782,6 +2788,12 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
               🍎 Apple TV+
             </button>
             <button
+              className={`px-4 py-2 rounded ${audioSource === 'peacock' ? 'bg-yellow-600' : 'bg-gray-700'}`}
+              onClick={() => setAudioSource('peacock')}
+            >
+              🦚 Peacock
+            </button>
+            <button
               className={`px-4 py-2 rounded ${audioSource === 'listener' ? 'bg-teal-600' : 'bg-gray-700'}`}
               onClick={() => setAudioSource('listener')}
             >
@@ -2981,6 +2993,25 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
               <div className="bg-gray-800/50 border border-gray-600 rounded-lg p-3 text-sm text-gray-200 space-y-1">
                 <p className="font-medium">🍎 How it works</p>
                 <p className="text-xs text-gray-300">Chrome opens on the EC2 server on a separate display. After launch, click <strong>Open VNC</strong> to see and control the browser — navigate to your live event and press play. Audio streams automatically to the voice trader.</p>
+              </div>
+            </div>
+          )}
+
+          {audioSource === 'peacock' && (
+            <div className="space-y-3 mb-6">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Peacock URL <span className="text-gray-500">(optional — you can navigate in the VNC window)</span></label>
+                <input
+                  type="text"
+                  value={peacockUrl}
+                  onChange={e => setPeacockUrl(e.target.value)}
+                  placeholder="https://www.peacocktv.com/sports"
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-white"
+                />
+              </div>
+              <div className="bg-yellow-900/30 border border-yellow-700 rounded-lg p-3 text-sm text-yellow-200 space-y-1">
+                <p className="font-medium">🦚 How it works</p>
+                <p className="text-xs text-yellow-300">Chrome opens on the EC2 server on a separate display. After launch, click <strong>Open VNC</strong> to see and control the browser — navigate to your live event and press play. Audio streams automatically to the voice trader.</p>
               </div>
             </div>
           )}
@@ -3308,6 +3339,26 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             </button>
             <button
               onClick={async () => { await fetchWithAuth(`${EC2_BASE}/appletv/stop`, { method: 'POST' }); }}
+              className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
+            >
+              Stop Capture
+            </button>
+          </div>
+        )}
+
+        {/* PEACOCK BANNER */}
+        {audioSource === 'peacock' && (
+          <div className="bg-yellow-900/40 border border-yellow-700 px-3 py-2 rounded-lg mb-2 flex items-center gap-3 text-sm">
+            <span className="text-yellow-200 font-medium">🦚 Peacock capture running</span>
+            <button
+              onClick={() => window.open(`${EC2_BASE}/peacock/novnc`, 'peacock-vnc',
+                'width=1280,height=800,toolbar=no,menubar=no,scrollbars=no,resizable=yes')}
+              className="px-3 py-1 bg-yellow-600 hover:bg-yellow-500 text-white rounded font-medium transition-colors"
+            >
+              🖥️ Open VNC Viewer
+            </button>
+            <button
+              onClick={async () => { await fetchWithAuth(`${EC2_BASE}/peacock/stop`, { method: 'POST' }); }}
               className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
             >
               Stop Capture

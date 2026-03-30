@@ -713,7 +713,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
               status: hb.call_state || s.status || 'running',
               call_state: hb.call_state || 'unknown',
               started_at: s.started_at || '',
-              websocket_url: WS_BASE,
+              websocket_url: `${WS_BASE}/ws/${sid}`,
               audio_source: hb.audio_source,
             });
           }
@@ -3405,37 +3405,15 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                         paused: newPaused 
                       }));
                     }
-                    // Riva flush on trading pause DISABLED — was causing more problems than it solved
-                    // To re-enable: uncomment the block below
-                    /*
-                    const usesSatelliteRiva = audioSource === 'satellite' || (audioSource === 'web' && !youtubeSrtMode);
-                    if (newPaused && usesSatelliteRiva) {
+                    // Flush Riva when trading is ENABLED to drain stale partials from the pipeline
+                    if (!newPaused) {
                       try {
                         const params = selectedSatStreamId !== null ? `?stream_id=${selectedSatStreamId}` : '';
-                        const r = await fetchWithAuth(`${EC2_BASE}/satellite/flush_riva${params}`, { method: 'POST' });
-                        if (r.ok) {
-                          const result = await r.json();
-                          setSystemLog(prev => [...prev, {
-                            timestamp: Date.now() / 1000,
-                            message: `🔄 Riva flushed (trading paused) — restarted ${result.restarted}/${result.total} stream(s)`,
-                            level: 'info' as const
-                          }]);
-                        } else {
-                          setSystemLog(prev => [...prev, {
-                            timestamp: Date.now() / 1000,
-                            message: `⚠️ Riva flush failed (trading paused): HTTP ${r.status}`,
-                            level: 'warning' as const
-                          }]);
-                        }
-                      } catch (err) {
-                        setSystemLog(prev => [...prev, {
-                          timestamp: Date.now() / 1000,
-                          message: `⚠️ Riva flush error (trading paused): ${err instanceof Error ? err.message : String(err)}`,
-                          level: 'warning' as const
-                        }]);
+                        await fetchWithAuth(`${EC2_BASE}/satellite/flush_riva${params}`, { method: 'POST' });
+                      } catch (_) {
+                        // Best-effort flush — satellite may not be running
                       }
                     }
-                    */
                   }}
                   className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                     containerState?.detection_paused 

@@ -119,6 +119,7 @@ interface RunningVoiceContainer {
   started_at: string;
   public_ip?: string;
   websocket_url?: string;
+  audio_source?: string;
 }
 
 interface EC2Status {
@@ -188,10 +189,12 @@ function SatSnapshotImg({ streamId, ec2Base, authToken }: { streamId: number; ec
 // Satellite HLS video monitor — 640x360, with keepalive pings every 30s
 const SATELLITE_PROXY = `https://${VOICE_TRADER_HOST}:8091`;  // satellite reverse proxy (same as satellite page)
 
-function SatelliteVideoMonitor({ streamId, fetchWithAuth, authToken }: {
+function SatelliteVideoMonitor({ streamId, fetchWithAuth, authToken, audioMuted, audioVolume }: {
   streamId: number;
   fetchWithAuth: (url: string, opts?: RequestInit) => Promise<Response>;
   authToken: string | null;
+  audioMuted: boolean;
+  audioVolume: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<InstanceType<typeof HlsType> | null>(null);
@@ -292,21 +295,55 @@ function SatelliteVideoMonitor({ streamId, fetchWithAuth, authToken }: {
       hlsRef.current?.destroy();
       hlsRef.current = null;
     };
-  }, [hlsUrl]);
+  }, [hlsUrl, hlsError]);  // hlsError dependency triggers re-create on stall recovery
 
-  // Live-edge sync: if playback falls >3s behind live edge, snap forward
+  // Sync video muted/volume with the main Speaker button
   useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = audioMuted;
+    video.volume = audioVolume;
+  }, [audioMuted, audioVolume]);
+
+  // Live-edge sync + stall detection: snap forward if behind, detect dead streams
+  useEffect(() => {
+    let lastTime = -1;
+    let stallCount = 0;
     const iv = setInterval(() => {
       const video = videoRef.current;
       const hls = hlsRef.current;
-      if (!video || !hls || video.paused) return;
-      const liveEdge = hls.liveSyncPosition;
-      if (liveEdge && video.currentTime < liveEdge - 3) {
-        video.currentTime = liveEdge;
+      if (!video || !hls) return;
+
+      // Stall detection: if time hasn't advanced in ~8s while playing, stream is dead
+      if (!video.paused && hlsStatus === 'playing') {
+        if (lastTime >= 0 && video.currentTime === lastTime) {
+          stallCount++;
+          if (stallCount >= 4) {
+            // Stream is dead — trigger recovery by destroying and recreating HLS
+            setHlsStatus('stalled — recovering...');
+            stallCount = 0;
+            hls.destroy();
+            hlsRef.current = null;
+            // Force re-mount by toggling the effect dependency
+            setHlsError('stream_stall_recovery');
+            setTimeout(() => setHlsError(null), 100);
+          }
+        } else {
+          stallCount = 0;
+        }
+      }
+      lastTime = video.currentTime;
+
+      // Live-edge sync: snap forward if >3s behind
+      if (!video.paused) {
+        const liveEdge = hls.liveSyncPosition;
+        if (liveEdge && video.currentTime < liveEdge - 3) {
+          video.currentTime = liveEdge;
+        }
       }
     }, 2000);
     return () => clearInterval(iv);
-  }, []);
+  }, [hlsStatus]);
 
   // Keepalive ping every 30s — hits satellite API via port 8091
   useEffect(() => {
@@ -328,12 +365,18 @@ function SatelliteVideoMonitor({ streamId, fetchWithAuth, authToken }: {
         {hlsError && <span className="text-xs text-red-400">{hlsError}</span>}
       </div>
       <video
+        id="satellite-video"
         ref={videoRef}
         muted
         autoPlay
         playsInline
         className="rounded bg-black"
         style={{ width: '640px', height: '360px', objectFit: 'contain' }}
+        onCanPlay={() => {
+          // Once autoplay has started, sync muted state with Speaker button
+          const v = videoRef.current;
+          if (v) { v.muted = audioMuted; v.volume = audioVolume; }
+        }}
       />
     </div>
   );
@@ -396,6 +439,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const partialRatchetRef = useRef<string>('');  // max-length text seen this utterance
   const [partialDisplay, setPartialDisplay] = useState<string>('');  // drives render
   const finalsScrollRef = useRef<HTMLDivElement | null>(null);
+  const partialScrollRef = useRef<HTMLDivElement | null>(null);
   const [systemLog, setSystemLog] = useState<SystemLogEntry[]>([]);  // System log - never truncated
   const [lastSpeakerId, setLastSpeakerId] = useState<string | null>(null);  // Track speaker changes
   const wsConnectedOnceRef = useRef<boolean>(false);  // Track if we've logged connection once
@@ -594,6 +638,13 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
     }
   }, [finalSegments]);
 
+  // Auto-scroll partials panel to bottom when partial text updates
+  useEffect(() => {
+    if (partialScrollRef.current) {
+      partialScrollRef.current.scrollTop = partialScrollRef.current.scrollHeight;
+    }
+  }, [partialDisplay]);
+
   // Fetch events and running containers
   useEffect(() => {
     if (pageState !== 'events' || !authToken) return;
@@ -648,21 +699,25 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
         
         if (response.ok) {
           const data = await response.json();
-          // Convert single session status to container list format
-          if (data.status !== 'idle' && data.session_id) {
-            setRunningContainers([{
-              session_id: data.session_id || 'current',
-              event_ticker: data.event_ticker,
-              title: data.event_ticker,
-              user_name: data.user_name || 'unknown',
-              status: data.status,
-              call_state: data.call_state,
-              started_at: data.started_at,
-              websocket_url: WS_BASE
-            }]);
-          } else {
-            setRunningContainers([]);
+          // Parse multi-session /status response
+          const sessions = data.sessions || {};
+          const containers: RunningVoiceContainer[] = [];
+          for (const [sid, info] of Object.entries(sessions)) {
+            const s = info as any;
+            const hb = s.heartbeat || {};
+            containers.push({
+              session_id: sid,
+              event_ticker: s.event_ticker || hb.event_ticker || sid,
+              title: s.event_ticker || hb.event_ticker || sid,
+              user_name: s.user_name || hb.user_name || 'unknown',
+              status: hb.call_state || s.status || 'running',
+              call_state: hb.call_state || 'unknown',
+              started_at: s.started_at || '',
+              websocket_url: WS_BASE,
+              audio_source: hb.audio_source,
+            });
           }
+          setRunningContainers(containers);
         }
       } catch (err) {
         console.error('Error fetching status:', err);
@@ -1969,6 +2024,32 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
       });
     }
     
+    // Restore audio source for satellite sessions
+    if (container.audio_source === 'satellite_transcript') {
+      setAudioSource('satellite');
+      // Fetch available satellite streams to restore stream ID
+      try {
+        const streamsRes = await fetchWithAuth(`${EC2_BASE}/satellite/streams`);
+        const streamsData = await streamsRes.json();
+        const activeStreams = streamsData.streams || [];
+        setSatStreams(activeStreams);
+        if (activeStreams.length > 0) {
+          setSelectedSatStreamId(activeStreams[0].stream_id);
+        }
+      } catch {
+        // Satellite stream fetch failed — video won't render but transcripts still work
+        console.warn('Could not fetch satellite streams for reconnect');
+      }
+    } else if (container.audio_source) {
+      // Map worker audio_source back to dashboard audioSource values
+      const sourceMap: Record<string, typeof audioSource> = {
+        'phone': 'phone', 'web': 'web', 'desktop': 'desktop',
+        'srt_listener': 'srt',
+      };
+      const mapped = sourceMap[container.audio_source];
+      if (mapped) setAudioSource(mapped);
+    }
+
     if (container.websocket_url) {
       const wsUrlWithToken = token
         ? `${container.websocket_url}?token=${encodeURIComponent(token)}`
@@ -3632,7 +3713,15 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
-                setAudioMuted(!audioMuted);
+                const newMuted = !audioMuted;
+                setAudioMuted(newMuted);
+                // Directly sync satellite video muted state in user-gesture call stack
+                // (useEffect runs after paint, may miss browser gesture window)
+                const satVideo = document.getElementById('satellite-video') as HTMLVideoElement;
+                if (satVideo) {
+                  satVideo.muted = newMuted;
+                  satVideo.volume = audioVolume;
+                }
                 // Resume audio context on user interaction (required by browsers)
                 if (audioContextRef.current?.state === 'suspended') {
                   audioContextRef.current.resume();
@@ -3714,6 +3803,8 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             streamId={selectedSatStreamId}
             fetchWithAuth={fetchWithAuth}
             authToken={authToken}
+            audioMuted={audioMuted}
+            audioVolume={audioVolume}
           />
         )}
 
@@ -4124,7 +4215,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             {/* Finals panel — scrolls only when a new final arrives */}
             <div
               ref={finalsScrollRef}
-              className="text-xs font-mono overflow-y-auto h-36 space-y-0.5"
+              className="text-xs font-mono overflow-y-auto h-28 space-y-0.5"
             >
               {finalSegments.slice(-100).map(seg => {
                 const time = seg.timestamp ? new Date(seg.timestamp * 1000).toLocaleTimeString() : '';
@@ -4144,8 +4235,8 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
               })}
             </div>
 
-            {/* Partial — ratcheted: only grows, never shrinks, fixed height, never reflows page */}
-            <div className="border-t border-gray-700 pt-1 h-24 overflow-hidden">
+            {/* Partial — ratcheted: only grows, never shrinks, scrollable */}
+            <div ref={partialScrollRef} className="border-t border-gray-700 pt-1 h-32 overflow-y-auto">
               {partialDisplay ? (
                 <p className="text-xs font-mono text-gray-400 italic leading-tight m-0">{partialDisplay}</p>
               ) : (

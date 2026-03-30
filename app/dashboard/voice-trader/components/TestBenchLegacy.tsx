@@ -186,15 +186,20 @@ function SatSnapshotImg({ streamId, ec2Base, authToken }: { streamId: number; ec
 }
 
 // Satellite HLS video monitor — 640x360, with keepalive pings every 30s
-function SatelliteVideoMonitor({ hlsUrl, streamId, ec2Base, fetchWithAuth }: {
+function SatelliteVideoMonitor({ hlsUrl, streamId, ec2Base, fetchWithAuth, authToken }: {
   hlsUrl: string;
   streamId: number;
   ec2Base: string;
   fetchWithAuth: (url: string, opts?: RequestInit) => Promise<Response>;
+  authToken: string | null;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const tokenRef = useRef<string | null>(authToken);
   const [hlsError, setHlsError] = useState<string | null>(null);
+
+  // Keep token ref in sync with prop
+  useEffect(() => { tokenRef.current = authToken; }, [authToken]);
 
   // HLS.js player
   useEffect(() => {
@@ -212,7 +217,7 @@ function SatelliteVideoMonitor({ hlsUrl, streamId, ec2Base, fetchWithAuth }: {
       return;
     }
 
-    const hlsConfig = {
+    const hlsConfig: Partial<import('hls.js').HlsConfig> = {
       lowLatencyMode: true,
       liveSyncDurationCount: 2,       // Target 2 segments behind live edge (~2s with 1s segments)
       liveMaxLatencyDurationCount: 4,  // Auto-skip if >4 segments behind (~4s)
@@ -223,40 +228,47 @@ function SatelliteVideoMonitor({ hlsUrl, streamId, ec2Base, fetchWithAuth }: {
       manifestLoadingTimeOut: 8000,
       manifestLoadingMaxRetry: 3,
       fragLoadingTimeOut: 10000,
+      xhrSetup: (xhr: XMLHttpRequest) => {
+        if (tokenRef.current) {
+          xhr.setRequestHeader('Authorization', `Bearer ${tokenRef.current}`);
+        }
+      },
     };
 
-    const hls = new Hls(hlsConfig);
-
-    hls.loadSource(hlsUrl);
-    hls.attachMedia(videoRef.current);
-
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      videoRef.current?.play().catch(() => {});
-    });
-
     let retryAttempt = 0;
-    hls.on(Hls.Events.ERROR, (_, data) => {
-      if (data.fatal) {
-        if (retryAttempt < 5) {
-          const delay = Math.min(2000 * (retryAttempt + 1), 12000);
-          retryAttempt++;
-          hls.destroy();
-          setTimeout(() => {
-            if (!videoRef.current) return;
-            const newHls = new Hls(hlsConfig);
-            newHls.loadSource(hlsUrl);
-            newHls.attachMedia(videoRef.current!);
-            hlsRef.current = newHls;
-          }, delay);
-        } else {
-          setHlsError('Video stream failed — check satellite controller');
-        }
-      }
-    });
 
-    hlsRef.current = hls;
+    function createHls(): Hls {
+      const hls = new Hls(hlsConfig);
+      hls.loadSource(hlsUrl);
+      hls.attachMedia(videoRef.current!);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        videoRef.current?.play().catch(() => {});
+      });
+
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) {
+          if (retryAttempt < 5) {
+            const delay = Math.min(2000 * (retryAttempt + 1), 12000);
+            retryAttempt++;
+            hls.destroy();
+            setTimeout(() => {
+              if (!videoRef.current) return;
+              const newHls = createHls();
+              hlsRef.current = newHls;
+            }, delay);
+          } else {
+            setHlsError('Video stream failed — check satellite controller');
+          }
+        }
+      });
+
+      return hls;
+    }
+
+    hlsRef.current = createHls();
     return () => {
-      hls.destroy();
+      hlsRef.current?.destroy();
       hlsRef.current = null;
     };
   }, [hlsUrl]);
@@ -3679,6 +3691,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
               streamId={selectedSatStreamId}
               ec2Base={EC2_BASE}
               fetchWithAuth={fetchWithAuth}
+              authToken={authToken}
             />
           );
         })()}

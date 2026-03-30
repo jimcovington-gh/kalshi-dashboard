@@ -16,7 +16,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useRouter } from 'next/navigation';
-import Hls from 'hls.js';
+import type HlsType from 'hls.js';
 import { ListenerAdminPanel } from './ListenerAdminPanel';
 import { ListenerStatusBar } from './ListenerStatusBar';
 
@@ -186,88 +186,109 @@ function SatSnapshotImg({ streamId, ec2Base, authToken }: { streamId: number; ec
 }
 
 // Satellite HLS video monitor — 640x360, with keepalive pings every 30s
-function SatelliteVideoMonitor({ hlsUrl, streamId, ec2Base, fetchWithAuth, authToken }: {
-  hlsUrl: string;
+const SATELLITE_PROXY = `https://${VOICE_TRADER_HOST}:8091`;  // satellite reverse proxy (same as satellite page)
+
+function SatelliteVideoMonitor({ streamId, fetchWithAuth, authToken }: {
   streamId: number;
-  ec2Base: string;
   fetchWithAuth: (url: string, opts?: RequestInit) => Promise<Response>;
   authToken: string | null;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef = useRef<Hls | null>(null);
+  const hlsRef = useRef<InstanceType<typeof HlsType> | null>(null);
   const tokenRef = useRef<string | null>(authToken);
+  const [hlsStatus, setHlsStatus] = useState<string>('initializing');
   const [hlsError, setHlsError] = useState<string | null>(null);
 
   // Keep token ref in sync with prop
   useEffect(() => { tokenRef.current = authToken; }, [authToken]);
 
-  // HLS.js player
+  // HLS URL — goes through port 8091 directly (same path as the satellite page iframe)
+  const hlsUrl = `${SATELLITE_PROXY}/hls/stream_${streamId}/thumb/index.m3u8`;
+
+  // HLS.js player — dynamic import to avoid SSR issues
   useEffect(() => {
     if (!videoRef.current) return;
 
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
+    setHlsStatus('loading HLS.js...');
     setHlsError(null);
 
-    // Safari: native HLS support
-    if (!Hls.isSupported()) {
-      videoRef.current.src = hlsUrl;
-      return;
-    }
+    let cancelled = false;
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
 
-    const hlsConfig: Partial<import('hls.js').HlsConfig> = {
-      lowLatencyMode: true,
-      liveSyncDurationCount: 2,       // Target 2 segments behind live edge (~2s with 1s segments)
-      liveMaxLatencyDurationCount: 4,  // Auto-skip if >4 segments behind (~4s)
-      maxBufferLength: 4,              // Keep buffer small — 4s max
-      maxMaxBufferLength: 8,
-      autoStartLoad: true,
-      startPosition: -1,
-      manifestLoadingTimeOut: 8000,
-      manifestLoadingMaxRetry: 3,
-      fragLoadingTimeOut: 10000,
-      xhrSetup: (xhr: XMLHttpRequest) => {
-        if (tokenRef.current) {
-          xhr.setRequestHeader('Authorization', `Bearer ${tokenRef.current}`);
-        }
-      },
-    };
+    import('hls.js').then(({ default: Hls }) => {
+      if (cancelled || !videoRef.current) return;
 
-    let retryAttempt = 0;
+      // Safari: native HLS support
+      if (!Hls.isSupported()) {
+        videoRef.current.src = hlsUrl;
+        setHlsStatus('native HLS');
+        return;
+      }
 
-    function createHls(): Hls {
-      const hls = new Hls(hlsConfig);
-      hls.loadSource(hlsUrl);
-      hls.attachMedia(videoRef.current!);
+      setHlsStatus('loading manifest...');
 
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        videoRef.current?.play().catch(() => {});
-      });
-
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) {
-          if (retryAttempt < 5) {
-            const delay = Math.min(2000 * (retryAttempt + 1), 12000);
-            retryAttempt++;
-            hls.destroy();
-            setTimeout(() => {
-              if (!videoRef.current) return;
-              const newHls = createHls();
-              hlsRef.current = newHls;
-            }, delay);
-          } else {
-            setHlsError('Video stream failed — check satellite controller');
+      // Config matches the satellite page's working HLS config
+      const hlsConfig: Partial<import('hls.js').HlsConfig> = {
+        lowLatencyMode: true,
+        maxBufferLength: 10,
+        maxMaxBufferLength: 20,
+        autoStartLoad: true,
+        startPosition: -1,
+        manifestLoadingTimeOut: 8000,
+        manifestLoadingMaxRetry: 2,
+        fragLoadingTimeOut: 10000,
+        xhrSetup: (xhr: XMLHttpRequest) => {
+          if (tokenRef.current) {
+            xhr.setRequestHeader('Authorization', `Bearer ${tokenRef.current}`);
           }
-        }
-      });
+        },
+      };
 
-      return hls;
-    }
+      let retryAttempt = 0;
 
-    hlsRef.current = createHls();
+      function createHls(): InstanceType<typeof Hls> {
+        const hls = new Hls(hlsConfig);
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(videoRef.current!);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          setHlsStatus('playing');
+          videoRef.current?.play().catch(() => {});
+        });
+
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            const detail = `${data.type}/${data.details}`;
+            if (retryAttempt < 5) {
+              const delay = Math.min(2000 * (retryAttempt + 1), 12000);
+              retryAttempt++;
+              setHlsStatus(`retry ${retryAttempt}/5 (${detail})`);
+              hls.destroy();
+              retryTimeout = setTimeout(() => {
+                retryTimeout = null;
+                if (cancelled || !videoRef.current) return;
+                hlsRef.current = createHls();
+              }, delay);
+            } else {
+              setHlsError(`Stream failed after 5 retries: ${detail}`);
+              setHlsStatus('failed');
+            }
+          }
+        });
+
+        return hls;
+      }
+
+      hlsRef.current = createHls();
+    }).catch(err => {
+      if (cancelled) return;
+      setHlsError(`Failed to load HLS.js: ${err?.message || err}`);
+      setHlsStatus('failed');
+    });
+
     return () => {
+      cancelled = true;
+      if (retryTimeout) clearTimeout(retryTimeout);
       hlsRef.current?.destroy();
       hlsRef.current = null;
     };
@@ -287,20 +308,23 @@ function SatelliteVideoMonitor({ hlsUrl, streamId, ec2Base, fetchWithAuth, authT
     return () => clearInterval(iv);
   }, []);
 
-  // Keepalive ping every 30s
+  // Keepalive ping every 30s — hits satellite API via port 8091
   useEffect(() => {
     const iv = setInterval(() => {
-      fetchWithAuth(`${ec2Base}/satellite/keepalive/${streamId}`, { method: 'POST' }).catch(() => {});
+      fetchWithAuth(`${SATELLITE_PROXY}/api/streams/${streamId}/keepalive`, { method: 'POST' }).catch(() => {});
     }, 30000);
     // Send first keepalive immediately
-    fetchWithAuth(`${ec2Base}/satellite/keepalive/${streamId}`, { method: 'POST' }).catch(() => {});
+    fetchWithAuth(`${SATELLITE_PROXY}/api/streams/${streamId}/keepalive`, { method: 'POST' }).catch(() => {});
     return () => clearInterval(iv);
-  }, [ec2Base, streamId, fetchWithAuth]);
+  }, [streamId, fetchWithAuth]);
 
   return (
     <div className="mb-3 bg-gray-800 rounded-lg p-2 inline-block">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-xs text-gray-400">📡 Satellite Stream {streamId}</span>
+        <span className={`text-xs ${hlsStatus === 'playing' ? 'text-green-400' : hlsStatus === 'failed' ? 'text-red-400' : 'text-yellow-400'}`}>
+          [{hlsStatus}]
+        </span>
         {hlsError && <span className="text-xs text-red-400">{hlsError}</span>}
       </div>
       <video
@@ -3300,8 +3324,9 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                         paused: newPaused 
                       }));
                     }
-                    // Flush Riva when turning trading OFF — natural break, guaranteed back to real-time
-                    // Only for modes using satellite Riva: satellite, nbc_multi, YouTube local transcription
+                    // Riva flush on trading pause DISABLED — was causing more problems than it solved
+                    // To re-enable: uncomment the block below
+                    /*
                     const usesSatelliteRiva = audioSource === 'satellite' || (audioSource === 'web' && !youtubeSrtMode);
                     if (newPaused && usesSatelliteRiva) {
                       try {
@@ -3329,6 +3354,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                         }]);
                       }
                     }
+                    */
                   }}
                   className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                     containerState?.detection_paused 
@@ -3683,18 +3709,13 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
         />
         
         {/* Satellite Video Monitor — 640x360, with keepalive */}
-        {audioSource === 'satellite' && selectedSatStreamId !== null && (() => {
-          const hlsUrl = `${EC2_BASE}/satellite/hls/${selectedSatStreamId}/thumb/index.m3u8`;
-          return (
-            <SatelliteVideoMonitor
-              hlsUrl={hlsUrl}
-              streamId={selectedSatStreamId}
-              ec2Base={EC2_BASE}
-              fetchWithAuth={fetchWithAuth}
-              authToken={authToken}
-            />
-          );
-        })()}
+        {audioSource === 'satellite' && selectedSatStreamId !== null && (
+          <SatelliteVideoMonitor
+            streamId={selectedSatStreamId}
+            fetchWithAuth={fetchWithAuth}
+            authToken={authToken}
+          />
+        )}
 
         <div className="grid grid-cols-3 gap-4">
           {/* Left column: Word Grid - 5 columns for density */}

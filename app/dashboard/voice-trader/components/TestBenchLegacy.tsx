@@ -16,6 +16,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useRouter } from 'next/navigation';
+import Hls from 'hls.js';
 import { ListenerAdminPanel } from './ListenerAdminPanel';
 import { ListenerStatusBar } from './ListenerStatusBar';
 
@@ -181,6 +182,124 @@ function SatSnapshotImg({ streamId, ec2Base, authToken }: { streamId: number; ec
       style={{ minHeight: '90px' }}
       onError={e => { (e.currentTarget as HTMLImageElement).style.opacity = '0.2'; }}
     />
+  );
+}
+
+// Satellite HLS video monitor — 640x360, with keepalive pings every 30s
+function SatelliteVideoMonitor({ hlsUrl, streamId, ec2Base, fetchWithAuth }: {
+  hlsUrl: string;
+  streamId: number;
+  ec2Base: string;
+  fetchWithAuth: (url: string, opts?: RequestInit) => Promise<Response>;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  const [hlsError, setHlsError] = useState<string | null>(null);
+
+  // HLS.js player
+  useEffect(() => {
+    if (!videoRef.current) return;
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    setHlsError(null);
+
+    // Safari: native HLS support
+    if (!Hls.isSupported()) {
+      videoRef.current.src = hlsUrl;
+      return;
+    }
+
+    const hlsConfig = {
+      lowLatencyMode: true,
+      liveSyncDurationCount: 2,       // Target 2 segments behind live edge (~2s with 1s segments)
+      liveMaxLatencyDurationCount: 4,  // Auto-skip if >4 segments behind (~4s)
+      maxBufferLength: 4,              // Keep buffer small — 4s max
+      maxMaxBufferLength: 8,
+      autoStartLoad: true,
+      startPosition: -1,
+      manifestLoadingTimeOut: 8000,
+      manifestLoadingMaxRetry: 3,
+      fragLoadingTimeOut: 10000,
+    };
+
+    const hls = new Hls(hlsConfig);
+
+    hls.loadSource(hlsUrl);
+    hls.attachMedia(videoRef.current);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      videoRef.current?.play().catch(() => {});
+    });
+
+    let retryAttempt = 0;
+    hls.on(Hls.Events.ERROR, (_, data) => {
+      if (data.fatal) {
+        if (retryAttempt < 5) {
+          const delay = Math.min(2000 * (retryAttempt + 1), 12000);
+          retryAttempt++;
+          hls.destroy();
+          setTimeout(() => {
+            if (!videoRef.current) return;
+            const newHls = new Hls(hlsConfig);
+            newHls.loadSource(hlsUrl);
+            newHls.attachMedia(videoRef.current!);
+            hlsRef.current = newHls;
+          }, delay);
+        } else {
+          setHlsError('Video stream failed — check satellite controller');
+        }
+      }
+    });
+
+    hlsRef.current = hls;
+    return () => {
+      hls.destroy();
+      hlsRef.current = null;
+    };
+  }, [hlsUrl]);
+
+  // Live-edge sync: if playback falls >3s behind live edge, snap forward
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const video = videoRef.current;
+      const hls = hlsRef.current;
+      if (!video || !hls || video.paused) return;
+      const liveEdge = hls.liveSyncPosition;
+      if (liveEdge && video.currentTime < liveEdge - 3) {
+        video.currentTime = liveEdge;
+      }
+    }, 2000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Keepalive ping every 30s
+  useEffect(() => {
+    const iv = setInterval(() => {
+      fetchWithAuth(`${ec2Base}/satellite/keepalive/${streamId}`, { method: 'POST' }).catch(() => {});
+    }, 30000);
+    // Send first keepalive immediately
+    fetchWithAuth(`${ec2Base}/satellite/keepalive/${streamId}`, { method: 'POST' }).catch(() => {});
+    return () => clearInterval(iv);
+  }, [ec2Base, streamId, fetchWithAuth]);
+
+  return (
+    <div className="mb-3 bg-gray-800 rounded-lg p-2 inline-block">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-xs text-gray-400">📡 Satellite Stream {streamId}</span>
+        {hlsError && <span className="text-xs text-red-400">{hlsError}</span>}
+      </div>
+      <video
+        ref={videoRef}
+        muted
+        autoPlay
+        playsInline
+        className="rounded bg-black"
+        style={{ width: '640px', height: '360px', objectFit: 'contain' }}
+      />
+    </div>
   );
 }
 
@@ -3551,6 +3670,19 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
           }}
         />
         
+        {/* Satellite Video Monitor — 640x360, with keepalive */}
+        {audioSource === 'satellite' && selectedSatStreamId !== null && (() => {
+          const hlsUrl = `${EC2_BASE}/satellite/hls/${selectedSatStreamId}/thumb/index.m3u8`;
+          return (
+            <SatelliteVideoMonitor
+              hlsUrl={hlsUrl}
+              streamId={selectedSatStreamId}
+              ec2Base={EC2_BASE}
+              fetchWithAuth={fetchWithAuth}
+            />
+          );
+        })()}
+
         <div className="grid grid-cols-3 gap-4">
           {/* Left column: Word Grid - 5 columns for density */}
           <div className="col-span-2 bg-gray-800 rounded-lg p-3 max-h-[350px] overflow-y-auto">

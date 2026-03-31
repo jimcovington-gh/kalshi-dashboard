@@ -392,7 +392,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [sessionId, setSessionId] = useState<string | null>(null);
   
   // Setup form state
-  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop' | 'paramount' | 'netflix' | 'appletv' | 'peacock' | 'listener' | 'srt'>('phone');
+  const [audioSource, setAudioSource] = useState<'phone' | 'web' | 'satellite' | 'desktop' | 'paramount' | 'netflix' | 'appletv' | 'peacock' | 'listener' | 'srt' | 'zoom'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('+12026268888');
   const [passcode, setPasscode] = useState('');
   const [webUrl, setWebUrl] = useState('');
@@ -407,6 +407,8 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [netflixUrl, setNetflixUrl] = useState('https://www.netflix.com/browse');
   const [appletvUrl, setAppletvUrl] = useState('https://tv.apple.com/sports');
   const [peacockUrl, setPeacockUrl] = useState('https://www.peacocktv.com/sports');
+  const [zoomMeetingUrl, setZoomMeetingUrl] = useState('');
+  const [zoomSocketPath, setZoomSocketPath] = useState('/tmp/zoom_audio.sock');
 
   // Satellite TV channel picker
   interface SatStream { stream_id: number; channel_name: string; status: string; thumb_url: string; }
@@ -1886,6 +1888,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                     : audioSource === 'appletv' ? 'desktop'
                     : audioSource === 'peacock' ? 'desktop'
                     : audioSource === 'srt' ? 'srt_listener'
+                    : audioSource === 'zoom' ? 'unix_socket'
                     : audioSource,
       };
 
@@ -1916,6 +1919,11 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
         body.desktop_port = 4404;
       } else if (audioSource === 'peacock') {
         body.desktop_port = 4405;
+      } else if (audioSource === 'zoom') {
+        body.unix_socket_path = zoomSocketPath;
+        if (zoomMeetingUrl) {
+          body.zoom_meeting_url = zoomMeetingUrl;
+        }
       }
       
       // Speaker diarization — only enable when user wants speaker labels
@@ -2805,6 +2813,12 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             >
               📡 SRT Feed
             </button>
+            <button
+              className={`px-4 py-2 rounded ${audioSource === 'zoom' ? 'bg-blue-500' : 'bg-gray-700'}`}
+              onClick={() => setAudioSource('zoom')}
+            >
+              🎥 Zoom Call
+            </button>
 
           </div>
           
@@ -2849,6 +2863,36 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
                   className="w-full bg-gray-700 rounded px-3 py-2 text-white"
                 />
                 <p className="text-xs text-gray-500 mt-1">Leave blank if no passcode needed. Include # or * if required</p>
+              </div>
+            </div>
+          )}
+
+          {audioSource === 'zoom' && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Zoom Meeting URL</label>
+                <input
+                  type="text"
+                  value={zoomMeetingUrl}
+                  onChange={e => setZoomMeetingUrl(e.target.value)}
+                  placeholder="https://us02web.zoom.us/j/12345678?pwd=..."
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-white"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Paste Zoom invite link. A headless browser will join and capture audio via PulseAudio.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Unix Socket Path</label>
+                <input
+                  type="text"
+                  value={zoomSocketPath}
+                  onChange={e => setZoomSocketPath(e.target.value)}
+                  className="w-full bg-gray-700 rounded px-3 py-2 text-white font-mono text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  PCM audio socket. Default works unless running multiple taps.
+                </p>
               </div>
             </div>
           )}

@@ -230,7 +230,7 @@ export default function SatellitePage() {
           const active = streamsData.streams || [];
           if (active.length > 0) {
             await Promise.all(active.map((s: { stream_id: string }) =>
-              fetchWithAuth(`${SATELLITE_PROXY}/api/streams/${s.stream_id}`, { method: 'DELETE' }).catch(() => {})
+              fetchWithAuth(`${SATELLITE_PROXY}/api/streams/${s.stream_id}?force=true`, { method: 'DELETE' }).catch(() => {})
             ));
             addLog(`  Stopped ${active.length} stream(s)`);
           } else {

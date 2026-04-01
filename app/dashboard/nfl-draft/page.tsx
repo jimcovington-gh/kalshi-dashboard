@@ -126,6 +126,42 @@ const MODE_COLORS: Record<string, string> = {
   low_wallet: 'bg-purple-100 text-purple-800 border-purple-300',
 };
 
+// All 32 NFL teams sorted alphabetically by city
+const NFL_TEAMS = [
+  { abbr: 'ARI', label: 'Arizona Cardinals' },
+  { abbr: 'ATL', label: 'Atlanta Falcons' },
+  { abbr: 'BAL', label: 'Baltimore Ravens' },
+  { abbr: 'BUF', label: 'Buffalo Bills' },
+  { abbr: 'CAR', label: 'Carolina Panthers' },
+  { abbr: 'CHI', label: 'Chicago Bears' },
+  { abbr: 'CIN', label: 'Cincinnati Bengals' },
+  { abbr: 'CLE', label: 'Cleveland Browns' },
+  { abbr: 'DAL', label: 'Dallas Cowboys' },
+  { abbr: 'DEN', label: 'Denver Broncos' },
+  { abbr: 'DET', label: 'Detroit Lions' },
+  { abbr: 'GB', label: 'Green Bay Packers' },
+  { abbr: 'HOU', label: 'Houston Texans' },
+  { abbr: 'IND', label: 'Indianapolis Colts' },
+  { abbr: 'JAX', label: 'Jacksonville Jaguars' },
+  { abbr: 'KC', label: 'Kansas City Chiefs' },
+  { abbr: 'LAC', label: 'Los Angeles Chargers' },
+  { abbr: 'LAR', label: 'Los Angeles Rams' },
+  { abbr: 'LV', label: 'Las Vegas Raiders' },
+  { abbr: 'MIA', label: 'Miami Dolphins' },
+  { abbr: 'MIN', label: 'Minnesota Vikings' },
+  { abbr: 'NE', label: 'New England Patriots' },
+  { abbr: 'NO', label: 'New Orleans Saints' },
+  { abbr: 'NYG', label: 'New York Giants' },
+  { abbr: 'NYJ', label: 'New York Jets' },
+  { abbr: 'PHI', label: 'Philadelphia Eagles' },
+  { abbr: 'PIT', label: 'Pittsburgh Steelers' },
+  { abbr: 'SEA', label: 'Seattle Seahawks' },
+  { abbr: 'SF', label: 'San Francisco 49ers' },
+  { abbr: 'TB', label: 'Tampa Bay Buccaneers' },
+  { abbr: 'TEN', label: 'Tennessee Titans' },
+  { abbr: 'WAS', label: 'Washington Commanders' },
+];
+
 // --- Page ---
 
 export default function NFLDraftPage() {
@@ -152,6 +188,7 @@ export default function NFLDraftPage() {
   const [transcriptInjectInput, setTranscriptInjectInput] = useState('');
   const [selectedMode, setSelectedMode] = useState('dry_run');
   const [walletLimitInput, setWalletLimitInput] = useState('100');
+  const [bridgeRestarting, setBridgeRestarting] = useState(false);
 
   // Computed
   const currentPick = picks.find(p => p.pick_number === (status?.current_pick ?? 0));
@@ -296,6 +333,21 @@ export default function NFLDraftPage() {
     }
   };
 
+  const handleBridgeRestart = async () => {
+    setBridgeRestarting(true);
+    try {
+      const resp = await fetch(`${API_BASE}/bridge/restart`, { method: 'POST' });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({ detail: 'Unknown error' }));
+        setErrors(prev => [...prev.slice(-19), `Bridge restart failed: ${data.detail || resp.statusText}`]);
+      }
+    } catch (e) {
+      setErrors(prev => [...prev.slice(-19), `Bridge restart failed: ${e}`]);
+    } finally {
+      setTimeout(() => setBridgeRestarting(false), 3000);
+    }
+  };
+
   // Audio level bar helper — maps dBFS to 0-100%
   const dbToPercent = (db: number) => Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
 
@@ -415,17 +467,21 @@ export default function NFLDraftPage() {
             <div>
               <label className="text-xs text-gray-500 font-medium">Manual Fire</label>
               <div className="flex gap-1 mt-1">
-                <input
-                  type="text"
+                <select
                   value={manualPlayerInput}
                   onChange={e => setManualPlayerInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleManualFire()}
-                  placeholder="Player name..."
-                  className="flex-1 px-2 py-1.5 border rounded text-sm"
-                />
+                  className="flex-1 px-2 py-1.5 border rounded text-sm bg-white"
+                >
+                  <option value="">Select player...</option>
+                  {prospects.filter(p => !p.drafted).map(p => (
+                    <option key={p.suffix} value={p.name}>
+                      {p.name} ({p.position})
+                    </option>
+                  ))}
+                </select>
                 <button onClick={handleManualFire}
                   className="px-3 py-1.5 bg-red-600 text-white rounded text-sm font-medium hover:bg-red-700 disabled:opacity-50"
-                  disabled={!connected || !manualPlayerInput.trim()}>
+                  disabled={!connected || !manualPlayerInput}>
                   🔥 FIRE
                 </button>
               </div>
@@ -435,20 +491,23 @@ export default function NFLDraftPage() {
             <div>
               <label className="text-xs text-gray-500 font-medium">Team Override (trade)</label>
               <div className="flex gap-1 mt-1">
-                <input
-                  type="text"
+                <select
                   value={teamOverrideInput}
-                  onChange={e => setTeamOverrideInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleTeamOverride()}
-                  placeholder="ARI, NYJ..."
-                  className="flex-1 px-2 py-1.5 border rounded text-sm uppercase"
-                  maxLength={3}
-                />
-                <button onClick={handleTeamOverride}
-                  className="px-3 py-1.5 bg-blue-500 text-white rounded text-sm hover:bg-blue-600 disabled:opacity-50"
-                  disabled={!connected || !teamOverrideInput.trim()}>
-                  SET
-                </button>
+                  onChange={e => {
+                    setTeamOverrideInput(e.target.value);
+                    if (e.target.value && status?.current_pick) {
+                      wsSend({ type: 'update_team', pick_number: status.current_pick, team: e.target.value });
+                    }
+                  }}
+                  className="flex-1 px-2 py-1.5 border rounded text-sm bg-white"
+                >
+                  <option value="">Select team...</option>
+                  {NFL_TEAMS.map(t => (
+                    <option key={t.abbr} value={t.abbr}>
+                      {t.abbr} — {t.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>
@@ -587,19 +646,39 @@ export default function NFLDraftPage() {
         {/* Right Column: Audio Status + Transcript + Prospect Pool */}
         <div className="col-span-4 space-y-4">
 
-          {/* Audio Status Panel */}
+          {/* Audio / Mumble Bridge Panel */}
           <div className="bg-white rounded-lg shadow p-4">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-sm font-semibold text-gray-500 uppercase">Audio</h2>
-              <div className="flex items-center gap-2">
-                <span className={`inline-block w-2 h-2 rounded-full ${audioStats?.mumble_connected ? 'bg-green-500' : 'bg-red-500'}`} />
-                <span className="text-xs text-gray-500">
-                  {audioStats?.mumble_connected ? 'Mumble' : 'No Mumble'}
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-500 uppercase">Mumble Bridge</h2>
+              <button
+                onClick={handleBridgeRestart}
+                disabled={bridgeRestarting}
+                className="px-2 py-1 text-[10px] font-medium rounded bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50"
+              >
+                {bridgeRestarting ? '⏳ Restarting...' : '🔄 Restart Bridge'}
+              </button>
+            </div>
+
+            {/* Connection Status */}
+            <div className="flex items-center gap-4 mb-3 text-xs">
+              <div className="flex items-center gap-1.5">
+                <span className={`inline-block w-2.5 h-2.5 rounded-full ${audioStats?.mumble_connected ? 'bg-green-500' : 'bg-red-500'}`} />
+                <span className={audioStats?.mumble_connected ? 'text-green-700 font-medium' : 'text-red-600 font-medium'}>
+                  {audioStats?.mumble_connected ? 'Mumble Connected' : 'Mumble Disconnected'}
                 </span>
-                {audioStats?.receiving && (
-                  <span className="text-xs text-green-600 font-medium">● Receiving</span>
-                )}
               </div>
+              <div className="flex items-center gap-1.5">
+                <span className={`inline-block w-2.5 h-2.5 rounded-full ${audioStats ? 'bg-green-500' : 'bg-red-500'}`} />
+                <span className={audioStats ? 'text-green-700 font-medium' : 'text-red-600 font-medium'}>
+                  {audioStats ? 'Bridge Active' : 'Bridge Offline'}
+                </span>
+              </div>
+              {audioStats?.receiving && (
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
+                  <span className="text-green-700 font-medium">Audio Receiving</span>
+                </div>
+              )}
             </div>
 
             {audioStats ? (
@@ -611,12 +690,10 @@ export default function NFLDraftPage() {
                     <span>Peak {audioStats.peak_db.toFixed(0)} dBFS</span>
                   </div>
                   <div className="relative h-4 bg-gray-100 rounded overflow-hidden">
-                    {/* RMS bar */}
                     <div
                       className={`absolute inset-y-0 left-0 rounded transition-all duration-200 ${audioStats.clipping ? 'bg-red-500' : audioStats.silence ? 'bg-gray-300' : 'bg-green-500'}`}
                       style={{ width: `${dbToPercent(audioStats.rms_db)}%` }}
                     />
-                    {/* Peak indicator */}
                     <div
                       className="absolute inset-y-0 w-0.5 bg-yellow-500 transition-all duration-100"
                       style={{ left: `${dbToPercent(audioStats.peak_db)}%` }}
@@ -633,15 +710,18 @@ export default function NFLDraftPage() {
                     <span className="text-gray-400">Silence</span>
                   )}
                   {!audioStats.silence && !audioStats.clipping && audioStats.receiving && (
-                    <span className="text-green-600">Good</span>
+                    <span className="text-green-600">Good Signal</span>
                   )}
                   <span className="text-gray-400">
-                    Q: {audioStats.queue_size} | F: {audioStats.transcripts_final} | P: {audioStats.transcripts_partial}
+                    Queue: {audioStats.queue_size} | Finals: {audioStats.transcripts_final} | Partials: {audioStats.transcripts_partial}
                   </span>
                 </div>
               </div>
             ) : (
-              <div className="text-xs text-gray-400">No audio data — bridge not running</div>
+              <div className="bg-red-50 border border-red-200 rounded p-3 text-xs text-red-700">
+                <p className="font-medium">Bridge is not sending data.</p>
+                <p className="text-red-500 mt-1">Check that the mumble-bridge service is running on EC2 and that a Mumble client is connected to the server.</p>
+              </div>
             )}
           </div>
 

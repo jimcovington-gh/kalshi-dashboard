@@ -312,19 +312,13 @@ export default function NFLDraftPage() {
     }
   };
 
-  const handleTeamOverride = () => {
-    if (teamOverrideInput.trim() && status?.current_pick) {
-      wsSend({ type: 'update_team', pick_number: status.current_pick, team: teamOverrideInput.trim().toUpperCase() });
-      setTeamOverrideInput('');
-    }
-  };
-
   const handleInitialize = () => wsSend({
     type: 'initialize',
     testing_mode: selectedMode,
     wallet_limit: selectedMode === 'low_wallet' ? parseFloat(walletLimitInput) || 100 : undefined,
   });
   const handleAdvancePick = (n: number) => wsSend({ type: 'advance', pick_number: n });
+  const handleRemoveProspect = (name: string) => wsSend({ type: 'remove', player_name: name });
 
   const handleInjectTranscript = () => {
     if (transcriptInjectInput.trim()) {
@@ -774,7 +768,8 @@ export default function NFLDraftPage() {
                   <tr className="text-left text-gray-400 border-b sticky top-0 bg-white">
                     <th className="pb-1 pr-2">Player</th>
                     <th className="pb-1 pr-2">Pos</th>
-                    <th className="pb-1">Status</th>
+                    <th className="pb-1 pr-1">Status</th>
+                    <th className="pb-1 w-6"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -789,6 +784,17 @@ export default function NFLDraftPage() {
                           </span>
                         ) : (
                           <span className="text-green-600 font-medium">Active</span>
+                        )}
+                      </td>
+                      <td className="py-0.5 text-center">
+                        {!p.drafted && (
+                          <button
+                            onClick={() => handleRemoveProspect(p.name)}
+                            className="text-gray-300 hover:text-red-500 text-xs leading-none"
+                            title={`Remove ${p.name}`}
+                          >
+                            ✕
+                          </button>
                         )}
                       </td>
                     </tr>

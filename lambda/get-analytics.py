@@ -178,12 +178,12 @@ def lambda_handler(event, context):
             
             # Calculate PnL manually as 'value' field is unreliable
             revenue = float(s.get('revenue', 0))
-            cost = float(s.get('yes_total_cost', 0)) + float(s.get('no_total_cost', 0))
+            cost_dollars = float(s.get('yes_total_cost_dollars', 0)) + float(s.get('no_total_cost_dollars', 0))
             fees = float(s.get('fee_cost', 0) or 0)
             
-            # Convert cents to dollars
-            pnl = (revenue - cost) / 100 - fees
-            volume = cost / 100
+            # revenue is still in cents; cost_dollars and fees already in dollars
+            pnl = revenue / 100 - cost_dollars - fees
+            volume = cost_dollars
             
             category_stats[category]['pnl'] += pnl
             category_stats[category]['volume'] += volume

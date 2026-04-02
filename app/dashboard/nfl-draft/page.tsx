@@ -250,6 +250,8 @@ export default function NFLDraftPage() {
           case 'transcript': {
             const entry = msg.data as TranscriptEntry;
             setTranscripts(prev => {
+              // Skip duplicate partials (same text as last entry)
+              if (prev.length > 0 && prev[prev.length - 1].text === entry.text) return prev;
               const next = [...prev, entry];
               return next.length > MAX_TRANSCRIPT_ENTRIES
                 ? next.slice(next.length - MAX_TRANSCRIPT_ENTRIES)

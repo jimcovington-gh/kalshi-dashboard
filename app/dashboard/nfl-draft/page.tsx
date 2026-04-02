@@ -608,8 +608,15 @@ export default function NFLDraftPage() {
                   {rankedBets.map((bet, i) => (
                     <tr key={bet.ticker} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-1 pr-2 font-mono text-gray-400">{i + 1}</td>
-                      <td className="py-1 pr-2 truncate max-w-[200px]" title={bet.market_description}>
-                        {bet.market_description}
+                      <td className="py-1 pr-2 truncate max-w-[200px]" title={`${bet.ticker} — ${bet.market_description}`}>
+                        <a
+                          href={`https://kalshi.com/markets/${bet.ticker.split('-')[0]}/${bet.ticker}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-800 hover:underline"
+                        >
+                          {bet.market_description}
+                        </a>
                       </td>
                       <td className="py-1 pr-2">
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${bet.side === 'yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>

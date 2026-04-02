@@ -189,21 +189,50 @@ function SatSnapshotImg({ streamId, ec2Base, authToken }: { streamId: number; ec
 // Satellite HLS video monitor — 640x360, with keepalive pings every 30s
 const SATELLITE_PROXY = `https://${VOICE_TRADER_HOST}:8091`;  // satellite reverse proxy (same as satellite page)
 
-function SatelliteVideoMonitor({ streamId, fetchWithAuth, authToken, audioMuted, audioVolume }: {
+function SatelliteVideoMonitor({ streamId, fetchWithAuth, authToken, audioMuted, audioVolume, ec2Base }: {
   streamId: number;
   fetchWithAuth: (url: string, opts?: RequestInit) => Promise<Response>;
   authToken: string | null;
   audioMuted: boolean;
   audioVolume: number;
+  ec2Base: string;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<InstanceType<typeof HlsType> | null>(null);
+  const [audioTrack, setAudioTrack] = useState<number>(0);
+  const [trackSwitching, setTrackSwitching] = useState(false);
   const tokenRef = useRef<string | null>(authToken);
   const [hlsStatus, setHlsStatus] = useState<string>('initializing');
   const [hlsError, setHlsError] = useState<string | null>(null);
 
   // Keep token ref in sync with prop
   useEffect(() => { tokenRef.current = authToken; }, [authToken]);
+
+  // Fetch current audio track from satellite stream info
+  useEffect(() => {
+    fetchWithAuth(`${ec2Base}/satellite/streams`)
+      .then(r => r.json())
+      .then(d => {
+        const stream = (d.streams || []).find((s: any) => s.stream_id === streamId);
+        if (stream && typeof stream.audio_track === 'number') setAudioTrack(stream.audio_track);
+      })
+      .catch(() => {});
+  }, [streamId]);
+
+  const switchAudioTrack = async (track: number) => {
+    setTrackSwitching(true);
+    try {
+      const r = await fetchWithAuth(`${ec2Base}/satellite/streams/${streamId}/audio_track`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio_track: track }),
+      });
+      if (r.ok) {
+        setAudioTrack(track);
+      }
+    } catch {}
+    setTrackSwitching(false);
+  };
 
   // HLS URL — goes through port 8091 directly (same path as the satellite page iframe)
   const hlsUrl = `${SATELLITE_PROXY}/hls/stream_${streamId}/thumb/index.m3u8`;
@@ -363,6 +392,23 @@ function SatelliteVideoMonitor({ streamId, fetchWithAuth, authToken, audioMuted,
           [{hlsStatus}]
         </span>
         {hlsError && <span className="text-xs text-red-400">{hlsError}</span>}
+        <span className="text-xs text-gray-500">|</span>
+        <span className="text-xs text-gray-400">Audio Track:</span>
+        {[0, 1].map(t => (
+          <button
+            key={t}
+            onClick={() => switchAudioTrack(t)}
+            disabled={trackSwitching || audioTrack === t}
+            className={`px-1.5 py-0.5 text-xs rounded ${
+              audioTrack === t
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            } ${trackSwitching ? 'opacity-50' : ''}`}
+          >
+            {t}
+          </button>
+        ))}
+        {trackSwitching && <span className="text-xs text-yellow-400">switching…</span>}
       </div>
       <video
         id="satellite-video"
@@ -411,7 +457,7 @@ export function TestBenchLegacy({ autoEventTicker }: { autoEventTicker?: string 
   const [zoomSocketPath, setZoomSocketPath] = useState('/tmp/zoom_audio.sock');
 
   // Satellite TV channel picker
-  interface SatStream { stream_id: number; channel_name: string; status: string; thumb_url: string; }
+  interface SatStream { stream_id: number; channel_name: string; status: string; thumb_url: string; audio_track?: number; }
   const [satStreams, setSatStreams] = useState<SatStream[]>([]);
   const [satLoading, setSatLoading] = useState(false);
   const [satError, setSatError] = useState<string | null>(null);
@@ -3878,6 +3924,7 @@ const response = await fetchWithAuth(`${EC2_BASE}/status`);
             authToken={authToken}
             audioMuted={audioMuted}
             audioVolume={audioVolume}
+            ec2Base={EC2_BASE}
           />
         )}
 

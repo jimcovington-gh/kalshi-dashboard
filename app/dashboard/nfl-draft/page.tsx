@@ -364,7 +364,7 @@ export default function NFLDraftPage() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm font-mono font-bold text-gray-700">
-            P&L: <span className={totalPnL >= 0 ? 'text-green-600' : 'text-red-600'}>${totalPnL.toFixed(2)}</span>
+            Max Profit: <span className={totalPnL >= 0 ? 'text-green-600' : 'text-red-600'}>${totalPnL.toFixed(2)}</span>
           </span>
           {status?.testing_mode && (
             <span className={`px-2 py-0.5 rounded text-xs font-bold border ${MODE_COLORS[status.testing_mode] || 'bg-gray-100'}`}>

@@ -1,0 +1,164 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - link "📊 Kalshi" [ref=e7] [cursor=pointer]:
+            - /url: /dashboard
+          - generic [ref=e8]:
+            - link "Positions" [ref=e9] [cursor=pointer]:
+              - /url: /dashboard
+            - link "Analytics" [ref=e10] [cursor=pointer]:
+              - /url: /dashboard/analytics
+            - button "🏈 Draft Trader" [ref=e12]
+            - button "▸ Tools" [ref=e14]
+            - link "Control" [ref=e15] [cursor=pointer]:
+              - /url: /dashboard/admin
+        - generic [ref=e16]:
+          - generic [ref=e17]: User
+          - button "Sign Out" [ref=e18]
+    - main [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]:
+          - generic [ref=e22]:
+            - heading "🏈 NFL Draft Trader" [level=1] [ref=e23]
+            - generic [ref=e24]: CONNECTED
+            - generic [ref=e25]: 3/5 players · 0 picks traded
+          - generic [ref=e26]:
+            - generic [ref=e27]:
+              - text: "Max Profit:"
+              - generic [ref=e28]: $0.00
+            - generic [ref=e29]: 🧪 DRY RUN
+        - generic [ref=e30]:
+          - generic [ref=e31]:
+            - generic [ref=e32]:
+              - heading "Current Pick" [level=2] [ref=e33]
+              - generic [ref=e34]:
+                - generic [ref=e35]: "#1"
+                - generic [ref=e36]: TEN
+                - generic [ref=e37]: ON_CLOCK
+            - generic [ref=e38]:
+              - heading "Controls" [level=2] [ref=e39]
+              - generic [ref=e40]:
+                - button "🎯 ARM" [ref=e41]
+                - button "DISARM" [ref=e42]
+                - button "SKIP" [ref=e43]
+              - generic [ref=e44]:
+                - text: Manual Fire
+                - generic [ref=e45]:
+                  - combobox [ref=e46]:
+                    - option "Select player..." [selected]
+                    - option "Cam Ward (QB)"
+                    - option "Shedeur Sanders (QB)"
+                    - option "Travis Hunter (WR/CB)"
+                    - option "Abdul Carter (EDGE)"
+                  - button "🔥 FIRE" [disabled] [ref=e47]
+              - generic [ref=e48]:
+                - text: Team Override (trade)
+                - combobox [ref=e50]:
+                  - option "Select team..." [selected]
+                  - option "ARI — Arizona Cardinals"
+                  - option "ATL — Atlanta Falcons"
+                  - option "BAL — Baltimore Ravens"
+                  - option "BUF — Buffalo Bills"
+                  - option "CAR — Carolina Panthers"
+                  - option "CHI — Chicago Bears"
+                  - option "CIN — Cincinnati Bengals"
+                  - option "CLE — Cleveland Browns"
+                  - option "DAL — Dallas Cowboys"
+                  - option "DEN — Denver Broncos"
+                  - option "DET — Detroit Lions"
+                  - option "GB — Green Bay Packers"
+                  - option "HOU — Houston Texans"
+                  - option "IND — Indianapolis Colts"
+                  - option "JAX — Jacksonville Jaguars"
+                  - option "KC — Kansas City Chiefs"
+                  - option "LAC — Los Angeles Chargers"
+                  - option "LAR — Los Angeles Rams"
+                  - option "LV — Las Vegas Raiders"
+                  - option "MIA — Miami Dolphins"
+                  - option "MIN — Minnesota Vikings"
+                  - option "NE — New England Patriots"
+                  - option "NO — New Orleans Saints"
+                  - option "NYG — New York Giants"
+                  - option "NYJ — New York Jets"
+                  - option "PHI — Philadelphia Eagles"
+                  - option "PIT — Pittsburgh Steelers"
+                  - option "SEA — Seattle Seahawks"
+                  - option "SF — San Francisco 49ers"
+                  - option "TB — Tampa Bay Buccaneers"
+                  - option "TEN — Tennessee Titans"
+                  - option "WAS — Washington Commanders"
+          - generic [ref=e51]:
+            - generic [ref=e52]:
+              - heading "Pick Tracker" [level=2] [ref=e53]
+              - generic [ref=e54]:
+                - button "1" [ref=e55] [cursor=pointer]
+                - button "2" [ref=e56] [cursor=pointer]
+                - button "3" [ref=e57] [cursor=pointer]
+                - button "4" [ref=e58] [cursor=pointer]
+            - generic [ref=e59]:
+              - heading "Top Bets" [level=2] [ref=e60]
+              - generic [ref=e61]: Bets will appear when a pick is being processed
+          - generic [ref=e62]:
+            - generic [ref=e63]:
+              - generic [ref=e64]:
+                - heading "Mumble Bridge" [level=2] [ref=e65]
+                - button "🔄 Restart Bridge" [ref=e66]
+              - generic [ref=e67]:
+                - generic [ref=e70]: Mumble Disconnected
+                - generic [ref=e73]: Bridge Offline
+              - generic [ref=e74]:
+                - paragraph [ref=e75]: Bridge is not sending data.
+                - paragraph [ref=e76]: Check that the mumble-bridge service is running on EC2 and that a Mumble client is connected to the server.
+            - generic [ref=e77]:
+              - heading "Live Transcript" [level=2] [ref=e78]
+              - generic [ref=e80]: Waiting for audio...
+              - generic [ref=e81]:
+                - textbox "Inject test transcript..." [ref=e82]
+                - button "Send" [disabled] [ref=e83]
+            - generic [ref=e84]:
+              - heading "Prospect Pool (4 active)" [level=2] [ref=e85]
+              - table [ref=e87]:
+                - rowgroup [ref=e88]:
+                  - row "Player Pos Status" [ref=e89]:
+                    - columnheader "Player" [ref=e90]
+                    - columnheader "Pos" [ref=e91]
+                    - columnheader "Status" [ref=e92]
+                    - columnheader [ref=e93]
+                - rowgroup [ref=e94]:
+                  - row "Cam Ward QB Active ✕" [ref=e95]:
+                    - cell "Cam Ward" [ref=e96]
+                    - cell "QB" [ref=e97]
+                    - cell "Active" [ref=e98]
+                    - cell "✕" [ref=e99]:
+                      - button "✕" [ref=e100]
+                  - row "Shedeur Sanders QB Active ✕" [ref=e101]:
+                    - cell "Shedeur Sanders" [ref=e102]
+                    - cell "QB" [ref=e103]
+                    - cell "Active" [ref=e104]
+                    - cell "✕" [ref=e105]:
+                      - button "✕" [ref=e106]
+                  - row "Travis Hunter WR/CB Active ✕" [ref=e107]:
+                    - cell "Travis Hunter" [ref=e108]
+                    - cell "WR/CB" [ref=e109]
+                    - cell "Active" [ref=e110]
+                    - cell "✕" [ref=e111]:
+                      - button "✕" [ref=e112]
+                  - row "Abdul Carter EDGE Active ✕" [ref=e113]:
+                    - cell "Abdul Carter" [ref=e114]
+                    - cell "EDGE" [ref=e115]
+                    - cell "Active" [ref=e116]
+                    - cell "✕" [ref=e117]:
+                      - button "✕" [ref=e118]
+                  - 'row "Drafted Player RB #99 → DAL" [ref=e119]':
+                    - cell "Drafted Player" [ref=e120]
+                    - cell "RB" [ref=e121]
+                    - cell "#99 → DAL" [ref=e122]:
+                      - generic [ref=e123]: "#99 → DAL"
+                    - cell [ref=e124]
+  - alert [ref=e125]
+```

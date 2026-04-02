@@ -63,6 +63,7 @@ interface TranscriptEntry {
   is_final: boolean;
   timestamp: number;
   source: string;
+  speaker?: string;
 }
 
 interface AudioStats {
@@ -189,6 +190,7 @@ export default function NFLDraftPage() {
   const [selectedMode, setSelectedMode] = useState('dry_run');
   const [walletLimitInput, setWalletLimitInput] = useState('100');
   const [bridgeRestarting, setBridgeRestarting] = useState(false);
+  const [initializing, setInitializing] = useState(false);
 
   // Computed
   const currentPick = picks.find(p => p.pick_number === (status?.current_pick ?? 0));
@@ -221,6 +223,7 @@ export default function NFLDraftPage() {
         switch (msg.type) {
           case 'status':
             setStatus(msg.data as SessionStatus);
+            setInitializing(false);
             break;
 
           case 'picks':
@@ -259,8 +262,24 @@ export default function NFLDraftPage() {
             setAudioStats(msg.data as AudioStats);
             break;
 
+          case 'diagnostic':
+            // Show engine diagnostics inline in the transcript feed
+            setTranscripts(prev => {
+              const next = [...prev, {
+                text: msg.data.message,
+                is_final: true,
+                timestamp: Date.now() / 1000,
+                source: 'engine',
+              }];
+              return next.length > MAX_TRANSCRIPT_ENTRIES
+                ? next.slice(next.length - MAX_TRANSCRIPT_ENTRIES)
+                : next;
+            });
+            break;
+
           case 'error':
             setErrors(prev => [...prev.slice(-19), msg.data.message as string]);
+            setInitializing(false);
             break;
 
           case 'pong':
@@ -312,11 +331,14 @@ export default function NFLDraftPage() {
     }
   };
 
-  const handleInitialize = () => wsSend({
-    type: 'initialize',
-    testing_mode: selectedMode,
-    wallet_limit: selectedMode === 'low_wallet' ? parseFloat(walletLimitInput) || 100 : undefined,
-  });
+  const handleInitialize = () => {
+    setInitializing(true);
+    wsSend({
+      type: 'initialize',
+      testing_mode: selectedMode,
+      wallet_limit: selectedMode === 'low_wallet' ? parseFloat(walletLimitInput) || 100 : undefined,
+    });
+  };
   const handleAdvancePick = (n: number) => wsSend({ type: 'advance', pick_number: n });
   const handleRemoveProspect = (name: string) => wsSend({ type: 'remove', player_name: name });
 
@@ -395,8 +417,14 @@ export default function NFLDraftPage() {
                 />
               )}
               <button onClick={handleInitialize}
-                className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700">
-                Initialize Session
+                className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-wait"
+                disabled={initializing}>
+                {initializing ? (
+                  <span className="flex items-center gap-1.5">
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                    Initializing…
+                  </span>
+                ) : 'Initialize Session'}
               </button>
             </div>
           )}
@@ -729,8 +757,14 @@ export default function NFLDraftPage() {
                 <div className="text-gray-600">Waiting for audio...</div>
               ) : (
                 transcripts.map((t, i) => (
-                  <div key={i} className={t.is_final ? 'text-green-300' : 'text-green-600'}>
-                    <span className="text-gray-600 mr-1">[{t.source}]</span>
+                  <div key={i} className={
+                    t.source === 'engine'
+                      ? 'text-yellow-400 italic'
+                      : t.is_final ? 'text-green-300' : 'text-green-600'
+                  }>
+                    {t.source !== 'engine' && (
+                      <span className="text-gray-600 mr-1">[{t.source}{t.speaker ? `:${t.speaker}` : ''}]</span>
+                    )}
                     {t.text}
                   </div>
                 ))

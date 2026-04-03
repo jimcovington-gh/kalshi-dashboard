@@ -611,7 +611,7 @@ export default function NFLDraftPage() {
                       <td className="py-1 pr-2 font-mono text-gray-400">{i + 1}</td>
                       <td className="py-1 pr-2 font-mono text-[10px]">
                         <a
-                          href={`https://kalshi.com/markets/${bet.ticker.split('-')[0]}/${bet.ticker}`}
+                          href={`https://kalshi.com/markets/${bet.ticker.split('-')[0].toLowerCase()}/_/${bet.ticker.slice(0, bet.ticker.lastIndexOf('-')).toLowerCase()}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-600 underline"

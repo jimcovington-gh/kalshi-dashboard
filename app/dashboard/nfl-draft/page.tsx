@@ -106,6 +106,15 @@ interface SessionStatus {
   wallet_limit: number | null;
   users: string[];
   user_budgets: Record<string, number>;
+  orderbook_cache?: {
+    connected: boolean;
+    subscribed_tickers: number;
+    cached_books: number;
+    fresh_books: number;
+    updates_received: number;
+    reconnect_count: number;
+    last_update_at: number;
+  };
 }
 
 // --- Constants ---
@@ -209,6 +218,13 @@ export default function NFLDraftPage() {
   const [walletLimitInput, setWalletLimitInput] = useState('100');
   const [bridgeRestarting, setBridgeRestarting] = useState(false);
   const [initializing, setInitializing] = useState(false);
+  const [now, setNow] = useState(Date.now());
+
+  // Tick every second for live staleness display
+  useEffect(() => {
+    const iv = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, []);
 
   // Computed
   const currentPick = picks.find(p => p.pick_number === (status?.current_pick ?? 0));
@@ -399,6 +415,10 @@ export default function NFLDraftPage() {
 
   const handleRefreshPrices = () => {
     wsSend({ type: 'fetch_player_prices' });
+  };
+
+  const handleRefreshOrderbooks = () => {
+    wsSend({ type: 'refresh_orderbooks' });
   };
 
   const handleInitialize = () => {
@@ -970,6 +990,53 @@ export default function NFLDraftPage() {
               </div>
             )}
           </div>
+
+          {/* Orderbook Cache Status */}
+          {status?.orderbook_cache && (
+            <div className="bg-white rounded-lg shadow p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-gray-500 uppercase">Orderbook Cache</h2>
+                <button
+                  onClick={handleRefreshOrderbooks}
+                  disabled={!connected}
+                  className="px-2 py-1 text-[10px] font-medium rounded bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-50"
+                >
+                  📡 Refresh Books
+                </button>
+              </div>
+              <div className="flex items-center gap-4 mb-2 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className={`inline-block w-2.5 h-2.5 rounded-full ${status.orderbook_cache.connected ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <span className={status.orderbook_cache.connected ? 'text-green-700 font-medium' : 'text-red-600 font-medium'}>
+                    {status.orderbook_cache.connected ? 'TIS Connected' : 'TIS Disconnected'}
+                  </span>
+                </div>
+                <span className="text-gray-400">
+                  {status.orderbook_cache.cached_books}/{status.orderbook_cache.subscribed_tickers} books
+                  {' '}({status.orderbook_cache.fresh_books} fresh)
+                </span>
+              </div>
+              <div className="flex items-center gap-4 text-xs">
+                <span className="text-gray-500">
+                  Updates: {status.orderbook_cache.updates_received}
+                </span>
+                {status.orderbook_cache.reconnect_count > 0 && (
+                  <span className="text-yellow-600">
+                    Reconnects: {status.orderbook_cache.reconnect_count}
+                  </span>
+                )}
+                <span className={`font-mono ${
+                  status.orderbook_cache.last_update_at > 0
+                    ? (now / 1000 - status.orderbook_cache.last_update_at < 30 ? 'text-green-600' : 'text-yellow-600')
+                    : 'text-red-500'
+                }`}>
+                  {status.orderbook_cache.last_update_at > 0
+                    ? `${Math.round(now / 1000 - status.orderbook_cache.last_update_at)}s ago`
+                    : 'No data yet'}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Transcript Feed */}
           <div className="bg-gray-900 rounded-lg shadow p-4 text-green-400 font-mono text-xs">

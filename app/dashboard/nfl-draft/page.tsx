@@ -38,6 +38,7 @@ interface OrderResult {
   fees_dollars: number;
   error_code: string;
   error_message: string;
+  assigned_user: string;
 }
 
 interface PickFireResult {
@@ -211,6 +212,24 @@ export default function NFLDraftPage() {
   const currentPick = picks.find(p => p.pick_number === (status?.current_pick ?? 0));
   const totalPnL = fireResults.reduce((sum, r) =>
     sum + r.buy_results.reduce((s, b) => s + (b.success ? b.contracts_filled * 1.0 - b.fill_cost_dollars : 0), 0), 0);
+  const totalCost = fireResults.reduce((sum, r) =>
+    sum + r.buy_results.reduce((s, b) => s + (b.success ? b.fill_cost_dollars + b.fees_dollars : 0), 0), 0);
+  const lastRound = fireResults.length > 0 ? fireResults[fireResults.length - 1] : null;
+  const lastRoundPnL = lastRound
+    ? lastRound.buy_results.reduce((s, b) => s + (b.success ? b.contracts_filled * 1.0 - b.fill_cost_dollars : 0), 0)
+    : 0;
+
+  // Per-user profit breakdown
+  const userPnL = fireResults.reduce<Record<string, { maxProfit: number; cost: number }>>((acc, r) => {
+    for (const b of r.buy_results) {
+      if (b.success && b.assigned_user) {
+        if (!acc[b.assigned_user]) acc[b.assigned_user] = { maxProfit: 0, cost: 0 };
+        acc[b.assigned_user].maxProfit += b.contracts_filled * 1.0 - b.fill_cost_dollars;
+        acc[b.assigned_user].cost += b.fill_cost_dollars + b.fees_dollars;
+      }
+    }
+    return acc;
+  }, {});
 
   // WS send helper
   const wsSend = useCallback((msg: Record<string, unknown>) => {
@@ -333,10 +352,11 @@ export default function NFLDraftPage() {
     };
   }, [wsSend]);
 
-  // Clear match alert flash
-  const transcriptEndRef = useRef<HTMLDivElement>(null);
+  // Auto-scroll transcript (container only, not the whole page)
+  const transcriptContainerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = transcriptContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [transcripts]);
 
   // --- Actions ---
@@ -344,7 +364,10 @@ export default function NFLDraftPage() {
   const handleArm = () => wsSend({ type: 'arm' });
   const handleDisarm = () => wsSend({ type: 'disarm' });
   const handleSkip = () => wsSend({ type: 'skip' });
-  const handleReset = () => wsSend({ type: 'reset' });
+  const handleReset = () => {
+    wsSend({ type: 'reset' });
+    setFireResults([]);
+  };
 
   const handleManualFire = () => {
     if (manualPlayerInput.trim()) {
@@ -430,7 +453,20 @@ export default function NFLDraftPage() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm font-mono font-bold text-gray-700">
+            Spent: <span className="text-gray-900">${totalCost.toFixed(2)}</span>
+            {' · '}
             Max Profit: <span className={totalPnL >= 0 ? 'text-green-600' : 'text-red-600'}>${totalPnL.toFixed(2)}</span>
+            {Object.entries(userPnL).map(([user, stats]) => (
+              <span key={user} className="ml-1 text-[11px]">
+                ({user}: <span className={stats.maxProfit >= 0 ? 'text-green-600' : 'text-red-600'}>${stats.maxProfit.toFixed(2)}</span>)
+              </span>
+            ))}
+            {lastRound && (
+              <>
+                {' · '}
+                Last ({lastRound.player_name}): <span className={lastRoundPnL >= 0 ? 'text-green-600' : 'text-red-600'}>${lastRoundPnL.toFixed(2)}</span>
+              </>
+            )}
           </span>
           {status?.testing_mode && (
             <span className={`px-2 py-0.5 rounded text-xs font-bold border ${MODE_COLORS[status.testing_mode] || 'bg-gray-100'}`}>
@@ -805,7 +841,11 @@ export default function NFLDraftPage() {
                       <td className="py-1 text-right font-mono font-bold text-green-600">
                         ${bet.projected_profit.toFixed(2)}
                       </td>
-                      <td className="py-1 text-right text-gray-400 text-[10px]">{bet.assigned_user}</td>
+                      <td className="py-1 pl-2 text-right">
+                        <span className="inline-block px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold text-[10px]">
+                          {bet.assigned_user}
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -933,7 +973,7 @@ export default function NFLDraftPage() {
             <h2 className="text-gray-500 uppercase font-semibold text-[10px] mb-2 font-sans">
               Live Transcript
             </h2>
-            <div className="h-48 overflow-y-auto space-y-0.5">
+            <div ref={transcriptContainerRef} className="h-48 overflow-y-auto space-y-0.5">
               {transcripts.length === 0 ? (
                 <div className="text-gray-600">Waiting for audio...</div>
               ) : (
@@ -950,7 +990,7 @@ export default function NFLDraftPage() {
                   </div>
                 ))
               )}
-              <div ref={transcriptEndRef} />
+
             </div>
             {/* Inject transcript */}
             <div className="flex gap-1 mt-2 pt-2 border-t border-gray-700">

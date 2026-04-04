@@ -329,7 +329,7 @@ test.describe('NFL Draft — Connection & Header', () => {
     // Player count
     await expect(page.getByText('3/5 players')).toBeVisible();
     // P&L
-    await expect(page.getByText('P&L:')).toBeVisible();
+    await expect(page.getByText('Max Profit:')).toBeVisible();
   });
 });
 
@@ -449,11 +449,17 @@ test.describe('NFL Draft — Current Pick Card', () => {
 });
 
 test.describe('NFL Draft — Manual Fire', () => {
-  test('Manual Fire dropdown is populated with active prospects', async ({ page }) => {
+  test('Manual Fire dropdown is behind Unlisted player disclosure', async ({ page }) => {
     await gotoWithMockWs(page);
     await initializeSession(page);
 
-    // The select for manual fire — has "Select player..." placeholder
+    // Dropdown is hidden in a <details> element
+    const details = page.locator('details').filter({ hasText: 'Unlisted player' });
+    await expect(details).toBeVisible();
+
+    // Open it
+    await details.locator('summary').click();
+
     const fireSelect = page.locator('select').filter({ hasText: 'Select player...' });
     await expect(fireSelect).toBeVisible();
 
@@ -468,6 +474,8 @@ test.describe('NFL Draft — Manual Fire', () => {
     await gotoWithMockWs(page);
     await initializeSession(page);
 
+    // Open the disclosure
+    await page.locator('details').filter({ hasText: 'Unlisted player' }).locator('summary').click();
     await expect(page.getByRole('button', { name: '🔥 FIRE' })).toBeDisabled();
   });
 
@@ -475,6 +483,9 @@ test.describe('NFL Draft — Manual Fire', () => {
     await gotoWithMockWs(page);
     await initializeSession(page);
     await clearWsSent(page);
+
+    // Open the disclosure
+    await page.locator('details').filter({ hasText: 'Unlisted player' }).locator('summary').click();
 
     const fireSelect = page.locator('select').filter({ hasText: 'Select player...' });
     await fireSelect.selectOption('Cam Ward');
@@ -489,6 +500,9 @@ test.describe('NFL Draft — Manual Fire', () => {
   test('FIRE clears selection after sending', async ({ page }) => {
     await gotoWithMockWs(page);
     await initializeSession(page);
+
+    // Open the disclosure
+    await page.locator('details').filter({ hasText: 'Unlisted player' }).locator('summary').click();
 
     const fireSelect = page.locator('select').filter({ hasText: 'Select player...' });
     await fireSelect.selectOption('Cam Ward');
@@ -814,7 +828,7 @@ test.describe('NFL Draft — Prospect Pool', () => {
     await initializeSession(page);
 
     // 4 undrafted = active
-    await expect(page.getByText('Prospect Pool (4 active)')).toBeVisible();
+    await expect(page.getByText('Prospects (4)')).toBeVisible();
   });
 
   test('renders all prospects with position', async ({ page }) => {
@@ -822,7 +836,7 @@ test.describe('NFL Draft — Prospect Pool', () => {
     await initializeSession(page);
 
     // Use prospect pool section to avoid matching Manual Fire dropdown
-    const pool = page.locator('.bg-white').filter({ hasText: 'Prospect Pool' });
+    const pool = page.locator('.bg-white').filter({ hasText: 'Prospects' });
     await expect(pool.getByText('Cam Ward')).toBeVisible();
     await expect(pool.getByText('Shedeur Sanders')).toBeVisible();
     await expect(pool.getByText('Travis Hunter')).toBeVisible();
@@ -832,19 +846,21 @@ test.describe('NFL Draft — Prospect Pool', () => {
     await expect(pool.getByText('EDGE')).toBeVisible();
   });
 
-  test('active prospects show Active badge', async ({ page }) => {
+  test('undrafted prospects are not dimmed', async ({ page }) => {
     await gotoWithMockWs(page);
     await initializeSession(page);
 
-    const activeBadges = page.getByText('Active', { exact: true });
-    await expect(activeBadges).toHaveCount(4); // 4 undrafted
+    const pool = page.locator('.bg-white').filter({ hasText: 'Prospects' });
+    // 4 undrafted prospects should have remove buttons
+    const removeButtons = pool.locator('button[title^="Remove"]');
+    await expect(removeButtons).toHaveCount(4);
   });
 
-  test('drafted prospect shows pick info', async ({ page }) => {
+  test('drafted prospect shows pick number', async ({ page }) => {
     await gotoWithMockWs(page);
     await initializeSession(page);
 
-    await expect(page.getByText('#99 → DAL')).toBeVisible();
+    await expect(page.getByText('#99 Drafted Player')).toBeVisible();
   });
 
   test('Remove button sends remove WS message', async ({ page }) => {

@@ -367,6 +367,7 @@ export default function NFLDraftPage() {
   const handleReset = () => {
     wsSend({ type: 'reset' });
     setFireResults([]);
+    setRankedBets([]);
   };
 
   const handleManualFire = () => {

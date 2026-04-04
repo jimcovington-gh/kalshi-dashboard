@@ -44,6 +44,8 @@ interface OrderResult {
 interface PickFireResult {
   pick_number: number;
   player_name: string;
+  team: string;
+  position: string;
   bets_attempted: number;
   buy_results: OrderResult[];
   sell_results: OrderResult[];
@@ -867,7 +869,7 @@ export default function NFLDraftPage() {
                   <div key={i} className="border border-gray-100 rounded p-2 text-xs">
                     <div className="flex justify-between items-center">
                       <span className="font-bold text-gray-800">
-                        Pick #{result.pick_number} — {result.player_name}
+                        Pick #{result.pick_number} — {result.player_name}{result.position ? ` (${result.position})` : ''}{result.team ? ` → ${result.team}` : ''}
                       </span>
                       <span className="text-gray-500">
                         {result.bets_attempted} bets &middot; {result.total_latency_ms.toFixed(0)}ms

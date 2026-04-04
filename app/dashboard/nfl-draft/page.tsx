@@ -101,6 +101,8 @@ interface SessionStatus {
   position_counts: Record<string, number>;
   testing_mode: string;
   wallet_limit: number | null;
+  users: string[];
+  user_budgets: Record<string, number>;
 }
 
 // --- Constants ---
@@ -342,6 +344,7 @@ export default function NFLDraftPage() {
   const handleArm = () => wsSend({ type: 'arm' });
   const handleDisarm = () => wsSend({ type: 'disarm' });
   const handleSkip = () => wsSend({ type: 'skip' });
+  const handleReset = () => wsSend({ type: 'reset' });
 
   const handleManualFire = () => {
     if (manualPlayerInput.trim()) {
@@ -570,7 +573,50 @@ export default function NFLDraftPage() {
                 disabled={!connected}>
                 SKIP
               </button>
+              <button onClick={handleReset}
+                className="flex-1 px-3 py-2 bg-blue-500 text-white rounded font-medium text-sm hover:bg-blue-600 disabled:opacity-50"
+                disabled={!connected}>
+                ↺ RESET
+              </button>
             </div>
+
+            {/* Per-User Budgets */}
+            {status?.users && status.user_budgets && (
+              <div>
+                <label className="text-xs text-gray-500 font-medium">Budget per bet (per user)</label>
+                <div className="flex gap-2 mt-1">
+                  {status.users.map(user => (
+                    <div key={user} className="flex-1">
+                      <label className="text-[10px] text-gray-400 block">{user}</label>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-400">$</span>
+                        <input
+                          type="number"
+                          defaultValue={status.user_budgets[user] ?? 100}
+                          onBlur={e => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val) && val > 0) {
+                              wsSend({ type: 'update_budget', user_name: user, budget: val });
+                            }
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              const val = parseFloat((e.target as HTMLInputElement).value);
+                              if (!isNaN(val) && val > 0) {
+                                wsSend({ type: 'update_budget', user_name: user, budget: val });
+                              }
+                            }
+                          }}
+                          className="w-full px-2 py-1 border rounded text-sm font-mono"
+                          min={1}
+                          step={10}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Manual Fire — Player Tiles */}
             <div>

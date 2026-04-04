@@ -82,6 +82,13 @@ interface AudioStats {
   transcripts_partial: number;
 }
 
+interface PlayerPrice {
+  name: string;
+  position: string;
+  suffix: string;
+  best_yes_bid: number;
+}
+
 interface SessionStatus {
   session_id: string;
   status: string;
@@ -180,12 +187,18 @@ export default function NFLDraftPage() {
   const [fireResults, setFireResults] = useState<PickFireResult[]>([]);
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
   const [audioStats, setAudioStats] = useState<AudioStats | null>(null);
+  const [playerPrices, setPlayerPrices] = useState<PlayerPrice[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [matchAlert, setMatchAlert] = useState<string | null>(null);
 
   // Controls
   const [manualPlayerInput, setManualPlayerInput] = useState('');
   const [teamOverrideInput, setTeamOverrideInput] = useState('');
+
+  // Double-click tracking for player tiles
+  const lastTileClick = useRef<{ name: string; time: number }>({ name: '', time: 0 });
+  const [pendingTile, setPendingTile] = useState<string | null>(null);
+  const pendingTileTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [transcriptInjectInput, setTranscriptInjectInput] = useState('');
   const [selectedMode, setSelectedMode] = useState('dry_run');
   const [walletLimitInput, setWalletLimitInput] = useState('100');
@@ -236,6 +249,10 @@ export default function NFLDraftPage() {
 
           case 'ranked_bets':
             setRankedBets(msg.data as BetOpportunity[]);
+            break;
+
+          case 'player_prices':
+            setPlayerPrices(msg.data as PlayerPrice[]);
             break;
 
           case 'fire_result':
@@ -331,6 +348,28 @@ export default function NFLDraftPage() {
       wsSend({ type: 'manual_fire', player_name: manualPlayerInput.trim() });
       setManualPlayerInput('');
     }
+  };
+
+  const handleTileClick = (playerName: string) => {
+    const now = Date.now();
+    const last = lastTileClick.current;
+    if (last.name === playerName && now - last.time <= 1000) {
+      // Double-click confirmed — fire
+      wsSend({ type: 'manual_fire', player_name: playerName });
+      lastTileClick.current = { name: '', time: 0 };
+      setPendingTile(null);
+      if (pendingTileTimer.current) clearTimeout(pendingTileTimer.current);
+    } else {
+      // First click — mark pending
+      lastTileClick.current = { name: playerName, time: now };
+      setPendingTile(playerName);
+      if (pendingTileTimer.current) clearTimeout(pendingTileTimer.current);
+      pendingTileTimer.current = setTimeout(() => setPendingTile(null), 1000);
+    }
+  };
+
+  const handleRefreshPrices = () => {
+    wsSend({ type: 'fetch_player_prices' });
   };
 
   const handleInitialize = () => {
@@ -441,6 +480,52 @@ export default function NFLDraftPage() {
       )}
 
       <div className="grid grid-cols-12 gap-4">
+        {/* Far Left Column: Prospect Pool */}
+        <div className="col-span-2 space-y-4">
+          {/* Prospect Pool */}
+          <div className="bg-white rounded-lg shadow p-3">
+            <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">
+              Prospects ({prospects.filter(p => !p.drafted).length})
+            </h2>
+            <div className="max-h-[calc(100vh-180px)] overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-gray-400 border-b sticky top-0 bg-white">
+                    <th className="pb-1 pr-1">Player</th>
+                    <th className="pb-1 pr-1">Pos</th>
+                    <th className="pb-1 w-4"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {prospects.map(p => (
+                    <tr key={p.suffix} className={`border-b border-gray-50 ${p.drafted ? 'opacity-40' : ''}`}>
+                      <td className="py-0.5 pr-1 truncate max-w-[100px]" title={p.name}>
+                        {p.drafted ? (
+                          <span className="text-gray-400">#{p.drafted_at_pick} {p.name}</span>
+                        ) : (
+                          p.name
+                        )}
+                      </td>
+                      <td className="py-0.5 pr-1 font-medium text-gray-500">{p.position}</td>
+                      <td className="py-0.5 text-center">
+                        {!p.drafted && (
+                          <button
+                            onClick={() => handleRemoveProspect(p.name)}
+                            className="text-gray-300 hover:text-red-500 text-xs leading-none"
+                            title={`Remove ${p.name}`}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         {/* Left Column: Current Pick + Controls */}
         <div className="col-span-3 space-y-4">
 
@@ -487,28 +572,69 @@ export default function NFLDraftPage() {
               </button>
             </div>
 
-            {/* Manual Fire */}
+            {/* Manual Fire — Player Tiles */}
             <div>
-              <label className="text-xs text-gray-500 font-medium">Manual Fire</label>
-              <div className="flex gap-1 mt-1">
-                <select
-                  value={manualPlayerInput}
-                  onChange={e => setManualPlayerInput(e.target.value)}
-                  className="flex-1 px-2 py-1.5 border rounded text-sm bg-white"
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-gray-500 font-medium">Manual Fire (double-click)</label>
+                <button
+                  onClick={handleRefreshPrices}
+                  disabled={!connected}
+                  className="text-[10px] text-blue-600 hover:text-blue-800 disabled:opacity-40"
                 >
-                  <option value="">Select player...</option>
-                  {prospects.filter(p => !p.drafted).map(p => (
-                    <option key={p.suffix} value={p.name}>
-                      {p.name} ({p.position})
-                    </option>
-                  ))}
-                </select>
-                <button onClick={handleManualFire}
-                  className="px-3 py-1.5 bg-red-600 text-white rounded text-sm font-medium hover:bg-red-700 disabled:opacity-50"
-                  disabled={!connected || !manualPlayerInput}>
-                  🔥 FIRE
+                  ↻ Refresh
                 </button>
               </div>
+              {playerPrices.length > 0 ? (
+                <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
+                  {playerPrices.map(pp => (
+                    <button
+                      key={pp.suffix}
+                      onClick={() => handleTileClick(pp.name)}
+                      disabled={!connected}
+                      className={`text-left px-2 py-1.5 rounded border text-xs transition-all select-none
+                        ${pendingTile === pp.name
+                          ? 'bg-red-100 border-red-400 ring-2 ring-red-300 animate-pulse'
+                          : 'bg-gray-50 border-gray-200 hover:bg-gray-100 hover:border-gray-300'}
+                        disabled:opacity-40 disabled:cursor-not-allowed`}
+                    >
+                      <div className="font-semibold text-gray-800 truncate">{pp.name}</div>
+                      <div className="flex items-center justify-between mt-0.5">
+                        <span className="text-gray-400">{pp.position}</span>
+                        <span className="font-mono font-bold text-green-700">${pp.best_yes_bid.toFixed(2)}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-gray-400 text-[10px] text-center py-2">
+                  No player prices — click Refresh or advance pick
+                </div>
+              )}
+              {/* Fallback dropdown for unlisted players */}
+              <details className="mt-2">
+                <summary className="text-[10px] text-gray-400 cursor-pointer hover:text-gray-600">
+                  Unlisted player...
+                </summary>
+                <div className="flex gap-1 mt-1">
+                  <select
+                    value={manualPlayerInput}
+                    onChange={e => setManualPlayerInput(e.target.value)}
+                    className="flex-1 px-2 py-1.5 border rounded text-sm bg-white"
+                  >
+                    <option value="">Select player...</option>
+                    {prospects.filter(p => !p.drafted).map(p => (
+                      <option key={p.suffix} value={p.name}>
+                        {p.name} ({p.position})
+                      </option>
+                    ))}
+                  </select>
+                  <button onClick={handleManualFire}
+                    className="px-3 py-1.5 bg-red-600 text-white rounded text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+                    disabled={!connected || !manualPlayerInput}>
+                    🔥 FIRE
+                  </button>
+                </div>
+              </details>
             </div>
 
             {/* Team Override */}
@@ -562,8 +688,8 @@ export default function NFLDraftPage() {
           )}
         </div>
 
-        {/* Center Column: Pick Tracker + Ranked Bets */}
-        <div className="col-span-5 space-y-4">
+        {/* Center + Right Column: Pick Tracker + Audio + Ranked Bets */}
+        <div className="col-span-7 space-y-4">
 
           {/* Pick Tracker Strip */}
           <div className="bg-white rounded-lg shadow p-3">
@@ -676,10 +802,6 @@ export default function NFLDraftPage() {
               </div>
             </div>
           )}
-        </div>
-
-        {/* Right Column: Audio Status + Transcript + Prospect Pool */}
-        <div className="col-span-4 space-y-4">
 
           {/* Audio / Mumble Bridge Panel */}
           <div className="bg-white rounded-lg shadow p-4">
@@ -804,52 +926,6 @@ export default function NFLDraftPage() {
             </div>
           </div>
 
-          {/* Prospect Pool */}
-          <div className="bg-white rounded-lg shadow p-4">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">
-              Prospect Pool ({prospects.filter(p => !p.drafted).length} active)
-            </h2>
-            <div className="max-h-72 overflow-y-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-gray-400 border-b sticky top-0 bg-white">
-                    <th className="pb-1 pr-2">Player</th>
-                    <th className="pb-1 pr-2">Pos</th>
-                    <th className="pb-1 pr-1">Status</th>
-                    <th className="pb-1 w-6"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {prospects.map(p => (
-                    <tr key={p.suffix} className={`border-b border-gray-50 ${p.drafted ? 'opacity-40' : ''}`}>
-                      <td className="py-0.5 pr-2">{p.name}</td>
-                      <td className="py-0.5 pr-2 font-medium text-gray-500">{p.position}</td>
-                      <td className="py-0.5">
-                        {p.drafted ? (
-                          <span className="text-gray-400">
-                            #{p.drafted_at_pick} → {p.drafted_by_team}
-                          </span>
-                        ) : (
-                          <span className="text-green-600 font-medium">Active</span>
-                        )}
-                      </td>
-                      <td className="py-0.5 text-center">
-                        {!p.drafted && (
-                          <button
-                            onClick={() => handleRemoveProspect(p.name)}
-                            className="text-gray-300 hover:text-red-500 text-xs leading-none"
-                            title={`Remove ${p.name}`}
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
         </div>
       </div>
     </div>
